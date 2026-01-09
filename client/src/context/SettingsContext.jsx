@@ -1,0 +1,1 @@
+// SettingsContext.jsx
