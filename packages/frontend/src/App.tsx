@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Toaster, toast } from "sonner";
 import {
   createSector,
   createSource,
@@ -27,6 +28,7 @@ export default function App() {
   const [sectorForm, setSectorForm] = useState(emptySectorForm);
   const [isTriggering, setIsTriggering] = useState(false);
   const [maxAgeDrafts, setMaxAgeDrafts] = useState<Record<string, string>>({});
+  const [confirmSource, setConfirmSource] = useState<Source | null>(null);
 
   const activeCount = useMemo(
     () => sources.filter((source) => source.active).length,
@@ -44,7 +46,10 @@ export default function App() {
       setSources(sourcesData);
       setSectors(sectorsData);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load sources");
+      const message =
+        err instanceof Error ? err.message : "Failed to load sources";
+      setError(message);
+      toast.error(message);
     } finally {
       setIsLoading(false);
     }
@@ -79,8 +84,12 @@ export default function App() {
       });
       setSources((prev) => [created, ...prev]);
       setSourceForm(emptySourceForm);
+      toast.success("Source added");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create source");
+      const message =
+        err instanceof Error ? err.message : "Failed to create source";
+      setError(message);
+      toast.error(message);
     }
   };
 
@@ -92,26 +101,36 @@ export default function App() {
       setSources((prev) =>
         prev.map((item) => (item.id === source.id ? updated : item)),
       );
+      toast.success(source.active ? "Source deactivated" : "Source activated");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update source");
+      const message =
+        err instanceof Error ? err.message : "Failed to update source";
+      setError(message);
+      toast.error(message);
     }
   };
 
   const onDelete = async (source: Source) => {
-    const confirmed = window.confirm(
-      `Deactivate ${source.name ?? source.url}?`,
-    );
-    if (!confirmed) {
+    setConfirmSource(source);
+  };
+
+  const confirmDeactivate = async () => {
+    if (!confirmSource) {
       return;
     }
-
     try {
-      const updated = await updateSource(source.id, { active: false });
+      const updated = await updateSource(confirmSource.id, { active: false });
       setSources((prev) =>
-        prev.map((item) => (item.id === source.id ? updated : item)),
+        prev.map((item) => (item.id === confirmSource.id ? updated : item)),
       );
+      toast.success("Source deactivated");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete source");
+      const message =
+        err instanceof Error ? err.message : "Failed to deactivate source";
+      setError(message);
+      toast.error(message);
+    } finally {
+      setConfirmSource(null);
     }
   };
 
@@ -135,8 +154,12 @@ export default function App() {
           delete next[source.id];
           return next;
         });
+        toast.success("Max age updated");
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to update source");
+        const message =
+          err instanceof Error ? err.message : "Failed to update source";
+        setError(message);
+        toast.error(message);
       }
       return;
     }
@@ -152,8 +175,12 @@ export default function App() {
         prev.map((item) => (item.id === source.id ? updated : item)),
       );
       setMaxAgeDrafts((prev) => ({ ...prev, [source.id]: String(value) }));
+      toast.success("Max age updated");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update source");
+      const message =
+        err instanceof Error ? err.message : "Failed to update source";
+      setError(message);
+      toast.error(message);
     }
   };
 
@@ -177,8 +204,12 @@ export default function App() {
       });
       setSectors((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
       setSectorForm(emptySectorForm);
+      toast.success("Sector created");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create sector");
+      const message =
+        err instanceof Error ? err.message : "Failed to create sector";
+      setError(message);
+      toast.error(message);
     }
   };
 
@@ -187,8 +218,12 @@ export default function App() {
     setError(null);
     try {
       await runIngest();
+      toast.success("Ingest triggered");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to trigger ingest");
+      const message =
+        err instanceof Error ? err.message : "Failed to trigger ingest";
+      setError(message);
+      toast.error(message);
     } finally {
       setIsTriggering(false);
     }
@@ -215,6 +250,7 @@ export default function App() {
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
+      <Toaster richColors position="top-right" />
       <section className="mx-auto flex max-w-5xl flex-col gap-10 px-6 py-12">
         <header className="flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -378,12 +414,14 @@ export default function App() {
                                   item.id === source.id ? updated : item,
                                 ),
                               );
+                              toast.success("Sector updated");
                             } catch (err) {
-                              setError(
+                              const message =
                                 err instanceof Error
                                   ? err.message
-                                  : "Failed to update source",
-                              );
+                                  : "Failed to update source";
+                              setError(message);
+                              toast.error(message);
                             }
                           }}
                           className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
@@ -446,6 +484,35 @@ export default function App() {
           </div>
         </section>
       </section>
+
+      {confirmSource ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-100 shadow-xl">
+            <h3 className="text-lg font-semibold">Deactivate source</h3>
+            <p className="mt-2 text-sm text-slate-400">
+              Disable{" "}
+              <span className="text-slate-200">
+                {confirmSource.name ?? confirmSource.url}
+              </span>
+              ?
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => setConfirmSource(null)}
+                className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeactivate}
+                className="rounded-full bg-red-500/20 px-4 py-2 text-sm font-semibold text-red-200"
+              >
+                Deactivate
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
