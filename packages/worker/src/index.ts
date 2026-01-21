@@ -17,11 +17,27 @@ const supabase = createSupabaseClient({
   serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
 });
 
-const ingestQueue = new Queue("ingest", { connection });
-const feedQueue = new Queue("feed-processing", { connection });
+const ingestQueue = new Queue("ingest", {
+  connection,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 2000 },
+    removeOnComplete: 100,
+    removeOnFail: 100,
+  },
+});
+const feedQueue = new Queue("feed-processing", {
+  connection,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 2000 },
+    removeOnComplete: 100,
+    removeOnFail: 100,
+  },
+});
 const parser = new Parser();
 
-new Worker(
+const ingestWorker = new Worker(
   "ingest",
   async (job) => {
     if (job.name !== "ingest:poll") {
@@ -55,7 +71,7 @@ new Worker(
   { connection }
 );
 
-new Worker(
+const feedWorker = new Worker(
   "feed-processing",
   async (job) => {
     if (job.name !== "feed:process") {
@@ -63,7 +79,13 @@ new Worker(
     }
 
     const { url, sourceId } = job.data as { url: string; sourceId: string };
-    const feed = await parser.parseURL(url);
+    let feed;
+    try {
+      feed = await parser.parseURL(url);
+    } catch (error) {
+      console.error(`[${sourceId}] failed to parse ${url}`, error);
+      return;
+    }
 
     const itemsToInsert = feed.items
       .map((item) => {
@@ -101,6 +123,14 @@ new Worker(
   },
   { connection }
 );
+
+ingestWorker.on("failed", (job, err) => {
+  console.error(`[ingest] job ${job?.id ?? "unknown"} failed`, err);
+});
+
+feedWorker.on("failed", (job, err) => {
+  console.error(`[feed-processing] job ${job?.id ?? "unknown"} failed`, err);
+});
 
 await ingestQueue.add(
   "ingest:poll",

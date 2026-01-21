@@ -1,4 +1,6 @@
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
+const API_KEY = import.meta.env.VITE_API_KEY ?? "";
+const authHeaders = API_KEY ? { "x-api-key": API_KEY } : {};
 
 export type Source = {
   id: string;
@@ -10,7 +12,9 @@ export type Source = {
 };
 
 export const listSources = async (): Promise<Source[]> => {
-  const res = await fetch(`${API_URL}/sources`);
+  const res = await fetch(`${API_URL}/sources`, {
+    headers: authHeaders,
+  });
   if (!res.ok) {
     throw new Error("Failed to load sources");
   }
@@ -24,7 +28,7 @@ export const createSource = async (payload: {
 }): Promise<Source> => {
   const res = await fetch(`${API_URL}/sources`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify(payload),
   });
 
@@ -41,7 +45,7 @@ export const updateSource = async (
 ): Promise<Source> => {
   const res = await fetch(`${API_URL}/sources/${id}`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify(payload),
   });
 
@@ -53,14 +57,21 @@ export const updateSource = async (
 };
 
 export const deleteSource = async (id: string): Promise<void> => {
-  const res = await fetch(`${API_URL}/sources/${id}`, { method: "DELETE" });
+  const res = await fetch(`${API_URL}/sources/${id}`, {
+    method: "DELETE",
+    headers: authHeaders,
+  });
   if (!res.ok) {
     throw new Error("Failed to delete source");
   }
 };
 
 export const runIngest = async (): Promise<{ queued: boolean; jobId?: string }> => {
-  const res = await fetch(`${API_URL}/ingest/run`, { method: "POST" });
+  const res = await fetch(`${API_URL}/ingest/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: "{}",
+  });
   if (!res.ok) {
     throw new Error("Failed to trigger ingest");
   }

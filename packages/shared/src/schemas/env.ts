@@ -9,6 +9,7 @@ export const baseEnvSchema = z.object({
   LLM_API_KEY: z.union([z.string().min(1), z.literal("")]).optional(),
   LLM_MODEL: z.string().optional(),
   EMBEDDING_MODEL: z.string().optional(),
+  API_KEY: z.union([z.string().min(8), z.literal("")]).optional(),
 });
 
 export type BaseEnv = z.infer<typeof baseEnvSchema>;

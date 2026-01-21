@@ -28,7 +28,18 @@ await app.register(cors, {
 
 app.get("/health", async () => ({ status: "ok" }));
 
-app.get("/sources", async (_request, reply) => {
+const requireApiKey = async (request: typeof app.request, reply: typeof app.reply) => {
+  if (!env.API_KEY) {
+    return;
+  }
+
+  const apiKey = request.headers["x-api-key"];
+  if (apiKey !== env.API_KEY) {
+    return reply.code(401).send({ error: "Unauthorized" });
+  }
+};
+
+app.get("/sources", { preHandler: requireApiKey }, async (_request, reply) => {
   const { data, error } = await supabase
     .from("rss_sources")
     .select("id,url,name,active,created_at,last_fetched_at")
@@ -43,7 +54,7 @@ app.get("/sources", async (_request, reply) => {
 
 app.post<{
   Body: { url: string; name?: string; active?: boolean };
-}>("/sources", async (request, reply) => {
+}>("/sources", { preHandler: requireApiKey }, async (request, reply) => {
   const { url, name, active } = request.body ?? {};
 
   if (!url) {
@@ -67,7 +78,10 @@ app.post<{
   return data;
 });
 
-app.delete<{ Params: { id: string } }>("/sources/:id", async (request, reply) => {
+app.delete<{ Params: { id: string } }>(
+  "/sources/:id",
+  { preHandler: requireApiKey },
+  async (request, reply) => {
   const { id } = request.params;
 
   const { error } = await supabase.from("rss_sources").delete().eq("id", id);
@@ -76,13 +90,14 @@ app.delete<{ Params: { id: string } }>("/sources/:id", async (request, reply) =>
     return reply.code(500).send({ error: error.message });
   }
 
-  return { deleted: true };
-});
+    return { deleted: true };
+  },
+);
 
 app.patch<{
   Params: { id: string };
   Body: { url?: string; name?: string; active?: boolean };
-}>("/sources/:id", async (request, reply) => {
+}>("/sources/:id", { preHandler: requireApiKey }, async (request, reply) => {
   const { id } = request.params;
   const { url, name, active } = request.body ?? {};
 
@@ -110,7 +125,7 @@ app.patch<{
   return data;
 });
 
-app.post("/ingest/run", async (_request, reply) => {
+app.post("/ingest/run", { preHandler: requireApiKey }, async (_request, reply) => {
   try {
     const job = await ingestQueue.add("ingest:poll", {}, {
       jobId: `ingest-poll-manual-${Date.now()}`,
