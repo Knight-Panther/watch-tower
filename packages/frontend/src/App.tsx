@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import {
   createSector,
   createSource,
-  deleteSource,
   listSectors,
   listSources,
   runIngest,
@@ -27,6 +26,7 @@ export default function App() {
   const [sourceForm, setSourceForm] = useState(emptySourceForm);
   const [sectorForm, setSectorForm] = useState(emptySectorForm);
   const [isTriggering, setIsTriggering] = useState(false);
+  const [maxAgeDrafts, setMaxAgeDrafts] = useState<Record<string, string>>({});
 
   const activeCount = useMemo(
     () => sources.filter((source) => source.active).length,
@@ -99,30 +99,49 @@ export default function App() {
 
   const onDelete = async (source: Source) => {
     const confirmed = window.confirm(
-      `Remove ${source.name ?? source.url}?`,
+      `Deactivate ${source.name ?? source.url}?`,
     );
     if (!confirmed) {
       return;
     }
 
     try {
-      await deleteSource(source.id);
-      setSources((prev) => prev.filter((item) => item.id !== source.id));
+      const updated = await updateSource(source.id, { active: false });
+      setSources((prev) =>
+        prev.map((item) => (item.id === source.id ? updated : item)),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete source");
     }
   };
 
-  const onSetMaxAge = async (source: Source) => {
-    const current =
-      source.max_age_days ??
-      source.sectors?.default_max_age_days ??
-      5;
-    const input = window.prompt("Max age days (1-15)", String(current));
-    if (input === null) {
+  const onSaveMaxAge = async (source: Source) => {
+    const rawValue =
+      maxAgeDrafts[source.id] ??
+      String(
+        source.max_age_days ??
+          source.sectors?.default_max_age_days ??
+          5,
+      );
+
+    if (rawValue.trim() === "") {
+      try {
+        const updated = await updateSource(source.id, { max_age_days: null });
+        setSources((prev) =>
+          prev.map((item) => (item.id === source.id ? updated : item)),
+        );
+        setMaxAgeDrafts((prev) => {
+          const next = { ...prev };
+          delete next[source.id];
+          return next;
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to update source");
+      }
       return;
     }
-    const value = Number(input);
+
+    const value = Number(rawValue);
     if (Number.isNaN(value) || value < 1 || value > 15) {
       setError("Max age must be between 1 and 15");
       return;
@@ -132,6 +151,7 @@ export default function App() {
       setSources((prev) =>
         prev.map((item) => (item.id === source.id ? updated : item)),
       );
+      setMaxAgeDrafts((prev) => ({ ...prev, [source.id]: String(value) }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update source");
     }
@@ -174,6 +194,25 @@ export default function App() {
     }
   };
 
+  const groupedSources = useMemo(() => {
+    const groups = new Map<string, { title: string; sources: Source[] }>();
+
+    sources.forEach((source) => {
+      const sectorName = source.sectors?.name ?? "No sector";
+      const maxAge =
+        source.max_age_days ?? source.sectors?.default_max_age_days ?? 5;
+      const key = `${sectorName}::${maxAge}`;
+      const title = `${sectorName} - max age ${maxAge} days`;
+      const group = groups.get(key) ?? { title, sources: [] };
+      group.sources.push(source);
+      groups.set(key, group);
+    });
+
+    return Array.from(groups.values()).sort((a, b) =>
+      a.title.localeCompare(b.title),
+    );
+  }, [sources]);
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
       <section className="mx-auto flex max-w-5xl flex-col gap-10 px-6 py-12">
@@ -183,7 +222,7 @@ export default function App() {
               Media Watch Tower
             </h1>
             <p className="mt-2 text-sm text-slate-400">
-              {activeCount} active sources · {sources.length} total
+              {activeCount} active sources - {sources.length} total
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -303,77 +342,101 @@ export default function App() {
             <p className="mt-3 text-sm text-red-400">{error}</p>
           ) : null}
 
-          <div className="mt-4 grid gap-3">
-            {sources.map((source) => (
-              <div
-                key={source.id}
-                className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-950/70 px-4 py-3"
-              >
-                <div>
-                  <p className="text-sm font-semibold">
-                    {source.name ?? "Untitled source"}
+          <div className="mt-4 grid gap-6">
+            {groupedSources.map((group) => (
+              <div key={group.title} className="rounded-xl border border-slate-800">
+                <div className="flex items-center justify-between border-b border-slate-800 px-4 py-2">
+                  <p className="text-sm font-semibold text-slate-200">
+                    {group.title}
                   </p>
-                  <p className="text-xs text-slate-400">{source.url}</p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {source.sectors?.name ?? "No sector"} · max age{" "}
-                    {source.max_age_days ??
-                      source.sectors?.default_max_age_days ??
-                      5}{" "}
-                    days
-                  </p>
+                  <span className="text-xs text-slate-500">
+                    {group.sources.length} sources
+                  </span>
                 </div>
-                <div className="flex items-center gap-3">
-                  <select
-                    value={source.sector_id ?? ""}
-                    onChange={async (event) => {
-                      try {
-                        const updated = await updateSource(source.id, {
-                          sector_id: event.target.value || null,
-                        });
-                        setSources((prev) =>
-                          prev.map((item) =>
-                            item.id === source.id ? updated : item,
-                          ),
-                        );
-                      } catch (err) {
-                        setError(
-                          err instanceof Error
-                            ? err.message
-                            : "Failed to update source",
-                        );
-                      }
-                    }}
-                    className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
-                  >
-                    <option value="">No sector</option>
-                    {sectors.map((sector) => (
-                      <option key={sector.id} value={sector.id}>
-                        {sector.name}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={() => onSetMaxAge(source)}
-                    className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 transition hover:border-slate-500"
-                  >
-                    Set max age
-                  </button>
-                  <button
-                    onClick={() => onToggle(source)}
-                    className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                      source.active
-                        ? "bg-emerald-500/20 text-emerald-200"
-                        : "bg-slate-700/40 text-slate-300"
-                    }`}
-                  >
-                    {source.active ? "Active" : "Inactive"}
-                  </button>
-                  <button
-                    onClick={() => onDelete(source)}
-                    className="text-xs text-red-300 hover:text-red-200"
-                  >
-                    Remove
-                  </button>
+                <div className="grid gap-3 p-4">
+                  {group.sources.map((source) => (
+                    <div
+                      key={source.id}
+                      className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-950/70 px-4 py-3"
+                    >
+                      <div>
+                        <p className="text-sm font-semibold">
+                          {source.name ?? "Untitled source"}
+                        </p>
+                        <p className="text-xs text-slate-400">{source.url}</p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <select
+                          value={source.sector_id ?? ""}
+                          onChange={async (event) => {
+                            try {
+                              const updated = await updateSource(source.id, {
+                                sector_id: event.target.value || null,
+                              });
+                              setSources((prev) =>
+                                prev.map((item) =>
+                                  item.id === source.id ? updated : item,
+                                ),
+                              );
+                            } catch (err) {
+                              setError(
+                                err instanceof Error
+                                  ? err.message
+                                  : "Failed to update source",
+                              );
+                            }
+                          }}
+                          className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
+                        >
+                          <option value="">No sector</option>
+                          {sectors.map((sector) => (
+                            <option key={sector.id} value={sector.id}>
+                              {sector.name}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          value={
+                            maxAgeDrafts[source.id] ??
+                            String(
+                              source.max_age_days ??
+                                source.sectors?.default_max_age_days ??
+                                5,
+                            )
+                          }
+                          onChange={(event) =>
+                            setMaxAgeDrafts((prev) => ({
+                              ...prev,
+                              [source.id]: event.target.value,
+                            }))
+                          }
+                          className="w-20 rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
+                        />
+                        <button
+                          onClick={() => onSaveMaxAge(source)}
+                          className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 transition hover:border-slate-500"
+                        >
+                          Save
+                        </button>
+                        <button
+                          onClick={() => onToggle(source)}
+                          className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                            source.active
+                              ? "bg-emerald-500/20 text-emerald-200"
+                              : "bg-slate-700/40 text-slate-300"
+                          }`}
+                        >
+                          {source.active ? "Active" : "Inactive"}
+                        </button>
+                        <button
+                          onClick={() => onDelete(source)}
+                          className="text-xs text-red-300 hover:text-red-200"
+                        >
+                          Deactivate
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             ))}

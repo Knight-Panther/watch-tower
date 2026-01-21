@@ -48,7 +48,8 @@ export const createSector = async (payload: {
   });
 
   if (!res.ok) {
-    throw new Error("Failed to create sector");
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to create sector");
   }
 
   return res.json();
@@ -78,7 +79,8 @@ export const createSource = async (payload: {
   });
 
   if (!res.ok) {
-    throw new Error("Failed to create source");
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to create source");
   }
 
   return res.json();
@@ -105,16 +107,6 @@ export const updateSource = async (
   }
 
   return res.json();
-};
-
-export const deleteSource = async (id: string): Promise<void> => {
-  const res = await fetch(`${API_URL}/sources/${id}`, {
-    method: "DELETE",
-    headers: authHeaders,
-  });
-  if (!res.ok) {
-    throw new Error("Failed to delete source");
-  }
 };
 
 export const runIngest = async (): Promise<{ queued: boolean; jobId?: string }> => {

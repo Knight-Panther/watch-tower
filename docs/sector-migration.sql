@@ -11,3 +11,5 @@ create table if not exists sectors (
 alter table rss_sources
   add column if not exists sector_id uuid references sectors(id),
   add column if not exists max_age_days smallint check (max_age_days between 1 and 15);
+
+create unique index if not exists rss_sources_url_unique on rss_sources (url);

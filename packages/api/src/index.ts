@@ -24,6 +24,7 @@ const app = Fastify({ logger: true });
 
 await app.register(cors, {
   origin: true,
+  methods: ["GET", "POST", "PATCH", "DELETE"],
 });
 
 app.get("/health", async () => ({ status: "ok" }));
@@ -90,6 +91,9 @@ app.post<{
     .single();
 
   if (error) {
+    if (error.code === "23505") {
+      return reply.code(409).send({ error: "Sector already exists" });
+    }
     return reply.code(500).send({ error: error.message });
   }
 
@@ -145,6 +149,9 @@ app.post<{
     .single();
 
   if (error) {
+    if (error.code === "23505") {
+      return reply.code(409).send({ error: "RSS URL already exists" });
+    }
     return reply.code(500).send({ error: error.message });
   }
 
@@ -155,15 +162,22 @@ app.delete<{ Params: { id: string } }>(
   "/sources/:id",
   { preHandler: requireApiKey },
   async (request, reply) => {
-  const { id } = request.params;
+    const { id } = request.params;
 
-  const { error } = await supabase.from("rss_sources").delete().eq("id", id);
+    const { data, error } = await supabase
+      .from("rss_sources")
+      .update({ active: false })
+      .eq("id", id)
+      .select(
+        "id,url,name,active,sector_id,max_age_days,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days)",
+      )
+      .single();
 
-  if (error) {
-    return reply.code(500).send({ error: error.message });
-  }
+    if (error) {
+      return reply.code(500).send({ error: error.message });
+    }
 
-    return { deleted: true };
+    return data;
   },
 );
 
