@@ -1,0 +1,16 @@
+{
+  "name": "@watch-tower/shared",
+  "version": "1.0.0",
+  "description": "Shared types and utilities",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

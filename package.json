@@ -1,19 +1,34 @@
 {
   "name": "watch-tower",
   "version": "1.0.0",
-  "description": "",
-  "main": "scaffold.js",
+  "description": "Media Watch Tower monorepo",
+  "private": true,
+  "directories": {
+    "doc": "docs"
+  },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev:api": "npm --workspace @watch-tower/api run dev",
+    "dev:worker": "npm --workspace @watch-tower/worker run dev",
+    "dev:frontend": "npm --workspace @watch-tower/frontend run dev -- --open",
+    "dev:all": "concurrently \"npm run dev:api\" \"npm run dev:worker\" \"npm run dev:frontend\"",
+    "redis:up": "docker compose -f infra/docker-compose.yml up -d"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Knight-Panther/watch-tower.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
-  "dependencies": {
-    "dotenv": "^17.2.3"
+  "bugs": {
+    "url": "https://github.com/Knight-Panther/watch-tower/issues"
   },
+  "homepage": "https://github.com/Knight-Panther/watch-tower#readme",
+  "workspaces": [
+    "packages/*"
+  ],
   "devDependencies": {
-    "nodemon": "^3.1.11"
+    "concurrently": "^9.2.1"
   }
 }

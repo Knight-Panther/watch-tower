@@ -1,1 +1,0 @@
-// posting.job.js

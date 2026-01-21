@@ -1,1 +1,0 @@
-// articles.routes.js
