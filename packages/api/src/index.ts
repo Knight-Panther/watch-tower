@@ -130,6 +130,10 @@ app.post<{
     return reply.code(400).send({ error: "url is required" });
   }
 
+  if (!sector_id) {
+    return reply.code(400).send({ error: "sector_id is required" });
+  }
+
   if (max_age_days !== undefined && (max_age_days < 1 || max_age_days > 15)) {
     return reply.code(400).send({ error: "max_age_days must be 1-15" });
   }

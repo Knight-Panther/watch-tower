@@ -25,10 +25,21 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sourceForm, setSourceForm] = useState(emptySourceForm);
+  const [sourceErrors, setSourceErrors] = useState<{
+    url?: string;
+    sectorId?: string;
+    maxAgeDays?: string;
+  }>({});
   const [sectorForm, setSectorForm] = useState(emptySectorForm);
+  const [sectorErrors, setSectorErrors] = useState<{
+    name?: string;
+    defaultMaxAgeDays?: string;
+  }>({});
   const [isTriggering, setIsTriggering] = useState(false);
   const [maxAgeDrafts, setMaxAgeDrafts] = useState<Record<string, string>>({});
   const [confirmSource, setConfirmSource] = useState<Source | null>(null);
+  const [sectorDrafts, setSectorDrafts] = useState<Record<string, string>>({});
+  const [filters, setFilters] = useState({ sectorId: "", maxAgeDays: "" });
 
   const activeCount = useMemo(
     () => sources.filter((source) => source.active).length,
@@ -61,8 +72,18 @@ export default function App() {
 
   const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setSourceErrors({});
     if (!sourceForm.url) {
+      setSourceErrors((prev) => ({ ...prev, url: "URL is required" }));
       setError("URL is required");
+      return;
+    }
+    if (!sourceForm.sectorId) {
+      setSourceErrors((prev) => ({
+        ...prev,
+        sectorId: "Sector is required",
+      }));
+      setError("Sector is required");
       return;
     }
 
@@ -71,6 +92,10 @@ export default function App() {
         ? null
         : Number(sourceForm.maxAgeDays);
     if (maxAge !== null && (Number.isNaN(maxAge) || maxAge < 1 || maxAge > 15)) {
+      setSourceErrors((prev) => ({
+        ...prev,
+        maxAgeDays: "Max age must be between 1 and 15",
+      }));
       setError("Max age must be between 1 and 15");
       return;
     }
@@ -79,7 +104,7 @@ export default function App() {
       const created = await createSource({
         url: sourceForm.url,
         name: sourceForm.name,
-        sector_id: sourceForm.sectorId || undefined,
+        sector_id: sourceForm.sectorId,
         max_age_days: maxAge,
       });
       setSources((prev) => [created, ...prev]);
@@ -134,7 +159,7 @@ export default function App() {
     }
   };
 
-  const onSaveMaxAge = async (source: Source) => {
+  const onSaveChanges = async (source: Source) => {
     const rawValue =
       maxAgeDrafts[source.id] ??
       String(
@@ -143,39 +168,58 @@ export default function App() {
           5,
       );
 
-    if (rawValue.trim() === "") {
-      try {
-        const updated = await updateSource(source.id, { max_age_days: null });
-        setSources((prev) =>
-          prev.map((item) => (item.id === source.id ? updated : item)),
-        );
-        setMaxAgeDrafts((prev) => {
-          const next = { ...prev };
-          delete next[source.id];
-          return next;
-        });
-        toast.success("Max age updated");
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Failed to update source";
-        setError(message);
-        toast.error(message);
+    let maxAgeValue: number | null = null;
+    if (rawValue.trim() !== "") {
+      const parsed = Number(rawValue);
+      if (Number.isNaN(parsed) || parsed < 1 || parsed > 15) {
+        setError("Max age must be between 1 and 15");
+        toast.error("Max age must be between 1 and 15");
+        return;
       }
+      maxAgeValue = parsed;
+    }
+
+    const sectorId =
+      sectorDrafts[source.id] ?? source.sector_id ?? "";
+
+    if (!sectorId) {
+      setError("Select a sector to save");
+      toast.error("Select a sector to save");
       return;
     }
 
-    const value = Number(rawValue);
-    if (Number.isNaN(value) || value < 1 || value > 15) {
-      setError("Max age must be between 1 and 15");
+    const sectorChanged = sectorId !== (source.sector_id ?? "");
+    const maxAgeChanged =
+      maxAgeValue !==
+      (source.max_age_days ?? source.sectors?.default_max_age_days ?? 5);
+
+    if (!sectorChanged && !maxAgeChanged) {
+      toast("No changes to save");
       return;
     }
+
     try {
-      const updated = await updateSource(source.id, { max_age_days: value });
+      const updated = await updateSource(source.id, {
+        sector_id: sectorId,
+        max_age_days: maxAgeValue,
+      });
       setSources((prev) =>
         prev.map((item) => (item.id === source.id ? updated : item)),
       );
-      setMaxAgeDrafts((prev) => ({ ...prev, [source.id]: String(value) }));
-      toast.success("Max age updated");
+      setMaxAgeDrafts((prev) => ({ ...prev, [source.id]: rawValue }));
+      setSectorDrafts((prev) => {
+        const next = { ...prev };
+        delete next[source.id];
+        return next;
+      });
+
+      if (sectorChanged && maxAgeChanged) {
+        toast.success("Sector and max age updated");
+      } else if (sectorChanged) {
+        toast.success("Sector updated");
+      } else {
+        toast.success("Max age updated");
+      }
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to update source";
@@ -186,13 +230,22 @@ export default function App() {
 
   const onCreateSector = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setSectorErrors({});
     if (!sectorForm.name.trim()) {
+      setSectorErrors((prev) => ({
+        ...prev,
+        name: "Sector name is required",
+      }));
       setError("Sector name is required");
       return;
     }
 
     const maxAge = Number(sectorForm.defaultMaxAgeDays);
     if (Number.isNaN(maxAge) || maxAge < 1 || maxAge > 15) {
+      setSectorErrors((prev) => ({
+        ...prev,
+        defaultMaxAgeDays: "Default max age must be 1-15",
+      }));
       setError("Default max age must be between 1 and 15");
       return;
     }
@@ -230,10 +283,32 @@ export default function App() {
   };
 
   const groupedSources = useMemo(() => {
+    const maxAgeFilter = filters.maxAgeDays.trim()
+      ? Number(filters.maxAgeDays)
+      : null;
+    const maxAgeValid =
+      maxAgeFilter === null ||
+      (!Number.isNaN(maxAgeFilter) && maxAgeFilter >= 1 && maxAgeFilter <= 15);
+
+    const filteredSources = sources.filter((source) => {
+      if (filters.sectorId && source.sector_id !== filters.sectorId) {
+        return false;
+      }
+      if (!maxAgeValid) {
+        return true;
+      }
+      if (maxAgeFilter !== null) {
+        const effectiveMaxAge =
+          source.max_age_days ?? source.sectors?.default_max_age_days ?? 5;
+        return effectiveMaxAge === maxAgeFilter;
+      }
+      return true;
+    });
+
     const groups = new Map<string, { title: string; sources: Source[] }>();
 
-    sources.forEach((source) => {
-      const sectorName = source.sectors?.name ?? "No sector";
+    filteredSources.forEach((source) => {
+      const sectorName = source.sectors?.name ?? "Unassigned";
       const maxAge =
         source.max_age_days ?? source.sectors?.default_max_age_days ?? 5;
       const key = `${sectorName}::${maxAge}`;
@@ -246,7 +321,7 @@ export default function App() {
     return Array.from(groups.values()).sort((a, b) =>
       a.title.localeCompare(b.title),
     );
-  }, [sources]);
+  }, [sources, filters]);
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
@@ -292,6 +367,9 @@ export default function App() {
               placeholder="RSS URL"
               className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
             />
+            {sourceErrors.url ? (
+              <p className="text-xs text-red-400">{sourceErrors.url}</p>
+            ) : null}
             <input
               value={sourceForm.name}
               onChange={(event) =>
@@ -307,13 +385,23 @@ export default function App() {
               }
               className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
             >
-              <option value="">No sector</option>
+              <option value="" disabled>
+                Select sector
+              </option>
               {sectors.map((sector) => (
                 <option key={sector.id} value={sector.id}>
                   {sector.name}
                 </option>
               ))}
             </select>
+            {sectors.length === 0 ? (
+              <p className="text-xs text-amber-300">
+                Create a sector before adding sources.
+              </p>
+            ) : null}
+            {sourceErrors.sectorId ? (
+              <p className="text-xs text-red-400">{sourceErrors.sectorId}</p>
+            ) : null}
             <input
               value={sourceForm.maxAgeDays}
               onChange={(event) =>
@@ -322,10 +410,14 @@ export default function App() {
               placeholder="Max age days (1-15, optional)"
               className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
             />
+            {sourceErrors.maxAgeDays ? (
+              <p className="text-xs text-red-400">{sourceErrors.maxAgeDays}</p>
+            ) : null}
             <div className="md:col-span-2">
               <button
                 type="submit"
-                className="w-full rounded-xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-white"
+                disabled={sectors.length === 0}
+                className="w-full rounded-xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Add
               </button>
@@ -344,6 +436,9 @@ export default function App() {
               placeholder="Sector name"
               className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
             />
+            {sectorErrors.name ? (
+              <p className="text-xs text-red-400">{sectorErrors.name}</p>
+            ) : null}
             <input
               value={sectorForm.defaultMaxAgeDays}
               onChange={(event) =>
@@ -355,6 +450,11 @@ export default function App() {
               placeholder="Default max age days (1-15)"
               className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
             />
+            {sectorErrors.defaultMaxAgeDays ? (
+              <p className="text-xs text-red-400">
+                {sectorErrors.defaultMaxAgeDays}
+              </p>
+            ) : null}
             <div className="md:col-span-2">
               <button
                 type="submit"
@@ -367,6 +467,46 @@ export default function App() {
         </section>
 
         <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+          <h2 className="text-lg font-semibold">Filters</h2>
+          <div className="mt-4 grid gap-4 md:grid-cols-[2fr,1fr]">
+            <select
+              value={filters.sectorId}
+              onChange={(event) =>
+                setFilters((prev) => ({ ...prev, sectorId: event.target.value }))
+              }
+              className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
+            >
+              <option value="">All sectors</option>
+              {sectors.map((sector) => (
+                <option key={sector.id} value={sector.id}>
+                  {sector.name}
+                </option>
+              ))}
+            </select>
+            <input
+              value={filters.maxAgeDays}
+              onChange={(event) =>
+                setFilters((prev) => ({
+                  ...prev,
+                  maxAgeDays: event.target.value,
+                }))
+              }
+              placeholder="Max age days (1-15)"
+              className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
+            />
+          </div>
+          {filters.maxAgeDays.trim() !== "" ? (
+            Number.isNaN(Number(filters.maxAgeDays)) ||
+            Number(filters.maxAgeDays) < 1 ||
+            Number(filters.maxAgeDays) > 15 ? (
+              <p className="mt-2 text-xs text-red-400">
+                Filter max age must be between 1 and 15
+              </p>
+            ) : null
+          ) : null}
+        </section>
+
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold">Sources</h2>
             {isLoading ? (
@@ -376,6 +516,11 @@ export default function App() {
 
           {error ? (
             <p className="mt-3 text-sm text-red-400">{error}</p>
+          ) : null}
+          {!isLoading && sources.length > 0 && activeCount === 0 ? (
+            <p className="mt-3 text-sm text-amber-300">
+              All sources are inactive. Ingest will not pull any items.
+            </p>
           ) : null}
 
           <div className="mt-4 grid gap-6">
@@ -403,30 +548,16 @@ export default function App() {
                       </div>
                       <div className="flex items-center gap-3">
                         <select
-                          value={source.sector_id ?? ""}
-                          onChange={async (event) => {
-                            try {
-                              const updated = await updateSource(source.id, {
-                                sector_id: event.target.value || null,
-                              });
-                              setSources((prev) =>
-                                prev.map((item) =>
-                                  item.id === source.id ? updated : item,
-                                ),
-                              );
-                              toast.success("Sector updated");
-                            } catch (err) {
-                              const message =
-                                err instanceof Error
-                                  ? err.message
-                                  : "Failed to update source";
-                              setError(message);
-                              toast.error(message);
-                            }
-                          }}
+                          value={sectorDrafts[source.id] ?? source.sector_id ?? ""}
+                          onChange={(event) =>
+                            setSectorDrafts((prev) => ({
+                              ...prev,
+                              [source.id]: event.target.value,
+                            }))
+                          }
                           className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
                         >
-                          <option value="">No sector</option>
+                          <option value="">Unassigned</option>
                           {sectors.map((sector) => (
                             <option key={sector.id} value={sector.id}>
                               {sector.name}
@@ -451,7 +582,7 @@ export default function App() {
                           className="w-20 rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
                         />
                         <button
-                          onClick={() => onSaveMaxAge(source)}
+                          onClick={() => onSaveChanges(source)}
                           className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 transition hover:border-slate-500"
                         >
                           Save
