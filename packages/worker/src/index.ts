@@ -1,18 +1,109 @@
+import dotenv from "dotenv";
+import { fileURLToPath } from "url";
 import { Queue, Worker } from "bullmq";
+import Parser from "rss-parser";
+import { baseEnvSchema, createSupabaseClient } from "@watch-tower/shared";
 
+dotenv.config({ path: fileURLToPath(new URL("../.env", import.meta.url)) });
+
+const env = baseEnvSchema.parse(process.env);
 const connection = {
-  host: process.env.REDIS_HOST ?? "127.0.0.1",
-  port: Number(process.env.REDIS_PORT ?? 6379),
+  host: env.REDIS_HOST,
+  port: env.REDIS_PORT,
 };
 
-const queue = new Queue("watchtower", { connection });
+const supabase = createSupabaseClient({
+  url: env.SUPABASE_URL,
+  serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
+});
+
+const ingestQueue = new Queue("ingest", { connection });
+const feedQueue = new Queue("feed-processing", { connection });
+const parser = new Parser();
 
 new Worker(
-  "watchtower",
+  "ingest",
   async (job) => {
-    console.log(`Processing job ${job.name} (${job.id})`);
+    if (job.name !== "ingest:poll") {
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("rss_sources")
+      .select("id,url,active")
+      .eq("active", true);
+
+    if (error) {
+      throw error;
+    }
+
+    for (const source of data ?? []) {
+      await feedQueue.add("feed:process", {
+        sourceId: source.id,
+        url: source.url,
+      });
+    }
+
+    await supabase
+      .from("rss_sources")
+      .update({ last_fetched_at: new Date().toISOString() })
+      .in(
+        "id",
+        (data ?? []).map((source) => source.id),
+      );
   },
   { connection }
 );
 
-queue.add("startup", { startedAt: new Date().toISOString() });
+new Worker(
+  "feed-processing",
+  async (job) => {
+    if (job.name !== "feed:process") {
+      return;
+    }
+
+    const { url, sourceId } = job.data as { url: string; sourceId: string };
+    const feed = await parser.parseURL(url);
+
+    const itemsToInsert = feed.items
+      .map((item) => {
+        const link = item.link ?? item.guid;
+        if (!link) {
+          return null;
+        }
+
+        return {
+          source_id: sourceId,
+          url: link,
+          title: item.title ?? null,
+          published_at: item.isoDate ?? item.pubDate ?? null,
+          raw: item,
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item));
+
+    if (itemsToInsert.length === 0) {
+      return;
+    }
+
+    const { error } = await supabase.from("feed_items").upsert(itemsToInsert, {
+      onConflict: "url",
+      ignoreDuplicates: true,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    console.log(
+      `[${sourceId}] upserted ${itemsToInsert.length} items from ${feed.title ?? url}`,
+    );
+  },
+  { connection }
+);
+
+await ingestQueue.add(
+  "ingest:poll",
+  {},
+  { repeat: { every: 15 * 60 * 1000 }, jobId: "ingest:poll" }
+);

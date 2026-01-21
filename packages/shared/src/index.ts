@@ -3,3 +3,6 @@ export type Sector = {
   name: string;
   slug: string;
 };
+
+export * from "./schemas/env";
+export * from "./supabase";

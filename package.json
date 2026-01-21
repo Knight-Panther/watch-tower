@@ -7,11 +7,13 @@
     "doc": "docs"
   },
   "scripts": {
-    "dev:api": "npm --workspace @watch-tower/api run dev",
-    "dev:worker": "npm --workspace @watch-tower/worker run dev",
+    "dev:api": "npm --workspace @watch-tower/shared run build && npm --workspace @watch-tower/api run dev",
+    "dev:worker": "npm --workspace @watch-tower/shared run build && npm --workspace @watch-tower/worker run dev",
     "dev:frontend": "npm --workspace @watch-tower/frontend run dev -- --open",
     "dev:all": "concurrently \"npm run dev:api\" \"npm run dev:worker\" \"npm run dev:frontend\"",
-    "redis:up": "docker compose -f infra/docker-compose.yml up -d"
+    "redis:up": "docker compose -f infra/docker-compose.yml up -d",
+    "lint": "eslint \"packages/**/*.{ts,tsx}\"",
+    "format": "prettier --write \"packages/**/*.{ts,tsx,js,jsx,json,md}\""
   },
   "repository": {
     "type": "git",
@@ -29,6 +31,11 @@
     "packages/*"
   ],
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "@typescript-eslint/eslint-plugin": "^8.53.1",
+    "@typescript-eslint/parser": "^8.53.1",
+    "concurrently": "^9.2.1",
+    "eslint": "^9.39.2",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.8.0"
   }
 }
