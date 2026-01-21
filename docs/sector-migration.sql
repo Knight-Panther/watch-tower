@@ -1,0 +1,13 @@
+-- Add sector support and per-source max age
+
+create table if not exists sectors (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  slug text not null unique,
+  default_max_age_days smallint not null default 5 check (default_max_age_days between 1 and 15),
+  created_at timestamptz not null default now()
+);
+
+alter table rss_sources
+  add column if not exists sector_id uuid references sectors(id),
+  add column if not exists max_age_days smallint check (max_age_days between 1 and 15);

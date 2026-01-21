@@ -1,20 +1,31 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  createSector,
   createSource,
   deleteSource,
+  listSectors,
   listSources,
   runIngest,
+  type Sector,
   type Source,
   updateSource,
 } from "./api";
 
-const emptyForm = { url: "", name: "" };
+const emptySourceForm = {
+  url: "",
+  name: "",
+  sectorId: "",
+  maxAgeDays: "",
+};
+const emptySectorForm = { name: "", defaultMaxAgeDays: "5" };
 
 export default function App() {
   const [sources, setSources] = useState<Source[]>([]);
+  const [sectors, setSectors] = useState<Sector[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState(emptyForm);
+  const [sourceForm, setSourceForm] = useState(emptySourceForm);
+  const [sectorForm, setSectorForm] = useState(emptySectorForm);
   const [isTriggering, setIsTriggering] = useState(false);
 
   const activeCount = useMemo(
@@ -26,7 +37,12 @@ export default function App() {
     setIsLoading(true);
     setError(null);
     try {
-      setSources(await listSources());
+      const [sourcesData, sectorsData] = await Promise.all([
+        listSources(),
+        listSectors(),
+      ]);
+      setSources(sourcesData);
+      setSectors(sectorsData);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load sources");
     } finally {
@@ -40,15 +56,29 @@ export default function App() {
 
   const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!form.url) {
+    if (!sourceForm.url) {
       setError("URL is required");
       return;
     }
 
+    const maxAge =
+      sourceForm.maxAgeDays.trim() === ""
+        ? null
+        : Number(sourceForm.maxAgeDays);
+    if (maxAge !== null && (Number.isNaN(maxAge) || maxAge < 1 || maxAge > 15)) {
+      setError("Max age must be between 1 and 15");
+      return;
+    }
+
     try {
-      const created = await createSource({ url: form.url, name: form.name });
+      const created = await createSource({
+        url: sourceForm.url,
+        name: sourceForm.name,
+        sector_id: sourceForm.sectorId || undefined,
+        max_age_days: maxAge,
+      });
       setSources((prev) => [created, ...prev]);
-      setForm(emptyForm);
+      setSourceForm(emptySourceForm);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create source");
     }
@@ -80,6 +110,55 @@ export default function App() {
       setSources((prev) => prev.filter((item) => item.id !== source.id));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete source");
+    }
+  };
+
+  const onSetMaxAge = async (source: Source) => {
+    const current =
+      source.max_age_days ??
+      source.sectors?.default_max_age_days ??
+      5;
+    const input = window.prompt("Max age days (1-15)", String(current));
+    if (input === null) {
+      return;
+    }
+    const value = Number(input);
+    if (Number.isNaN(value) || value < 1 || value > 15) {
+      setError("Max age must be between 1 and 15");
+      return;
+    }
+    try {
+      const updated = await updateSource(source.id, { max_age_days: value });
+      setSources((prev) =>
+        prev.map((item) => (item.id === source.id ? updated : item)),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update source");
+    }
+  };
+
+  const onCreateSector = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!sectorForm.name.trim()) {
+      setError("Sector name is required");
+      return;
+    }
+
+    const maxAge = Number(sectorForm.defaultMaxAgeDays);
+    if (Number.isNaN(maxAge) || maxAge < 1 || maxAge > 15) {
+      setError("Default max age must be between 1 and 15");
+      return;
+    }
+
+    try {
+      const created = await createSector({
+        name: sectorForm.name.trim(),
+        default_max_age_days: maxAge,
+      });
+      setSectors((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+      setSectorForm(emptySectorForm);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create sector");
     }
   };
 
@@ -128,30 +207,87 @@ export default function App() {
           <h2 className="text-lg font-semibold">Add source</h2>
           <form
             onSubmit={onSubmit}
-            className="mt-4 grid gap-4 md:grid-cols-[2fr,1fr,auto]"
+            className="mt-4 grid gap-4 md:grid-cols-[2fr,1fr]"
           >
             <input
-              value={form.url}
+              value={sourceForm.url}
               onChange={(event) =>
-                setForm((prev) => ({ ...prev, url: event.target.value }))
+                setSourceForm((prev) => ({ ...prev, url: event.target.value }))
               }
               placeholder="RSS URL"
               className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
             />
             <input
-              value={form.name}
+              value={sourceForm.name}
               onChange={(event) =>
-                setForm((prev) => ({ ...prev, name: event.target.value }))
+                setSourceForm((prev) => ({ ...prev, name: event.target.value }))
               }
               placeholder="Name (optional)"
               className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
             />
-            <button
-              type="submit"
-              className="rounded-xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-white"
+            <select
+              value={sourceForm.sectorId}
+              onChange={(event) =>
+                setSourceForm((prev) => ({ ...prev, sectorId: event.target.value }))
+              }
+              className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
             >
-              Add
-            </button>
+              <option value="">No sector</option>
+              {sectors.map((sector) => (
+                <option key={sector.id} value={sector.id}>
+                  {sector.name}
+                </option>
+              ))}
+            </select>
+            <input
+              value={sourceForm.maxAgeDays}
+              onChange={(event) =>
+                setSourceForm((prev) => ({ ...prev, maxAgeDays: event.target.value }))
+              }
+              placeholder="Max age days (1-15, optional)"
+              className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
+            />
+            <div className="md:col-span-2">
+              <button
+                type="submit"
+                className="w-full rounded-xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-white"
+              >
+                Add
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+          <h2 className="text-lg font-semibold">Add sector</h2>
+          <form onSubmit={onCreateSector} className="mt-4 grid gap-4 md:grid-cols-[2fr,1fr]">
+            <input
+              value={sectorForm.name}
+              onChange={(event) =>
+                setSectorForm((prev) => ({ ...prev, name: event.target.value }))
+              }
+              placeholder="Sector name"
+              className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
+            />
+            <input
+              value={sectorForm.defaultMaxAgeDays}
+              onChange={(event) =>
+                setSectorForm((prev) => ({
+                  ...prev,
+                  defaultMaxAgeDays: event.target.value,
+                }))
+              }
+              placeholder="Default max age days (1-15)"
+              className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
+            />
+            <div className="md:col-span-2">
+              <button
+                type="submit"
+                className="w-full rounded-xl border border-slate-700 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:border-slate-500"
+              >
+                Create sector
+              </button>
+            </div>
           </form>
         </section>
 
@@ -178,8 +314,50 @@ export default function App() {
                     {source.name ?? "Untitled source"}
                   </p>
                   <p className="text-xs text-slate-400">{source.url}</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {source.sectors?.name ?? "No sector"} · max age{" "}
+                    {source.max_age_days ??
+                      source.sectors?.default_max_age_days ??
+                      5}{" "}
+                    days
+                  </p>
                 </div>
                 <div className="flex items-center gap-3">
+                  <select
+                    value={source.sector_id ?? ""}
+                    onChange={async (event) => {
+                      try {
+                        const updated = await updateSource(source.id, {
+                          sector_id: event.target.value || null,
+                        });
+                        setSources((prev) =>
+                          prev.map((item) =>
+                            item.id === source.id ? updated : item,
+                          ),
+                        );
+                      } catch (err) {
+                        setError(
+                          err instanceof Error
+                            ? err.message
+                            : "Failed to update source",
+                        );
+                      }
+                    }}
+                    className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
+                  >
+                    <option value="">No sector</option>
+                    {sectors.map((sector) => (
+                      <option key={sector.id} value={sector.id}>
+                        {sector.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => onSetMaxAge(source)}
+                    className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 transition hover:border-slate-500"
+                  >
+                    Set max age
+                  </button>
                   <button
                     onClick={() => onToggle(source)}
                     className={`rounded-full px-3 py-1 text-xs font-semibold ${

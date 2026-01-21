@@ -28,7 +28,10 @@ await app.register(cors, {
 
 app.get("/health", async () => ({ status: "ok" }));
 
-const requireApiKey = async (request: typeof app.request, reply: typeof app.reply) => {
+const requireApiKey = async (
+  request: typeof app.request,
+  reply: typeof app.reply,
+) => {
   if (!env.API_KEY) {
     return;
   }
@@ -39,10 +42,66 @@ const requireApiKey = async (request: typeof app.request, reply: typeof app.repl
   }
 };
 
+const slugify = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+app.get("/sectors", { preHandler: requireApiKey }, async (_request, reply) => {
+  const { data, error } = await supabase
+    .from("sectors")
+    .select("id,name,slug,default_max_age_days,created_at")
+    .order("name", { ascending: true });
+
+  if (error) {
+    return reply.code(500).send({ error: error.message });
+  }
+
+  return data ?? [];
+});
+
+app.post<{
+  Body: { name: string; default_max_age_days?: number };
+}>("/sectors", { preHandler: requireApiKey }, async (request, reply) => {
+  const { name, default_max_age_days } = request.body ?? {};
+  if (!name) {
+    return reply.code(400).send({ error: "name is required" });
+  }
+
+  if (
+    default_max_age_days !== undefined &&
+    (default_max_age_days < 1 || default_max_age_days > 15)
+  ) {
+    return reply
+      .code(400)
+      .send({ error: "default_max_age_days must be between 1 and 15" });
+  }
+
+  const { data, error } = await supabase
+    .from("sectors")
+    .insert({
+      name,
+      slug: slugify(name),
+      default_max_age_days: default_max_age_days ?? 5,
+    })
+    .select("id,name,slug,default_max_age_days,created_at")
+    .single();
+
+  if (error) {
+    return reply.code(500).send({ error: error.message });
+  }
+
+  return data;
+});
+
 app.get("/sources", { preHandler: requireApiKey }, async (_request, reply) => {
   const { data, error } = await supabase
     .from("rss_sources")
-    .select("id,url,name,active,created_at,last_fetched_at")
+    .select(
+      "id,url,name,active,sector_id,max_age_days,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days)",
+    )
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -53,12 +112,22 @@ app.get("/sources", { preHandler: requireApiKey }, async (_request, reply) => {
 });
 
 app.post<{
-  Body: { url: string; name?: string; active?: boolean };
+  Body: {
+    url: string;
+    name?: string;
+    active?: boolean;
+    sector_id?: string;
+    max_age_days?: number;
+  };
 }>("/sources", { preHandler: requireApiKey }, async (request, reply) => {
-  const { url, name, active } = request.body ?? {};
+  const { url, name, active, sector_id, max_age_days } = request.body ?? {};
 
   if (!url) {
     return reply.code(400).send({ error: "url is required" });
+  }
+
+  if (max_age_days !== undefined && (max_age_days < 1 || max_age_days > 15)) {
+    return reply.code(400).send({ error: "max_age_days must be 1-15" });
   }
 
   const { data, error } = await supabase
@@ -67,8 +136,12 @@ app.post<{
       url,
       name: name ?? null,
       active: active ?? true,
+      sector_id: sector_id ?? null,
+      max_age_days: max_age_days ?? null,
     })
-    .select("id,url,name,active,created_at,last_fetched_at")
+    .select(
+      "id,url,name,active,sector_id,max_age_days,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days)",
+    )
     .single();
 
   if (error) {
@@ -96,26 +169,42 @@ app.delete<{ Params: { id: string } }>(
 
 app.patch<{
   Params: { id: string };
-  Body: { url?: string; name?: string; active?: boolean };
+  Body: {
+    url?: string;
+    name?: string;
+    active?: boolean;
+    sector_id?: string;
+    max_age_days?: number | null;
+  };
 }>("/sources/:id", { preHandler: requireApiKey }, async (request, reply) => {
   const { id } = request.params;
-  const { url, name, active } = request.body ?? {};
+  const { url, name, active, sector_id, max_age_days } = request.body ?? {};
 
   const updates = {
     ...(url ? { url } : {}),
     ...(name !== undefined ? { name } : {}),
     ...(active !== undefined ? { active } : {}),
+    ...(sector_id !== undefined ? { sector_id } : {}),
+    ...(max_age_days !== undefined ? { max_age_days } : {}),
   };
 
   if (Object.keys(updates).length === 0) {
     return reply.code(400).send({ error: "No updates provided" });
   }
 
+  if (max_age_days !== undefined && max_age_days !== null) {
+    if (max_age_days < 1 || max_age_days > 15) {
+      return reply.code(400).send({ error: "max_age_days must be 1-15" });
+    }
+  }
+
   const { data, error } = await supabase
     .from("rss_sources")
     .update(updates)
     .eq("id", id)
-    .select("id,url,name,active,created_at,last_fetched_at")
+    .select(
+      "id,url,name,active,sector_id,max_age_days,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days)",
+    )
     .single();
 
   if (error) {

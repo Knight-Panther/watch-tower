@@ -36,6 +36,7 @@ const feedQueue = new Queue("feed-processing", {
   },
 });
 const parser = new Parser();
+const clampMaxAgeDays = (value: number) => Math.min(15, Math.max(1, value));
 
 const ingestWorker = new Worker(
   "ingest",
@@ -46,7 +47,7 @@ const ingestWorker = new Worker(
 
     const { data, error } = await supabase
       .from("rss_sources")
-      .select("id,url,active")
+      .select("id,url,active,max_age_days,sectors(default_max_age_days)")
       .eq("active", true);
 
     if (error) {
@@ -54,9 +55,14 @@ const ingestWorker = new Worker(
     }
 
     for (const source of data ?? []) {
+      const sectorMaxAge = source.sectors?.default_max_age_days;
+      const maxAgeDays = clampMaxAgeDays(
+        source.max_age_days ?? sectorMaxAge ?? 5,
+      );
       await feedQueue.add("feed:process", {
         sourceId: source.id,
         url: source.url,
+        maxAgeDays,
       });
     }
 
@@ -78,7 +84,11 @@ const feedWorker = new Worker(
       return;
     }
 
-    const { url, sourceId } = job.data as { url: string; sourceId: string };
+    const { url, sourceId, maxAgeDays } = job.data as {
+      url: string;
+      sourceId: string;
+      maxAgeDays: number;
+    };
     let feed;
     try {
       feed = await parser.parseURL(url);
@@ -87,6 +97,7 @@ const feedWorker = new Worker(
       return;
     }
 
+    const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
     const itemsToInsert = feed.items
       .map((item) => {
         const link = item.link ?? item.guid;
@@ -94,11 +105,21 @@ const feedWorker = new Worker(
           return null;
         }
 
+        const published = item.isoDate ?? item.pubDate ?? null;
+        if (!published) {
+          return null;
+        }
+
+        const publishedAt = new Date(published).getTime();
+        if (Number.isNaN(publishedAt) || publishedAt < cutoff) {
+          return null;
+        }
+
         return {
           source_id: sourceId,
           url: link,
           title: item.title ?? null,
-          published_at: item.isoDate ?? item.pubDate ?? null,
+          published_at: published,
           raw: item,
         };
       })

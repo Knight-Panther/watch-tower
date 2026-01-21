@@ -7,8 +7,51 @@ export type Source = {
   url: string;
   name: string | null;
   active: boolean;
+  sector_id: string | null;
+  max_age_days: number | null;
   created_at: string;
   last_fetched_at: string | null;
+  sectors?: {
+    id: string;
+    name: string;
+    slug: string;
+    default_max_age_days: number;
+  } | null;
+};
+
+export type Sector = {
+  id: string;
+  name: string;
+  slug: string;
+  default_max_age_days: number;
+  created_at: string;
+};
+
+export const listSectors = async (): Promise<Sector[]> => {
+  const res = await fetch(`${API_URL}/sectors`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    throw new Error("Failed to load sectors");
+  }
+  return res.json();
+};
+
+export const createSector = async (payload: {
+  name: string;
+  default_max_age_days?: number;
+}): Promise<Sector> => {
+  const res = await fetch(`${API_URL}/sectors`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    throw new Error("Failed to create sector");
+  }
+
+  return res.json();
 };
 
 export const listSources = async (): Promise<Source[]> => {
@@ -25,6 +68,8 @@ export const createSource = async (payload: {
   url: string;
   name?: string;
   active?: boolean;
+  sector_id?: string;
+  max_age_days?: number | null;
 }): Promise<Source> => {
   const res = await fetch(`${API_URL}/sources`, {
     method: "POST",
@@ -41,7 +86,13 @@ export const createSource = async (payload: {
 
 export const updateSource = async (
   id: string,
-  payload: { url?: string; name?: string; active?: boolean },
+  payload: {
+    url?: string;
+    name?: string;
+    active?: boolean;
+    sector_id?: string;
+    max_age_days?: number | null;
+  },
 ): Promise<Source> => {
   const res = await fetch(`${API_URL}/sources/${id}`, {
     method: "PATCH",
