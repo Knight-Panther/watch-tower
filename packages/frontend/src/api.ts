@@ -120,3 +120,60 @@ export const runIngest = async (): Promise<{ queued: boolean; jobId?: string }> 
   }
   return res.json();
 };
+
+export const deleteSource = async (
+  id: string,
+  hard = false,
+): Promise<Source> => {
+  const res = await fetch(`${API_URL}/sources/${id}?hard=${hard}`, {
+    method: "DELETE",
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to delete source");
+  }
+  return res.json();
+};
+
+export const batchSourceAction = async (payload: {
+  ids: string[];
+  action: "deactivate" | "delete";
+}): Promise<Source[]> => {
+  const res = await fetch(`${API_URL}/sources/batch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to update sources");
+  }
+  return res.json();
+};
+
+export const getFeedItemsTtl = async (): Promise<number> => {
+  const res = await fetch(`${API_URL}/config/feed-items-ttl`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load TTL");
+  }
+  const data = await res.json();
+  return Number(data.days ?? 60);
+};
+
+export const setFeedItemsTtl = async (days: number): Promise<number> => {
+  const res = await fetch(`${API_URL}/config/feed-items-ttl`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify({ days }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to update TTL");
+  }
+  const data = await res.json();
+  return Number(data.days ?? days);
+};

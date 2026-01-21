@@ -162,20 +162,30 @@ app.post<{
   return data;
 });
 
-app.delete<{ Params: { id: string } }>(
+app.delete<{ Params: { id: string }; Querystring: { hard?: string } }>(
   "/sources/:id",
   { preHandler: requireApiKey },
   async (request, reply) => {
     const { id } = request.params;
+    const hard = request.query.hard === "true";
 
-    const { data, error } = await supabase
-      .from("rss_sources")
-      .update({ active: false })
-      .eq("id", id)
-      .select(
-        "id,url,name,active,sector_id,max_age_days,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days)",
-      )
-      .single();
+    const { data, error } = hard
+      ? await supabase
+          .from("rss_sources")
+          .delete()
+          .eq("id", id)
+          .select(
+            "id,url,name,active,sector_id,max_age_days,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days)",
+          )
+          .single()
+      : await supabase
+          .from("rss_sources")
+          .update({ active: false })
+          .eq("id", id)
+          .select(
+            "id,url,name,active,sector_id,max_age_days,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days)",
+          )
+          .single();
 
     if (error) {
       return reply.code(500).send({ error: error.message });
@@ -184,6 +194,35 @@ app.delete<{ Params: { id: string } }>(
     return data;
   },
 );
+
+app.post<{
+  Body: { ids: string[]; action: "deactivate" | "delete" };
+}>("/sources/batch", { preHandler: requireApiKey }, async (request, reply) => {
+  const { ids, action } = request.body ?? {};
+  if (!ids?.length) {
+    return reply.code(400).send({ error: "ids are required" });
+  }
+  if (!action || !["deactivate", "delete"].includes(action)) {
+    return reply.code(400).send({ error: "action must be deactivate or delete" });
+  }
+
+  const query =
+    action === "delete"
+      ? supabase.from("rss_sources").delete()
+      : supabase.from("rss_sources").update({ active: false });
+
+  const { data, error } = await query
+    .in("id", ids)
+    .select(
+      "id,url,name,active,sector_id,max_age_days,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days)",
+    );
+
+  if (error) {
+    return reply.code(500).send({ error: error.message });
+  }
+
+  return data ?? [];
+});
 
 app.patch<{
   Params: { id: string };
@@ -243,6 +282,47 @@ app.post("/ingest/run", { preHandler: requireApiKey }, async (_request, reply) =
     return reply.code(500).send({ error: message });
   }
 });
+
+app.get("/config/feed-items-ttl", { preHandler: requireApiKey }, async (_request, reply) => {
+  const { data, error } = await supabase
+    .from("app_config")
+    .select("value")
+    .eq("key", "feed_items_ttl_days")
+    .single();
+
+  if (error) {
+    return reply.code(500).send({ error: error.message });
+  }
+
+  return { days: Number(data?.value ?? 60) };
+});
+
+app.patch<{ Body: { days: number } }>(
+  "/config/feed-items-ttl",
+  { preHandler: requireApiKey },
+  async (request, reply) => {
+    const { days } = request.body ?? {};
+    if (!days || days < 30 || days > 60) {
+      return reply.code(400).send({ error: "days must be between 30 and 60" });
+    }
+
+    const { data, error } = await supabase
+      .from("app_config")
+      .upsert({
+        key: "feed_items_ttl_days",
+        value: String(days),
+        updated_at: new Date().toISOString(),
+      })
+      .select("value")
+      .single();
+
+    if (error) {
+      return reply.code(500).send({ error: error.message });
+    }
+
+    return { days: Number(data?.value ?? days) };
+  },
+);
 
 const port = Number(process.env.PORT ?? 3001);
 

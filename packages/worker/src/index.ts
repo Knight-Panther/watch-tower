@@ -35,8 +35,36 @@ const feedQueue = new Queue("feed-processing", {
     removeOnFail: 100,
   },
 });
+const maintenanceQueue = new Queue("maintenance", {
+  connection,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 2000 },
+    removeOnComplete: 50,
+    removeOnFail: 50,
+  },
+});
 const parser = new Parser();
 const clampMaxAgeDays = (value: number) => Math.min(15, Math.max(1, value));
+
+const getFeedItemsTtlDays = async () => {
+  const { data, error } = await supabase
+    .from("app_config")
+    .select("value")
+    .eq("key", "feed_items_ttl_days")
+    .single();
+
+  if (error) {
+    return 60;
+  }
+
+  const days = Number(data?.value ?? 60);
+  if (Number.isNaN(days) || days < 30 || days > 60) {
+    return 60;
+  }
+
+  return days;
+};
 
 const ingestWorker = new Worker(
   "ingest",
@@ -145,6 +173,28 @@ const feedWorker = new Worker(
   { connection }
 );
 
+const maintenanceWorker = new Worker(
+  "maintenance",
+  async (job) => {
+    if (job.name !== "maintenance:cleanup") {
+      return;
+    }
+
+    const ttlDays = await getFeedItemsTtlDays();
+    const cutoff = new Date(Date.now() - ttlDays * 24 * 60 * 60 * 1000).toISOString();
+
+    const { error } = await supabase
+      .from("feed_items")
+      .delete()
+      .lt("created_at", cutoff);
+
+    if (error) {
+      throw error;
+    }
+  },
+  { connection }
+);
+
 ingestWorker.on("failed", (job, err) => {
   console.error(`[ingest] job ${job?.id ?? "unknown"} failed`, err);
 });
@@ -153,8 +203,18 @@ feedWorker.on("failed", (job, err) => {
   console.error(`[feed-processing] job ${job?.id ?? "unknown"} failed`, err);
 });
 
+maintenanceWorker.on("failed", (job, err) => {
+  console.error(`[maintenance] job ${job?.id ?? "unknown"} failed`, err);
+});
+
 await ingestQueue.add(
   "ingest:poll",
   {},
   { repeat: { every: 15 * 60 * 1000 }, jobId: "ingest:poll" }
+);
+
+await maintenanceQueue.add(
+  "maintenance:cleanup",
+  {},
+  { repeat: { every: 24 * 60 * 60 * 1000 }, jobId: "maintenance:cleanup" }
 );

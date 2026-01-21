@@ -3,6 +3,10 @@ import { Toaster, toast } from "sonner";
 import {
   createSector,
   createSource,
+  deleteSource,
+  batchSourceAction,
+  getFeedItemsTtl,
+  setFeedItemsTtl,
   listSectors,
   listSources,
   runIngest,
@@ -40,6 +44,15 @@ export default function App() {
   const [confirmSource, setConfirmSource] = useState<Source | null>(null);
   const [sectorDrafts, setSectorDrafts] = useState<Record<string, string>>({});
   const [filters, setFilters] = useState({ sectorId: "", maxAgeDays: "" });
+  const [confirmDeleteSource, setConfirmDeleteSource] = useState<Source | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
+  const [confirmBatchAction, setConfirmBatchAction] = useState<{
+    action: "deactivate" | "delete";
+    count: number;
+    ids: string[];
+  } | null>(null);
+  const [ttlDays, setTtlDays] = useState("60");
+  const [ttlError, setTtlError] = useState<string | null>(null);
 
   const activeCount = useMemo(
     () => sources.filter((source) => source.active).length,
@@ -50,12 +63,14 @@ export default function App() {
     setIsLoading(true);
     setError(null);
     try {
-      const [sourcesData, sectorsData] = await Promise.all([
+      const [sourcesData, sectorsData, ttlValue] = await Promise.all([
         listSources(),
         listSectors(),
+        getFeedItemsTtl(),
       ]);
       setSources(sourcesData);
       setSectors(sectorsData);
+      setTtlDays(String(ttlValue));
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to load sources";
@@ -113,7 +128,9 @@ export default function App() {
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to create source";
-      setError(message);
+      if (!message.toLowerCase().includes("already exists")) {
+        setError(message);
+      }
       toast.error(message);
     }
   };
@@ -156,6 +173,26 @@ export default function App() {
       toast.error(message);
     } finally {
       setConfirmSource(null);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!confirmDeleteSource) {
+      return;
+    }
+    try {
+      const deleted = await deleteSource(confirmDeleteSource.id, true);
+      setSources((prev) =>
+        prev.filter((item) => item.id !== deleted.id),
+      );
+      toast.success("Source deleted");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to delete source";
+      setError(message);
+      toast.error(message);
+    } finally {
+      setConfirmDeleteSource(null);
     }
   };
 
@@ -261,7 +298,9 @@ export default function App() {
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to create sector";
-      setError(message);
+      if (!message.toLowerCase().includes("already exists")) {
+        setError(message);
+      }
       toast.error(message);
     }
   };
@@ -279,6 +318,26 @@ export default function App() {
       toast.error(message);
     } finally {
       setIsTriggering(false);
+    }
+  };
+
+  const onSaveTtl = async () => {
+    const value = Number(ttlDays);
+    if (Number.isNaN(value) || value < 30 || value > 60) {
+      setTtlError("TTL must be between 30 and 60 days");
+      toast.error("TTL must be between 30 and 60 days");
+      return;
+    }
+    try {
+      const updated = await setFeedItemsTtl(value);
+      setTtlDays(String(updated));
+      setTtlError(null);
+      toast.success("TTL updated");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to update TTL";
+      setTtlError(message);
+      toast.error(message);
     }
   };
 
@@ -322,6 +381,59 @@ export default function App() {
       a.title.localeCompare(b.title),
     );
   }, [sources, filters]);
+
+  const selectedCount = useMemo(
+    () => Object.values(selectedIds).filter(Boolean).length,
+    [selectedIds],
+  );
+
+  const toggleSelected = (id: string, value: boolean) => {
+    setSelectedIds((prev) => ({ ...prev, [id]: value }));
+  };
+
+  const runBatchAction = async (action: "deactivate" | "delete") => {
+    const ids = Object.entries(selectedIds)
+      .filter(([, selected]) => selected)
+      .map(([id]) => id);
+
+    if (!ids.length) {
+      toast.error("Select at least one source");
+      return;
+    }
+
+    setConfirmBatchAction({ action, count: ids.length, ids });
+  };
+
+  const confirmBatch = async () => {
+    if (!confirmBatchAction) {
+      return;
+    }
+    const { action, ids } = confirmBatchAction;
+    try {
+      const updated = await batchSourceAction({ ids, action });
+      if (action === "delete") {
+        setSources((prev) => prev.filter((item) => !ids.includes(item.id)));
+      } else {
+        const updatedMap = new Map(updated.map((item) => [item.id, item]));
+        setSources((prev) =>
+          prev.map((item) => updatedMap.get(item.id) ?? item),
+        );
+      }
+      setSelectedIds({});
+      toast.success(
+        action === "delete"
+          ? "Sources deleted"
+          : "Sources deactivated",
+      );
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to update sources";
+      setError(message);
+      toast.error(message);
+    } finally {
+      setConfirmBatchAction(null);
+    }
+  };
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
@@ -507,11 +619,56 @@ export default function App() {
         </section>
 
         <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+          <h2 className="text-lg font-semibold">Retention</h2>
+          <div className="mt-4 flex flex-wrap items-center gap-4">
+            <input
+              value={ttlDays}
+              onChange={(event) => setTtlDays(event.target.value)}
+              placeholder="30-60"
+              className="w-28 rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
+            />
+            <button
+              onClick={onSaveTtl}
+              className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:border-slate-500"
+            >
+              Save TTL
+            </button>
+            <span className="text-xs text-slate-500">
+              Feed items older than this are deleted daily.
+            </span>
+          </div>
+          {ttlError ? (
+            <p className="mt-2 text-xs text-red-400">{ttlError}</p>
+          ) : null}
+        </section>
+
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold">Sources</h2>
-            {isLoading ? (
-              <span className="text-xs text-slate-400">Loading...</span>
-            ) : null}
+            <div className="flex items-center gap-3">
+              {selectedCount > 0 ? (
+                <span className="text-xs text-slate-400">
+                  {selectedCount} selected
+                </span>
+              ) : null}
+              <button
+                onClick={() => runBatchAction("deactivate")}
+                disabled={selectedCount === 0}
+                className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 transition hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Deactivate selected
+              </button>
+              <button
+                onClick={() => runBatchAction("delete")}
+                disabled={selectedCount === 0}
+                className="rounded-full border border-red-500/60 px-3 py-1 text-xs text-red-200 transition hover:border-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Delete selected
+              </button>
+              {isLoading ? (
+                <span className="text-xs text-slate-400">Loading...</span>
+              ) : null}
+            </div>
           </div>
 
           {error ? (
@@ -540,11 +697,21 @@ export default function App() {
                       key={source.id}
                       className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-950/70 px-4 py-3"
                     >
-                      <div>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(selectedIds[source.id])}
+                          onChange={(event) =>
+                            toggleSelected(source.id, event.target.checked)
+                          }
+                          className="h-4 w-4 accent-emerald-400"
+                        />
+                        <div>
                         <p className="text-sm font-semibold">
                           {source.name ?? "Untitled source"}
                         </p>
                         <p className="text-xs text-slate-400">{source.url}</p>
+                        </div>
                       </div>
                       <div className="flex items-center gap-3">
                         <select
@@ -583,7 +750,7 @@ export default function App() {
                         />
                         <button
                           onClick={() => onSaveChanges(source)}
-                          className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 transition hover:border-slate-500"
+                          className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 transition hover:border-slate-400 hover:text-white"
                         >
                           Save
                         </button>
@@ -591,17 +758,23 @@ export default function App() {
                           onClick={() => onToggle(source)}
                           className={`rounded-full px-3 py-1 text-xs font-semibold ${
                             source.active
-                              ? "bg-emerald-500/20 text-emerald-200"
-                              : "bg-slate-700/40 text-slate-300"
+                              ? "bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30"
+                              : "bg-slate-700/40 text-slate-300 hover:bg-slate-700/60"
                           }`}
                         >
                           {source.active ? "Active" : "Inactive"}
                         </button>
                         <button
                           onClick={() => onDelete(source)}
-                          className="text-xs text-red-300 hover:text-red-200"
+                          className="text-xs text-red-300 hover:text-red-200 hover:underline"
                         >
                           Deactivate
+                        </button>
+                        <button
+                          onClick={() => setConfirmDeleteSource(source)}
+                          className="text-xs text-red-400 hover:text-red-200 hover:underline"
+                        >
+                          Delete
                         </button>
                       </div>
                     </div>
@@ -639,6 +812,61 @@ export default function App() {
                 className="rounded-full bg-red-500/20 px-4 py-2 text-sm font-semibold text-red-200"
               >
                 Deactivate
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {confirmDeleteSource ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-100 shadow-xl">
+            <h3 className="text-lg font-semibold">Delete source</h3>
+            <p className="mt-2 text-sm text-slate-400">
+              Permanently delete{" "}
+              <span className="text-slate-200">
+                {confirmDeleteSource.name ?? confirmDeleteSource.url}
+              </span>
+              ? Feed history will be kept.
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => setConfirmDeleteSource(null)}
+                className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="rounded-full bg-red-500/20 px-4 py-2 text-sm font-semibold text-red-200"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {confirmBatchAction ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-100 shadow-xl">
+            <h3 className="text-lg font-semibold">Confirm batch</h3>
+            <p className="mt-2 text-sm text-slate-400">
+              {confirmBatchAction.action === "delete" ? "Delete" : "Deactivate"}{" "}
+              {confirmBatchAction.count} selected source(s)?
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => setConfirmBatchAction(null)}
+                className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmBatch}
+                className="rounded-full bg-red-500/20 px-4 py-2 text-sm font-semibold text-red-200"
+              >
+                {confirmBatchAction.action === "delete"
+                  ? "Delete"
+                  : "Deactivate"}
               </button>
             </div>
           </div>
