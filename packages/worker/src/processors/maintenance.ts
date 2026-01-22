@@ -72,49 +72,86 @@ const scheduleSourceJobs = async (
 
   const repeatableJobs = await feedQueue.getRepeatableJobs();
   const activeIds = new Set((data ?? []).map((source) => source.id));
+  const repeatableById = new Map(
+    repeatableJobs
+      .filter((job) => job.name === JOB_FEED_PROCESS && job.id)
+      .map((job) => [job.id as string, job]),
+  );
+
+  const desiredJobs = new Map(
+    (data ?? []).map((source) => {
+      const sectorMaxAge = source.sectors?.default_max_age_days;
+      const maxAgeDays = Math.min(
+        15,
+        Math.max(1, source.max_age_days ?? sectorMaxAge ?? 5),
+      );
+      const sectorInterval = source.sectors?.ingest_interval_minutes;
+      const intervalMinutes = clampInterval(
+        source.ingest_interval_minutes ?? sectorInterval ?? globalInterval,
+      );
+
+      return [
+        `feed-process:${source.id}`,
+        {
+          sourceId: source.id,
+          url: source.url,
+          maxAgeDays,
+          intervalMs: intervalMinutes * 60 * 1000,
+        },
+      ];
+    }),
+  );
 
   for (const job of repeatableJobs) {
-    if (job.name !== JOB_FEED_PROCESS) {
+    if (job.name !== JOB_FEED_PROCESS || !job.id) {
       continue;
     }
-    if (job.id && job.id.startsWith("feed-process:")) {
+    if (job.id.startsWith("feed-process:")) {
       const sourceId = job.id.replace("feed-process:", "");
       if (!activeIds.has(sourceId)) {
         await feedQueue.removeRepeatableByKey(job.key);
+        console.info("scheduler: removed inactive repeatable", { sourceId });
       }
     }
   }
 
-  for (const source of data ?? []) {
-    const sectorMaxAge = source.sectors?.default_max_age_days;
-    const maxAgeDays = Math.min(
-      15,
-      Math.max(1, source.max_age_days ?? sectorMaxAge ?? 5),
-    );
-    const sectorInterval = source.sectors?.ingest_interval_minutes;
-    const interval = clampInterval(
-      source.ingest_interval_minutes ?? sectorInterval ?? globalInterval,
-    );
-    const jobId = `feed-process:${source.id}`;
+  for (const [jobId, desired] of desiredJobs) {
+    const existing = repeatableById.get(jobId);
+    const existingEvery = existing?.every ? Number(existing.every) : null;
+    const intervalMatches = existingEvery === desired.intervalMs;
 
-    for (const job of repeatableJobs) {
-      if (job.name === JOB_FEED_PROCESS && job.id === jobId) {
-        await feedQueue.removeRepeatableByKey(job.key);
-      }
+    if (existing && !intervalMatches) {
+      await feedQueue.removeRepeatableByKey(existing.key);
+      console.info("scheduler: rescheduling", {
+        jobId,
+        fromMs: existingEvery,
+        toMs: desired.intervalMs,
+      });
     }
 
-    await feedQueue.add(
-      JOB_FEED_PROCESS,
-      {
-        sourceId: source.id,
-        url: source.url,
-        maxAgeDays,
-      },
-      {
+    if (!existing || !intervalMatches) {
+      await feedQueue.add(
+        JOB_FEED_PROCESS,
+        {
+          sourceId: desired.sourceId,
+          url: desired.url,
+          maxAgeDays: desired.maxAgeDays,
+        },
+        {
+          jobId,
+          repeat: { every: desired.intervalMs },
+        },
+      );
+      console.info("scheduler: scheduled", {
         jobId,
-        repeat: { every: interval * 60 * 1000 },
-      },
-    );
+        intervalMs: desired.intervalMs,
+      });
+    } else {
+      console.info("scheduler: unchanged", {
+        jobId,
+        intervalMs: desired.intervalMs,
+      });
+    }
   }
 };
 

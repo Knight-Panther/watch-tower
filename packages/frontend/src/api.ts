@@ -1,34 +1,10 @@
+import type { Sector, Source } from "@watch-tower/shared";
+
+export type { Sector, Source };
+
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
 const API_KEY = import.meta.env.VITE_API_KEY ?? "";
 const authHeaders = API_KEY ? { "x-api-key": API_KEY } : {};
-
-export type Source = {
-  id: string;
-  url: string;
-  name: string | null;
-  active: boolean;
-  sector_id: string | null;
-  max_age_days: number | null;
-  ingest_interval_minutes: number | null;
-  created_at: string;
-  last_fetched_at: string | null;
-  sectors?: {
-    id: string;
-    name: string;
-    slug: string;
-    default_max_age_days: number;
-    ingest_interval_minutes: number | null;
-  } | null;
-};
-
-export type Sector = {
-  id: string;
-  name: string;
-  slug: string;
-  default_max_age_days: number;
-  ingest_interval_minutes: number | null;
-  created_at: string;
-};
 
 export const listSectors = async (): Promise<Sector[]> => {
   const res = await fetch(`${API_URL}/sectors`, {
