@@ -4,6 +4,7 @@ import { Toaster, toast } from "sonner";
 import {
   createSector,
   createSource,
+  deleteSector,
   deleteSource,
   batchSourceAction,
   getFeedItemsTtl,
@@ -53,7 +54,6 @@ export default function App() {
   }>({});
   const [isTriggering, setIsTriggering] = useState(false);
   const [maxAgeDrafts, setMaxAgeDrafts] = useState<Record<string, string>>({});
-  const [confirmSource, setConfirmSource] = useState<Source | null>(null);
   const [sectorDrafts, setSectorDrafts] = useState<Record<string, string>>({});
   const [filters, setFilters] = useState({ sectorId: "", maxAgeDays: "" });
   const [confirmDeleteSource, setConfirmDeleteSource] = useState<Source | null>(null);
@@ -63,12 +63,14 @@ export default function App() {
     count: number;
     ids: string[];
   } | null>(null);
-  const [ttlDays, setTtlDays] = useState("60");
+  const [ttlDays, setTtlDays] = useState("");
   const [ttlError, setTtlError] = useState<string | null>(null);
-  const [ingestIntervalMinutes, setIngestIntervalMinutes] = useState("15");
+  const [ingestIntervalMinutes, setIngestIntervalMinutes] = useState("");
   const [ingestIntervalError, setIngestIntervalError] = useState<string | null>(null);
   const [sectorIntervalDrafts, setSectorIntervalDrafts] = useState<Record<string, string>>({});
   const [sourceIntervalDrafts, setSourceIntervalDrafts] = useState<Record<string, string>>({});
+  const [sectorMaxAgeDrafts, setSectorMaxAgeDrafts] = useState<Record<string, string>>({});
+  const [confirmSectorDelete, setConfirmSectorDelete] = useState<Sector | null>(null);
 
   const activeCount = useMemo(
     () => sources.filter((source) => source.active).length,
@@ -185,29 +187,6 @@ export default function App() {
     }
   };
 
-  const onDelete = async (source: Source) => {
-    setConfirmSource(source);
-  };
-
-  const confirmDeactivate = async () => {
-    if (!confirmSource) {
-      return;
-    }
-    try {
-      const updated = await updateSource(confirmSource.id, { active: false });
-      setSources((prev) =>
-        prev.map((item) => (item.id === confirmSource.id ? updated : item)),
-      );
-      toast.success("Source deactivated");
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to deactivate source";
-      setError(message);
-      toast.error(message);
-    } finally {
-      setConfirmSource(null);
-    }
-  };
 
   const confirmDelete = async () => {
     if (!confirmDeleteSource) {
@@ -479,6 +458,10 @@ export default function App() {
     setSectorForm(next);
   };
 
+  const onSectorMaxAgeDraftChange = (id: string, value: string) => {
+    setSectorMaxAgeDrafts((prev) => ({ ...prev, [id]: value }));
+  };
+
   const onDeletePermanent = (source: Source) => {
     setConfirmDeleteSource(source);
   };
@@ -527,31 +510,101 @@ export default function App() {
     }
   };
 
-  const onSaveSectorInterval = async (sectorId: string) => {
-    const raw = sectorIntervalDrafts[sectorId] ?? "";
-    const value = raw.trim() === "" ? null : Number(raw);
-    if (value !== null && (Number.isNaN(value) || value < 1 || value > 4320)) {
+  const onSaveSectorSettings = async (sectorId: string) => {
+    const sector = sectors.find((item) => item.id === sectorId);
+    if (!sector) {
+      toast.error("Sector not found");
+      return;
+    }
+
+    const maxAgeRaw =
+      sectorMaxAgeDrafts[sectorId] ?? String(sector.default_max_age_days);
+    const maxAgeValue = Number(maxAgeRaw);
+    if (Number.isNaN(maxAgeValue) || maxAgeValue < 1 || maxAgeValue > 15) {
+      toast.error("Default max age must be between 1 and 15");
+      return;
+    }
+
+    const intervalRaw =
+      sectorIntervalDrafts[sectorId] ??
+      (sector.ingest_interval_minutes === null
+        ? ""
+        : String(sector.ingest_interval_minutes));
+    const intervalValue =
+      intervalRaw.trim() === "" ? null : Number(intervalRaw);
+    if (
+      intervalValue !== null &&
+      (Number.isNaN(intervalValue) || intervalValue < 1 || intervalValue > 4320)
+    ) {
       toast.error("Interval must be between 1 and 4320 minutes");
       return;
     }
+
+    const maxAgeChanged = maxAgeValue !== sector.default_max_age_days;
+    const intervalChanged = intervalValue !== sector.ingest_interval_minutes;
+
+    if (!maxAgeChanged && !intervalChanged) {
+      toast("No changes to save");
+      return;
+    }
+
     try {
       const updated = await updateSector(sectorId, {
-        ingest_interval_minutes: value,
+        default_max_age_days: maxAgeValue,
+        ingest_interval_minutes: intervalValue,
       });
       setSectors((prev) =>
         prev.map((item) => (item.id === sectorId ? updated : item)),
       );
+      setSectorMaxAgeDrafts((prev) => {
+        const next = { ...prev };
+        delete next[sectorId];
+        return next;
+      });
       setSectorIntervalDrafts((prev) => {
         const next = { ...prev };
         delete next[sectorId];
         return next;
       });
-      toast.success("Sector interval updated");
+      if (maxAgeChanged && intervalChanged) {
+        toast.success("Default max age and interval updated");
+      } else if (maxAgeChanged) {
+        toast.success("Default max age updated");
+      } else {
+        toast.success("Interval updated");
+      }
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to update sector";
       setError(message);
       toast.error(message);
+    }
+  };
+
+  const onDeleteSector = (sector: Sector) => {
+    setConfirmSectorDelete(sector);
+  };
+
+  const confirmSectorDeleteAction = async () => {
+    if (!confirmSectorDelete) {
+      return;
+    }
+    try {
+      const deleted = await deleteSector(confirmSectorDelete.id);
+      setSectors((prev) => prev.filter((item) => item.id !== deleted.id));
+      setSources((prev) =>
+        prev.map((item) =>
+          item.sector_id === deleted.id ? { ...item, sector_id: null, sectors: null } : item,
+        ),
+      );
+      toast.success("Sector deleted");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to delete sector";
+      setError(message);
+      toast.error(message);
+    } finally {
+      setConfirmSectorDelete(null);
     }
   };
 
@@ -582,7 +635,6 @@ export default function App() {
               onRefresh={refresh}
               onSubmit={onSubmit}
               onToggle={onToggle}
-              onDelete={onDelete}
               onDeletePermanent={onDeletePermanent}
               onSaveChanges={onSaveChanges}
               onFilterChange={onFilterChange}
@@ -602,8 +654,10 @@ export default function App() {
             <SectorManagement
               sectorForm={sectorForm}
               sectorErrors={sectorErrors}
+              sectors={sectors}
               onCreateSector={onCreateSector}
               onSectorFormChange={onSectorFormChange}
+              onDeleteSector={onDeleteSector}
             />
           }
         />
@@ -616,11 +670,13 @@ export default function App() {
               onSaveIngestInterval={onSaveIngestInterval}
               onIngestIntervalChange={setIngestIntervalMinutes}
               sectors={sectors}
+              sectorMaxAgeDrafts={sectorMaxAgeDrafts}
               sectorIntervalDrafts={sectorIntervalDrafts}
-              onSectorIntervalChange={(id, value) =>
+              onSectorMaxAgeDraftChange={onSectorMaxAgeDraftChange}
+              onSectorIntervalDraftChange={(id, value) =>
                 setSectorIntervalDrafts((prev) => ({ ...prev, [id]: value }))
               }
-              onSaveSectorInterval={onSaveSectorInterval}
+              onSaveSectorSettings={onSaveSectorSettings}
             />
           }
         />
@@ -637,34 +693,6 @@ export default function App() {
         />
       </Routes>
 
-      {confirmSource ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-          <div className="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-100 shadow-xl">
-            <h3 className="text-lg font-semibold">Deactivate source</h3>
-            <p className="mt-2 text-sm text-slate-400">
-              Disable{" "}
-              <span className="text-slate-200">
-                {confirmSource.name ?? confirmSource.url}
-              </span>
-              ?
-            </p>
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                onClick={() => setConfirmSource(null)}
-                className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmDeactivate}
-                className="rounded-full bg-red-500/20 px-4 py-2 text-sm font-semibold text-red-200"
-              >
-                Deactivate
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
       {confirmDeleteSource ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
           <div className="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-100 shadow-xl">
@@ -685,6 +713,32 @@ export default function App() {
               </button>
               <button
                 onClick={confirmDelete}
+                className="rounded-full bg-red-500/20 px-4 py-2 text-sm font-semibold text-red-200"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {confirmSectorDelete ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-100 shadow-xl">
+            <h3 className="text-lg font-semibold">Delete sector</h3>
+            <p className="mt-2 text-sm text-slate-400">
+              Remove{" "}
+              <span className="text-slate-200">{confirmSectorDelete.name}</span>
+              ? Sources will be unassigned.
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => setConfirmSectorDelete(null)}
+                className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmSectorDeleteAction}
                 className="rounded-full bg-red-500/20 px-4 py-2 text-sm font-semibold text-red-200"
               >
                 Delete

@@ -32,7 +32,6 @@ type HomeProps = {
   onRefresh: () => void;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
   onToggle: (source: Source) => void;
-  onDelete: (source: Source) => void;
   onDeletePermanent: (source: Source) => void;
   onSaveChanges: (source: Source) => void;
   onFilterChange: (next: { sectorId: string; maxAgeDays: string }) => void;
@@ -329,78 +328,89 @@ export default function Home(props: HomeProps) {
                         <p className="text-xs text-slate-400">{source.url}</p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <select
-                        value={props.sectorDrafts[source.id] ?? source.sector_id ?? ""}
-                        onChange={(event) =>
-                          props.onSectorDraftChange(source.id, event.target.value)
-                        }
-                        className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
-                      >
-                        <option value="">Unassigned</option>
-                        {props.sectors.map((sector) => (
-                          <option key={sector.id} value={sector.id}>
-                            {sector.name}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        value={
-                          props.maxAgeDrafts[source.id] ??
-                          String(
-                            source.max_age_days ??
-                              source.sectors?.default_max_age_days ??
-                              5,
-                          )
-                        }
-                        onChange={(event) =>
-                          props.onMaxAgeDraftChange(source.id, event.target.value)
-                        }
-                        className="w-20 rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
-                      />
-                      <input
-                        value={
-                          props.sourceIntervalDrafts[source.id] ??
-                          String(
-                            source.ingest_interval_minutes ??
-                              source.sectors?.ingest_interval_minutes ??
-                              Number(props.ingestIntervalMinutes) ??
-                              15,
-                          )
-                        }
-                        onChange={(event) =>
-                          props.onSourceIntervalDraftChange(source.id, event.target.value)
-                        }
-                        className="w-24 rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
-                      />
+                    <div className="flex flex-wrap items-end gap-3">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[10px] uppercase tracking-wide text-slate-500">
+                          Sector
+                        </span>
+                        <select
+                          value={props.sectorDrafts[source.id] ?? source.sector_id ?? ""}
+                          onChange={(event) =>
+                            props.onSectorDraftChange(source.id, event.target.value)
+                          }
+                          className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
+                        >
+                          <option value="">Unassigned</option>
+                          {props.sectors.map((sector) => (
+                            <option key={sector.id} value={sector.id}>
+                              {sector.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[10px] uppercase tracking-wide text-slate-500">
+                          Max age (days)
+                        </span>
+                        <input
+                          value={
+                            props.maxAgeDrafts[source.id] ??
+                            String(
+                              source.max_age_days ??
+                                source.sectors?.default_max_age_days ??
+                                5,
+                            )
+                          }
+                          onChange={(event) =>
+                            props.onMaxAgeDraftChange(source.id, event.target.value)
+                          }
+                          className="w-20 rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[10px] uppercase tracking-wide text-slate-500">
+                          Interval (min)
+                        </span>
+                        <input
+                          value={
+                            props.sourceIntervalDrafts[source.id] ??
+                            String(
+                              source.ingest_interval_minutes ??
+                                source.sectors?.ingest_interval_minutes ??
+                                Number(props.ingestIntervalMinutes) ??
+                                15,
+                            )
+                          }
+                          onChange={(event) =>
+                            props.onSourceIntervalDraftChange(source.id, event.target.value)
+                          }
+                          className="w-24 rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
+                        />
+                      </div>
                       <button
                         onClick={() => props.onSaveChanges(source)}
                         className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 transition hover:border-slate-400 hover:text-white"
                       >
                         Save
                       </button>
-                      <button
-                        onClick={() => props.onToggle(source)}
-                        className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                          source.active
-                            ? "bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30"
-                            : "bg-slate-700/40 text-slate-300 hover:bg-slate-700/60"
-                        }`}
-                      >
-                        {source.active ? "Active" : "Inactive"}
-                      </button>
-                      <button
-                        onClick={() => props.onDelete(source)}
-                        className="text-xs text-red-300 hover:text-red-200 hover:underline"
-                      >
-                        Deactivate
-                      </button>
-                      <button
-                        onClick={() => props.onDeletePermanent(source)}
-                        className="text-xs text-red-400 hover:text-red-200 hover:underline"
-                      >
-                        Delete
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => props.onToggle(source)}
+                          className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                            source.active
+                              ? "bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30"
+                              : "bg-slate-700/40 text-slate-300 hover:bg-slate-700/60"
+                          }`}
+                        >
+                          {source.active ? "Active" : "Inactive"}
+                        </button>
+                        <button
+                          onClick={() => props.onDeletePermanent(source)}
+                          className="text-xs text-red-400 hover:text-red-200 hover:underline"
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}

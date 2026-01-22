@@ -117,4 +117,36 @@ export const registerSectorRoutes = (app: FastifyInstance, deps: ApiDeps) => {
 
     return data;
   });
+
+  app.delete<{
+    Params: { id: string };
+  }>("/sectors/:id", { preHandler: deps.requireApiKey }, async (request, reply) => {
+    const { id } = request.params;
+
+    const { error: clearError } = await deps.supabase
+      .from("rss_sources")
+      .update({ sector_id: null })
+      .eq("sector_id", id);
+
+    if (clearError) {
+      return reply.code(500).send({ error: clearError.message });
+    }
+
+    const { data, error } = await deps.supabase
+      .from("sectors")
+      .delete()
+      .eq("id", id)
+      .select("id,name,slug,default_max_age_days,ingest_interval_minutes,created_at")
+      .maybeSingle();
+
+    if (error) {
+      return reply.code(500).send({ error: error.message });
+    }
+
+    if (!data) {
+      return reply.code(404).send({ error: "Sector not found" });
+    }
+
+    return data;
+  });
 };

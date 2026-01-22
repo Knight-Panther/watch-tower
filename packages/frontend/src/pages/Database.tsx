@@ -22,6 +22,7 @@ export default function Database({ ttlDays, ttlError, onTtlChange, onSaveTtl }: 
         />
         <button
           onClick={onSaveTtl}
+          disabled={!ttlDays.trim()}
           className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:border-slate-500"
         >
           Save TTL

@@ -225,3 +225,15 @@ export const updateSector = async (
   }
   return res.json();
 };
+
+export const deleteSector = async (id: string): Promise<Sector> => {
+  const res = await fetch(`${API_URL}/sectors/${id}`, {
+    method: "DELETE",
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to delete sector");
+  }
+  return res.json();
+};
