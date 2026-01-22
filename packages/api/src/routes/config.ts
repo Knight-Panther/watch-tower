@@ -3,6 +3,53 @@ import type { ApiDeps } from "../server";
 
 export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
   app.get(
+    "/config/ingest-interval",
+    { preHandler: deps.requireApiKey },
+    async (_request, reply) => {
+      const { data, error } = await deps.supabase
+        .from("app_config")
+        .select("value")
+        .eq("key", "ingest_interval_minutes")
+        .single();
+
+      if (error) {
+        return reply.code(500).send({ error: error.message });
+      }
+
+      return { minutes: Number(data?.value ?? 15) };
+    },
+  );
+
+  app.patch<{ Body: { minutes: number } }>(
+    "/config/ingest-interval",
+    { preHandler: deps.requireApiKey },
+    async (request, reply) => {
+      const { minutes } = request.body ?? {};
+      if (!minutes || minutes < 1 || minutes > 4320) {
+        return reply
+          .code(400)
+          .send({ error: "minutes must be between 1 and 4320" });
+      }
+
+      const { data, error } = await deps.supabase
+        .from("app_config")
+        .upsert({
+          key: "ingest_interval_minutes",
+          value: String(minutes),
+          updated_at: new Date().toISOString(),
+        })
+        .select("value")
+        .single();
+
+      if (error) {
+        return reply.code(500).send({ error: error.message });
+      }
+
+      return { minutes: Number(data?.value ?? minutes) };
+    },
+  );
+
+  app.get(
     "/config/feed-items-ttl",
     { preHandler: deps.requireApiKey },
     async (_request, reply) => {

@@ -5,6 +5,7 @@ create table if not exists sectors (
   name text not null unique,
   slug text not null unique,
   default_max_age_days smallint not null default 5 check (default_max_age_days between 1 and 15),
+  ingest_interval_minutes smallint check (ingest_interval_minutes between 1 and 4320),
   created_at timestamptz not null default now()
 );
 
@@ -15,6 +16,7 @@ create table if not exists rss_sources (
   active boolean not null default true,
   sector_id uuid references sectors(id),
   max_age_days smallint check (max_age_days between 1 and 15),
+  ingest_interval_minutes smallint check (ingest_interval_minutes between 1 and 4320),
   created_at timestamptz not null default now(),
   last_fetched_at timestamptz
 );

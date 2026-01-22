@@ -6,12 +6,15 @@ import {
   deleteSource,
   batchSourceAction,
   getFeedItemsTtl,
+  getIngestInterval,
   setFeedItemsTtl,
+  setIngestInterval,
   listSectors,
   listSources,
   runIngest,
   type Sector,
   type Source,
+  updateSector,
   updateSource,
 } from "./api";
 
@@ -20,8 +23,9 @@ const emptySourceForm = {
   name: "",
   sectorId: "",
   maxAgeDays: "",
+  ingestIntervalMinutes: "",
 };
-const emptySectorForm = { name: "", defaultMaxAgeDays: "5" };
+const emptySectorForm = { name: "", defaultMaxAgeDays: "5", ingestIntervalMinutes: "" };
 
 export default function App() {
   const [sources, setSources] = useState<Source[]>([]);
@@ -33,11 +37,13 @@ export default function App() {
     url?: string;
     sectorId?: string;
     maxAgeDays?: string;
+    ingestIntervalMinutes?: string;
   }>({});
   const [sectorForm, setSectorForm] = useState(emptySectorForm);
   const [sectorErrors, setSectorErrors] = useState<{
     name?: string;
     defaultMaxAgeDays?: string;
+    ingestIntervalMinutes?: string;
   }>({});
   const [isTriggering, setIsTriggering] = useState(false);
   const [maxAgeDrafts, setMaxAgeDrafts] = useState<Record<string, string>>({});
@@ -53,6 +59,10 @@ export default function App() {
   } | null>(null);
   const [ttlDays, setTtlDays] = useState("60");
   const [ttlError, setTtlError] = useState<string | null>(null);
+  const [ingestIntervalMinutes, setIngestIntervalMinutes] = useState("15");
+  const [ingestIntervalError, setIngestIntervalError] = useState<string | null>(null);
+  const [sectorIntervalDrafts, setSectorIntervalDrafts] = useState<Record<string, string>>({});
+  const [sourceIntervalDrafts, setSourceIntervalDrafts] = useState<Record<string, string>>({});
 
   const activeCount = useMemo(
     () => sources.filter((source) => source.active).length,
@@ -63,14 +73,16 @@ export default function App() {
     setIsLoading(true);
     setError(null);
     try {
-      const [sourcesData, sectorsData, ttlValue] = await Promise.all([
+      const [sourcesData, sectorsData, ttlValue, ingestIntervalValue] = await Promise.all([
         listSources(),
         listSectors(),
         getFeedItemsTtl(),
+        getIngestInterval(),
       ]);
       setSources(sourcesData);
       setSectors(sectorsData);
       setTtlDays(String(ttlValue));
+      setIngestIntervalMinutes(String(ingestIntervalValue));
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to load sources";
@@ -115,12 +127,27 @@ export default function App() {
       return;
     }
 
+    const intervalRaw = sourceForm.ingestIntervalMinutes.trim();
+    const intervalValue = intervalRaw === "" ? null : Number(intervalRaw);
+    if (
+      intervalValue !== null &&
+      (Number.isNaN(intervalValue) || intervalValue < 1 || intervalValue > 4320)
+    ) {
+      setSourceErrors((prev) => ({
+        ...prev,
+        ingestIntervalMinutes: "Interval must be 1-4320",
+      }));
+      setError("Interval must be between 1 and 4320 minutes");
+      return;
+    }
+
     try {
       const created = await createSource({
         url: sourceForm.url,
         name: sourceForm.name,
         sector_id: sourceForm.sectorId,
         max_age_days: maxAge,
+        ingest_interval_minutes: intervalValue,
       });
       setSources((prev) => [created, ...prev]);
       setSourceForm(emptySourceForm);
@@ -230,7 +257,32 @@ export default function App() {
       maxAgeValue !==
       (source.max_age_days ?? source.sectors?.default_max_age_days ?? 5);
 
-    if (!sectorChanged && !maxAgeChanged) {
+    const intervalValueRaw =
+      sourceIntervalDrafts[source.id] ??
+      String(
+        source.ingest_interval_minutes ??
+          source.sectors?.ingest_interval_minutes ??
+          Number(ingestIntervalMinutes) ??
+          15,
+      );
+    const intervalValue =
+      intervalValueRaw.trim() === "" ? null : Number(intervalValueRaw);
+    if (
+      intervalValue !== null &&
+      (Number.isNaN(intervalValue) || intervalValue < 1 || intervalValue > 4320)
+    ) {
+      setError("Interval must be between 1 and 4320 minutes");
+      toast.error("Interval must be between 1 and 4320 minutes");
+      return;
+    }
+    const intervalChanged =
+      intervalValue !==
+      (source.ingest_interval_minutes ??
+        source.sectors?.ingest_interval_minutes ??
+        Number(ingestIntervalMinutes) ??
+        15);
+
+    if (!sectorChanged && !maxAgeChanged && !intervalChanged) {
       toast("No changes to save");
       return;
     }
@@ -239,6 +291,7 @@ export default function App() {
       const updated = await updateSource(source.id, {
         sector_id: sectorId,
         max_age_days: maxAgeValue,
+        ingest_interval_minutes: intervalValue,
       });
       setSources((prev) =>
         prev.map((item) => (item.id === source.id ? updated : item)),
@@ -250,12 +303,20 @@ export default function App() {
         return next;
       });
 
-      if (sectorChanged && maxAgeChanged) {
+      if (sectorChanged && maxAgeChanged && intervalChanged) {
+        toast.success("Sector, max age, and interval updated");
+      } else if (sectorChanged && maxAgeChanged) {
         toast.success("Sector and max age updated");
+      } else if (sectorChanged && intervalChanged) {
+        toast.success("Sector and interval updated");
+      } else if (maxAgeChanged && intervalChanged) {
+        toast.success("Max age and interval updated");
       } else if (sectorChanged) {
         toast.success("Sector updated");
-      } else {
+      } else if (maxAgeChanged) {
         toast.success("Max age updated");
+      } else {
+        toast.success("Interval updated");
       }
     } catch (err) {
       const message =
@@ -287,10 +348,28 @@ export default function App() {
       return;
     }
 
+    const intervalRaw = sectorForm.ingestIntervalMinutes.trim();
+    const intervalValue =
+      intervalRaw === "" ? null : Number(intervalRaw);
+    if (
+      intervalValue !== null &&
+      (Number.isNaN(intervalValue) ||
+        intervalValue < 1 ||
+        intervalValue > 4320)
+    ) {
+      setSectorErrors((prev) => ({
+        ...prev,
+        ingestIntervalMinutes: "Interval must be 1-4320",
+      }));
+      setError("Interval must be between 1 and 4320 minutes");
+      return;
+    }
+
     try {
       const created = await createSector({
         name: sectorForm.name.trim(),
         default_max_age_days: maxAge,
+        ingest_interval_minutes: intervalValue,
       });
       setSectors((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
       setSectorForm(emptySectorForm);
@@ -337,6 +416,26 @@ export default function App() {
       const message =
         err instanceof Error ? err.message : "Failed to update TTL";
       setTtlError(message);
+      toast.error(message);
+    }
+  };
+
+  const onSaveIngestInterval = async () => {
+    const value = Number(ingestIntervalMinutes);
+    if (Number.isNaN(value) || value < 1 || value > 4320) {
+      setIngestIntervalError("Interval must be between 1 and 4320 minutes");
+      toast.error("Interval must be between 1 and 4320 minutes");
+      return;
+    }
+    try {
+      const updated = await setIngestInterval(value);
+      setIngestIntervalMinutes(String(updated));
+      setIngestIntervalError(null);
+      toast.success("Ingest interval updated");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to update ingest interval";
+      setIngestIntervalError(message);
       toast.error(message);
     }
   };
@@ -525,6 +624,22 @@ export default function App() {
             {sourceErrors.maxAgeDays ? (
               <p className="text-xs text-red-400">{sourceErrors.maxAgeDays}</p>
             ) : null}
+            <input
+              value={sourceForm.ingestIntervalMinutes}
+              onChange={(event) =>
+                setSourceForm((prev) => ({
+                  ...prev,
+                  ingestIntervalMinutes: event.target.value,
+                }))
+              }
+              placeholder="Interval minutes (1-4320, optional)"
+              className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
+            />
+            {sourceErrors.ingestIntervalMinutes ? (
+              <p className="text-xs text-red-400">
+                {sourceErrors.ingestIntervalMinutes}
+              </p>
+            ) : null}
             <div className="md:col-span-2">
               <button
                 type="submit"
@@ -565,6 +680,22 @@ export default function App() {
             {sectorErrors.defaultMaxAgeDays ? (
               <p className="text-xs text-red-400">
                 {sectorErrors.defaultMaxAgeDays}
+              </p>
+            ) : null}
+            <input
+              value={sectorForm.ingestIntervalMinutes}
+              onChange={(event) =>
+                setSectorForm((prev) => ({
+                  ...prev,
+                  ingestIntervalMinutes: event.target.value,
+                }))
+              }
+              placeholder="Interval minutes (1-4320, optional)"
+              className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
+            />
+            {sectorErrors.ingestIntervalMinutes ? (
+              <p className="text-xs text-red-400">
+                {sectorErrors.ingestIntervalMinutes}
               </p>
             ) : null}
             <div className="md:col-span-2">
@@ -615,6 +746,33 @@ export default function App() {
                 Filter max age must be between 1 and 15
               </p>
             ) : null
+          ) : null}
+        </section>
+
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+          <h2 className="text-lg font-semibold">Scheduling</h2>
+          <p className="mt-2 text-xs text-slate-500">
+            Effective interval: source override &gt; sector override &gt; global.
+          </p>
+          <div className="mt-4 flex flex-wrap items-center gap-4">
+            <input
+              value={ingestIntervalMinutes}
+              onChange={(event) => setIngestIntervalMinutes(event.target.value)}
+              placeholder="1-4320 minutes"
+              className="w-40 rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
+            />
+            <button
+              onClick={onSaveIngestInterval}
+              className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:border-slate-500"
+            >
+              Save global interval
+            </button>
+            <span className="text-xs text-slate-500">
+              In minutes (1 min - 3 days).
+            </span>
+          </div>
+          {ingestIntervalError ? (
+            <p className="mt-2 text-xs text-red-400">{ingestIntervalError}</p>
           ) : null}
         </section>
 
@@ -748,6 +906,24 @@ export default function App() {
                           }
                           className="w-20 rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
                         />
+                        <input
+                          value={
+                            sourceIntervalDrafts[source.id] ??
+                            String(
+                              source.ingest_interval_minutes ??
+                                source.sectors?.ingest_interval_minutes ??
+                                Number(ingestIntervalMinutes) ??
+                                15,
+                            )
+                          }
+                          onChange={(event) =>
+                            setSourceIntervalDrafts((prev) => ({
+                              ...prev,
+                              [source.id]: event.target.value,
+                            }))
+                          }
+                          className="w-24 rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
+                        />
                         <button
                           onClick={() => onSaveChanges(source)}
                           className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 transition hover:border-slate-400 hover:text-white"
@@ -784,6 +960,81 @@ export default function App() {
             ))}
             {!isLoading && sources.length === 0 ? (
               <p className="text-sm text-slate-400">No sources yet.</p>
+            ) : null}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+          <h2 className="text-lg font-semibold">Sectors</h2>
+          <div className="mt-4 grid gap-3">
+            {sectors.map((sector) => (
+              <div
+                key={sector.id}
+                className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-950/70 px-4 py-3"
+              >
+                <div>
+                  <p className="text-sm font-semibold">{sector.name}</p>
+                  <p className="text-xs text-slate-400">{sector.slug}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <input
+                    value={
+                      sectorIntervalDrafts[sector.id] ??
+                      String(sector.ingest_interval_minutes ?? "")
+                    }
+                    onChange={(event) =>
+                      setSectorIntervalDrafts((prev) => ({
+                        ...prev,
+                        [sector.id]: event.target.value,
+                      }))
+                    }
+                    placeholder="Interval (min)"
+                    className="w-32 rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
+                  />
+                  <button
+                    onClick={async () => {
+                      const raw = sectorIntervalDrafts[sector.id] ?? "";
+                      const value = raw.trim() === "" ? null : Number(raw);
+                      if (
+                        value !== null &&
+                        (Number.isNaN(value) || value < 1 || value > 4320)
+                      ) {
+                        toast.error("Interval must be between 1 and 4320 minutes");
+                        return;
+                      }
+                      try {
+                        const updated = await updateSector(sector.id, {
+                          ingest_interval_minutes: value,
+                        });
+                        setSectors((prev) =>
+                          prev.map((item) =>
+                            item.id === sector.id ? updated : item,
+                          ),
+                        );
+                        setSectorIntervalDrafts((prev) => {
+                          const next = { ...prev };
+                          delete next[sector.id];
+                          return next;
+                        });
+                        toast.success("Sector interval updated");
+                      } catch (err) {
+                        const message =
+                          err instanceof Error
+                            ? err.message
+                            : "Failed to update sector";
+                        setError(message);
+                        toast.error(message);
+                      }
+                    }}
+                    className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 transition hover:border-slate-400 hover:text-white"
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            ))}
+            {sectors.length === 0 ? (
+              <p className="text-sm text-slate-400">No sectors yet.</p>
             ) : null}
           </div>
         </section>

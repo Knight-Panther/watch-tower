@@ -6,6 +6,7 @@ import {
   createSupabaseClient,
   JOB_INGEST_POLL,
   JOB_MAINTENANCE_CLEANUP,
+  JOB_MAINTENANCE_SCHEDULE,
   QUEUE_FEED,
   QUEUE_INGEST,
   QUEUE_MAINTENANCE,
@@ -61,7 +62,11 @@ const ingestWorker = createIngestWorker({
   feedQueue,
 });
 const feedWorker = createFeedWorker({ connection, supabase });
-const maintenanceWorker = createMaintenanceWorker({ connection, supabase });
+const maintenanceWorker = createMaintenanceWorker({
+  connection,
+  supabase,
+  feedQueue,
+});
 
 ingestWorker.on("failed", (job, err) => {
   console.error(`[ingest] job ${job?.id ?? "unknown"} failed`, err);
@@ -75,14 +80,14 @@ maintenanceWorker.on("failed", (job, err) => {
   console.error(`[maintenance] job ${job?.id ?? "unknown"} failed`, err);
 });
 
-await ingestQueue.add(
-  JOB_INGEST_POLL,
-  {},
-  { repeat: { every: 15 * 60 * 1000 }, jobId: JOB_INGEST_POLL }
-);
-
 await maintenanceQueue.add(
   JOB_MAINTENANCE_CLEANUP,
   {},
   { repeat: { every: 24 * 60 * 60 * 1000 }, jobId: JOB_MAINTENANCE_CLEANUP }
+);
+
+await maintenanceQueue.add(
+  JOB_MAINTENANCE_SCHEDULE,
+  {},
+  { repeat: { every: 10 * 60 * 1000 }, jobId: JOB_MAINTENANCE_SCHEDULE }
 );

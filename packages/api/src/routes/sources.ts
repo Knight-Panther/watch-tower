@@ -9,7 +9,7 @@ export const registerSourceRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     const { data, error } = await deps.supabase
       .from("rss_sources")
       .select(
-        "id,url,name,active,sector_id,max_age_days,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days)",
+        "id,url,name,active,sector_id,max_age_days,ingest_interval_minutes,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days,ingest_interval_minutes)",
       )
       .order("created_at", { ascending: false });
 
@@ -27,9 +27,10 @@ export const registerSourceRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       active?: boolean;
       sector_id?: string;
       max_age_days?: number;
+      ingest_interval_minutes?: number;
     };
   }>("/sources", { preHandler: deps.requireApiKey }, async (request, reply) => {
-    const { url, name, active, sector_id, max_age_days } = request.body ?? {};
+    const { url, name, active, sector_id, max_age_days, ingest_interval_minutes } = request.body ?? {};
 
     if (!url) {
       return reply.code(400).send({ error: "url is required" });
@@ -42,6 +43,14 @@ export const registerSourceRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     if (max_age_days !== undefined && (max_age_days < 1 || max_age_days > 15)) {
       return reply.code(400).send({ error: "max_age_days must be 1-15" });
     }
+    if (
+      ingest_interval_minutes !== undefined &&
+      (ingest_interval_minutes < 1 || ingest_interval_minutes > 4320)
+    ) {
+      return reply
+        .code(400)
+        .send({ error: "ingest_interval_minutes must be 1-4320" });
+    }
 
     const { data, error } = await deps.supabase
       .from("rss_sources")
@@ -51,9 +60,10 @@ export const registerSourceRoutes = (app: FastifyInstance, deps: ApiDeps) => {
         active: active ?? true,
         sector_id: sector_id ?? null,
         max_age_days: max_age_days ?? null,
+        ingest_interval_minutes: ingest_interval_minutes ?? null,
       })
       .select(
-        "id,url,name,active,sector_id,max_age_days,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days)",
+        "id,url,name,active,sector_id,max_age_days,ingest_interval_minutes,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days,ingest_interval_minutes)",
       )
       .single();
 
@@ -89,23 +99,23 @@ export const registerSourceRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       const { id } = request.params;
       const hard = request.query.hard === "true";
 
-      const { data, error } = hard
-        ? await deps.supabase
-            .from("rss_sources")
-            .delete()
-            .eq("id", id)
-            .select(
-              "id,url,name,active,sector_id,max_age_days,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days)",
-            )
-            .single()
-        : await deps.supabase
-            .from("rss_sources")
-            .update({ active: false })
-            .eq("id", id)
-            .select(
-              "id,url,name,active,sector_id,max_age_days,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days)",
-            )
-            .single();
+    const { data, error } = hard
+      ? await deps.supabase
+          .from("rss_sources")
+          .delete()
+          .eq("id", id)
+          .select(
+            "id,url,name,active,sector_id,max_age_days,ingest_interval_minutes,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days,ingest_interval_minutes)",
+          )
+          .single()
+      : await deps.supabase
+          .from("rss_sources")
+          .update({ active: false })
+          .eq("id", id)
+          .select(
+            "id,url,name,active,sector_id,max_age_days,ingest_interval_minutes,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days,ingest_interval_minutes)",
+          )
+          .single();
 
       if (error) {
         return reply.code(500).send({ error: error.message });
@@ -136,7 +146,7 @@ export const registerSourceRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     const { data, error } = await query
       .in("id", ids)
       .select(
-        "id,url,name,active,sector_id,max_age_days,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days)",
+        "id,url,name,active,sector_id,max_age_days,ingest_interval_minutes,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days,ingest_interval_minutes)",
       );
 
     if (error) {
@@ -154,10 +164,11 @@ export const registerSourceRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       active?: boolean;
       sector_id?: string;
       max_age_days?: number | null;
+      ingest_interval_minutes?: number | null;
     };
   }>("/sources/:id", { preHandler: deps.requireApiKey }, async (request, reply) => {
     const { id } = request.params;
-    const { url, name, active, sector_id, max_age_days } = request.body ?? {};
+    const { url, name, active, sector_id, max_age_days, ingest_interval_minutes } = request.body ?? {};
 
     const updates = {
       ...(url ? { url } : {}),
@@ -165,6 +176,9 @@ export const registerSourceRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       ...(active !== undefined ? { active } : {}),
       ...(sector_id !== undefined ? { sector_id } : {}),
       ...(max_age_days !== undefined ? { max_age_days } : {}),
+      ...(ingest_interval_minutes !== undefined
+        ? { ingest_interval_minutes }
+        : {}),
     };
 
     if (Object.keys(updates).length === 0) {
@@ -176,13 +190,18 @@ export const registerSourceRoutes = (app: FastifyInstance, deps: ApiDeps) => {
         return reply.code(400).send({ error: "max_age_days must be 1-15" });
       }
     }
+    if (ingest_interval_minutes !== undefined && ingest_interval_minutes !== null) {
+      if (ingest_interval_minutes < 1 || ingest_interval_minutes > 4320) {
+        return reply.code(400).send({ error: "ingest_interval_minutes must be 1-4320" });
+      }
+    }
 
     const { data, error } = await deps.supabase
       .from("rss_sources")
       .update(updates)
       .eq("id", id)
       .select(
-        "id,url,name,active,sector_id,max_age_days,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days)",
+        "id,url,name,active,sector_id,max_age_days,ingest_interval_minutes,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days,ingest_interval_minutes)",
       )
       .single();
 

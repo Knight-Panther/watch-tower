@@ -5,3 +5,4 @@ export const QUEUE_MAINTENANCE = "maintenance";
 export const JOB_INGEST_POLL = "ingest:poll";
 export const JOB_FEED_PROCESS = "feed:process";
 export const JOB_MAINTENANCE_CLEANUP = "maintenance:cleanup";
+export const JOB_MAINTENANCE_SCHEDULE = "maintenance:schedule";
