@@ -17,7 +17,7 @@ import { registerIngestRoutes } from "./routes/ingest";
 import { registerStatsRoutes } from "./routes/stats";
 import { createRequireApiKey } from "./utils/auth";
 
-dotenv.config({ path: fileURLToPath(new URL("../.env", import.meta.url)) });
+dotenv.config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) });
 
 export type ApiDeps = {
   supabase: ReturnType<typeof createSupabaseClient>;

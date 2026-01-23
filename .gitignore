@@ -1,8 +1,35 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
+
+# Environment files (never commit secrets)
 .env
-.env.*
+.env.local
+.env.*.local
+
+# Supabase local
+supabase/.branches
+supabase/.temp
+
+# OS
 .DS_Store
-.turbo
-coverage/
+Thumbs.db
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# Logs
 *.log
+
+# Coverage
+coverage/
+
+# Turbo
+.turbo
+
+# Misc
+.gemini-clipboard/

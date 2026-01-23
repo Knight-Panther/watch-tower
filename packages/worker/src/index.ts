@@ -15,7 +15,7 @@ import { createIngestWorker } from "./processors/ingest";
 import { createFeedWorker } from "./processors/feed";
 import { createMaintenanceWorker } from "./processors/maintenance";
 
-dotenv.config({ path: fileURLToPath(new URL("../.env", import.meta.url)) });
+dotenv.config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) });
 
 const env = baseEnvSchema.parse(process.env);
 const connection = {
