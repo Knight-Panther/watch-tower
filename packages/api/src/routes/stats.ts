@@ -192,13 +192,10 @@ export const registerStatsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
           name: source.name,
           url: source.url,
           active: source.active,
-          sector: source.sectors
-            ? {
-                id: source.sectors.id,
-                name: source.sectors.name,
-                slug: source.sectors.slug,
-              }
-            : null,
+          sector: (() => {
+            const s = source.sectors as unknown as { id: string; name: string; slug: string } | null;
+            return s ? { id: s.id, name: s.name, slug: s.slug } : null;
+          })(),
           expected_interval_minutes: intervalMinutes,
           last_success_at: lastSuccessAt,
           last_run: latestRun

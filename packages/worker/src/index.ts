@@ -4,14 +4,11 @@ import { Queue } from "bullmq";
 import {
   baseEnvSchema,
   createSupabaseClient,
-  JOB_INGEST_POLL,
   JOB_MAINTENANCE_CLEANUP,
   JOB_MAINTENANCE_SCHEDULE,
   QUEUE_FEED,
-  QUEUE_INGEST,
   QUEUE_MAINTENANCE,
 } from "@watch-tower/shared";
-import { createIngestWorker } from "./processors/ingest";
 import { createFeedWorker } from "./processors/feed";
 import { createMaintenanceWorker } from "./processors/maintenance";
 
@@ -28,39 +25,26 @@ const supabase = createSupabaseClient({
   serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
 });
 
-const ingestQueue = new Queue(QUEUE_INGEST, {
-  connection,
-  defaultJobOptions: {
-    attempts: 3,
-    backoff: { type: "exponential", delay: 2000 },
-    removeOnComplete: 100,
-    removeOnFail: 100,
-  },
-});
 const feedQueue = new Queue(QUEUE_FEED, {
   connection,
   defaultJobOptions: {
     attempts: 3,
     backoff: { type: "exponential", delay: 2000 },
     removeOnComplete: 100,
-    removeOnFail: 100,
-  },
-});
-const maintenanceQueue = new Queue(QUEUE_MAINTENANCE, {
-  connection,
-  defaultJobOptions: {
-    attempts: 3,
-    backoff: { type: "exponential", delay: 2000 },
-    removeOnComplete: 50,
     removeOnFail: 50,
   },
 });
 
-const ingestWorker = createIngestWorker({
+const maintenanceQueue = new Queue(QUEUE_MAINTENANCE, {
   connection,
-  supabase,
-  feedQueue,
+  defaultJobOptions: {
+    attempts: 2,
+    backoff: { type: "exponential", delay: 5000 },
+    removeOnComplete: 20,
+    removeOnFail: 20,
+  },
 });
+
 const feedWorker = createFeedWorker({ connection, supabase });
 const maintenanceWorker = createMaintenanceWorker({
   connection,
@@ -68,18 +52,22 @@ const maintenanceWorker = createMaintenanceWorker({
   feedQueue,
 });
 
-ingestWorker.on("failed", (job, err) => {
-  console.error(`[ingest] job ${job?.id ?? "unknown"} failed`, err);
-});
-
 feedWorker.on("failed", (job, err) => {
-  console.error(`[feed-processing] job ${job?.id ?? "unknown"} failed`, err);
+  console.error(`[feed] job ${job?.id ?? "unknown"} failed`, err.message);
 });
 
 maintenanceWorker.on("failed", (job, err) => {
-  console.error(`[maintenance] job ${job?.id ?? "unknown"} failed`, err);
+  console.error(`[maintenance] job ${job?.id ?? "unknown"} failed`, err.message);
 });
 
+// Clean stale state from previous runs
+await feedQueue.drain();
+await maintenanceQueue.drain();
+await feedQueue.clean(0, 0, "failed");
+await maintenanceQueue.clean(0, 0, "failed");
+console.info("[worker] cleaned stale jobs");
+
+// Set up recurring jobs (BullMQ deduplicates by jobId automatically)
 await maintenanceQueue.add(
   JOB_MAINTENANCE_CLEANUP,
   {},
@@ -89,5 +77,9 @@ await maintenanceQueue.add(
 await maintenanceQueue.add(
   JOB_MAINTENANCE_SCHEDULE,
   {},
-  { repeat: { every: 10 * 60 * 1000 }, jobId: JOB_MAINTENANCE_SCHEDULE }
+  { repeat: { every: 60 * 1000 }, jobId: JOB_MAINTENANCE_SCHEDULE }
 );
+
+// Run scheduler immediately on startup
+await maintenanceQueue.add(JOB_MAINTENANCE_SCHEDULE, {}, { jobId: "schedule-startup" });
+console.info("[worker] started, scheduler will run immediately");

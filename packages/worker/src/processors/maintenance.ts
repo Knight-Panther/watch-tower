@@ -1,12 +1,12 @@
 import { Worker } from "bullmq";
 import {
+  JOB_FEED_PROCESS,
   JOB_MAINTENANCE_CLEANUP,
   JOB_MAINTENANCE_SCHEDULE,
   QUEUE_MAINTENANCE,
 } from "@watch-tower/shared";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Queue } from "bullmq";
-import { JOB_FEED_PROCESS } from "@watch-tower/shared";
 
 type MaintenanceDeps = {
   connection: { host: string; port: number };
@@ -52,13 +52,16 @@ const getFeedFetchRunsTtlHours = async (supabase: SupabaseClient) => {
   return hours;
 };
 
-const clampInterval = (value: number) => Math.min(4320, Math.max(1, value));
-
-const scheduleSourceJobs = async (
+/**
+ * Checks which active sources are due for ingestion and fires one-shot
+ * feed jobs for each. A source is "due" if it has never been successfully
+ * fetched, or if (now - last_success) >= ingest_interval.
+ */
+const runScheduledIngests = async (
   supabase: SupabaseClient,
   feedQueue: Queue,
 ) => {
-  const { data, error } = await supabase
+  const { data: sources, error } = await supabase
     .from("rss_sources")
     .select(
       "id,url,active,ingest_interval_minutes,max_age_days,sectors(default_max_age_days)",
@@ -69,90 +72,70 @@ const scheduleSourceJobs = async (
     throw error;
   }
 
-  const repeatableJobs = await feedQueue.getRepeatableJobs();
-  const activeIds = new Set((data ?? []).map((source) => source.id));
-  const repeatableById = new Map(
-    repeatableJobs
-      .filter((job) => job.name === JOB_FEED_PROCESS && job.id)
-      .map((job) => [job.id as string, job]),
-  );
-
-  const desiredJobs = new Map<
-    string,
-    { sourceId: string; url: string; maxAgeDays: number; intervalMs: number }
-  >();
-
-  for (const source of data ?? []) {
-    if (source.ingest_interval_minutes === null || source.ingest_interval_minutes === undefined) {
-      console.warn("scheduler: missing ingest interval", { sourceId: source.id });
-      continue;
-    }
-
-    const sectorMaxAge = source.sectors?.default_max_age_days;
-    const maxAgeDays = Math.min(
-      15,
-      Math.max(1, source.max_age_days ?? sectorMaxAge ?? 5),
-    );
-    const intervalMinutes = clampInterval(source.ingest_interval_minutes);
-
-    desiredJobs.set(`feed-process:${source.id}`, {
-      sourceId: source.id,
-      url: source.url,
-      maxAgeDays,
-      intervalMs: intervalMinutes * 60 * 1000,
-    });
+  if (!sources || sources.length === 0) {
+    return;
   }
 
-  for (const job of repeatableJobs) {
-    if (job.name !== JOB_FEED_PROCESS || !job.id) {
-      continue;
-    }
-    if (job.id.startsWith("feed-process:")) {
-      const sourceId = job.id.replace("feed-process:", "");
-      if (!activeIds.has(sourceId)) {
-        await feedQueue.removeRepeatableByKey(job.key);
-        console.info("scheduler: removed inactive repeatable", { sourceId });
+  // Get latest successful run for each source
+  const sourceIds = sources.map((s) => s.id);
+  const { data: runs, error: runsError } = await supabase
+    .from("feed_fetch_runs")
+    .select("source_id,finished_at,created_at")
+    .in("source_id", sourceIds)
+    .eq("status", "success")
+    .order("created_at", { ascending: false });
+
+  if (runsError) {
+    throw runsError;
+  }
+
+  const lastSuccessBySource = new Map<string, number>();
+  for (const run of runs ?? []) {
+    if (!lastSuccessBySource.has(run.source_id)) {
+      const ts = Date.parse(run.finished_at ?? run.created_at);
+      if (!Number.isNaN(ts)) {
+        lastSuccessBySource.set(run.source_id, ts);
       }
     }
   }
 
-  for (const [jobId, desired] of desiredJobs) {
-    const existing = repeatableById.get(jobId);
-    const existingEvery = existing?.every ? Number(existing.every) : null;
-    const intervalMatches = existingEvery === desired.intervalMs;
+  const now = Date.now();
+  let fired = 0;
 
-    if (existing && !intervalMatches) {
-      await feedQueue.removeRepeatableByKey(existing.key);
-      console.info("scheduler: rescheduling", {
-        jobId,
-        fromMs: existingEvery,
-        toMs: desired.intervalMs,
-      });
+  for (const source of sources) {
+    const intervalMinutes = source.ingest_interval_minutes;
+    if (!intervalMinutes || intervalMinutes <= 0) {
+      continue;
     }
 
-    if (!existing || !intervalMatches) {
-      await feedQueue.add(
-        JOB_FEED_PROCESS,
-        {
-          sourceId: desired.sourceId,
-          url: desired.url,
-          maxAgeDays: desired.maxAgeDays,
-        },
-        {
-          jobId,
-          repeat: { every: desired.intervalMs },
-        },
-      );
-      console.info("scheduler: scheduled", {
-        jobId,
-        intervalMs: desired.intervalMs,
-      });
-    } else {
-      console.info("scheduler: unchanged", {
-        jobId,
-        intervalMs: desired.intervalMs,
-      });
+    const intervalMs = Math.min(4320, Math.max(1, intervalMinutes)) * 60 * 1000;
+    const lastSuccess = lastSuccessBySource.get(source.id);
+
+    // Source is due if never fetched or interval has elapsed
+    const isDue = !lastSuccess || (now - lastSuccess) >= intervalMs;
+
+    if (!isDue) {
+      continue;
     }
+
+    const sector = source.sectors as unknown as { default_max_age_days: number } | null;
+    const sectorMaxAge = sector?.default_max_age_days;
+    const maxAgeDays = Math.min(
+      15,
+      Math.max(1, source.max_age_days ?? sectorMaxAge ?? 5),
+    );
+
+    await feedQueue.add(JOB_FEED_PROCESS, {
+      sourceId: source.id,
+      url: source.url,
+      maxAgeDays,
+    });
+
+    fired++;
+  }
+
+  if (fired > 0) {
+    console.info(`[scheduler] fired ${fired} feed jobs`);
   }
 };
 
@@ -192,11 +175,13 @@ export const createMaintenanceWorker = ({
         if (runsError) {
           throw runsError;
         }
+
+        console.info("[maintenance] cleanup complete");
         return;
       }
 
       if (job.name === JOB_MAINTENANCE_SCHEDULE) {
-        await scheduleSourceJobs(supabase, feedQueue);
+        await runScheduledIngests(supabase, feedQueue);
         return;
       }
     },

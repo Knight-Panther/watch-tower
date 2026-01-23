@@ -7,7 +7,7 @@ import {
   baseEnvSchema,
   createSupabaseClient,
   QUEUE_FEED,
-  QUEUE_INGEST,
+  QUEUE_MAINTENANCE,
 } from "@watch-tower/shared";
 import { registerHealthRoutes } from "./routes/health";
 import { registerSectorRoutes } from "./routes/sectors";
@@ -21,7 +21,7 @@ dotenv.config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) }
 
 export type ApiDeps = {
   supabase: ReturnType<typeof createSupabaseClient>;
-  ingestQueue: Queue;
+  maintenanceQueue: Queue;
   feedQueue: Queue;
   requireApiKey: ReturnType<typeof createRequireApiKey>;
 };
@@ -37,8 +37,8 @@ export const buildApp = async (): Promise<FastifyInstance> => {
     host: env.REDIS_HOST,
     port: env.REDIS_PORT,
   };
-  const ingestQueue = new Queue(QUEUE_INGEST, { connection: queueConnection });
   const feedQueue = new Queue(QUEUE_FEED, { connection: queueConnection });
+  const maintenanceQueue = new Queue(QUEUE_MAINTENANCE, { connection: queueConnection });
 
   const app = Fastify({ logger: true });
   await app.register(cors, {
@@ -47,7 +47,7 @@ export const buildApp = async (): Promise<FastifyInstance> => {
   });
 
   const requireApiKey = createRequireApiKey(env.API_KEY ?? "");
-  const deps: ApiDeps = { supabase, ingestQueue, feedQueue, requireApiKey };
+  const deps: ApiDeps = { supabase, maintenanceQueue, feedQueue, requireApiKey };
 
   registerHealthRoutes(app);
   registerSectorRoutes(app, deps);

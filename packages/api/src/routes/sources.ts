@@ -78,8 +78,9 @@ export const registerSourceRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     }
 
     if (data?.active) {
+      const sector = data.sectors as unknown as { default_max_age_days: number } | null;
       const maxAge =
-        data.max_age_days ?? data.sectors?.default_max_age_days ?? 5;
+        data.max_age_days ?? sector?.default_max_age_days ?? 5;
       const maxAgeDays = clampMaxAgeDays(maxAge);
       await deps.feedQueue.add(
         JOB_FEED_PROCESS,

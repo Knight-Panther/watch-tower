@@ -1,14 +1,14 @@
 import type { FastifyInstance } from "fastify";
 import type { ApiDeps } from "../server";
-import { JOB_INGEST_POLL } from "@watch-tower/shared";
+import { JOB_MAINTENANCE_SCHEDULE } from "@watch-tower/shared";
 
 export const registerIngestRoutes = (app: FastifyInstance, deps: ApiDeps) => {
   app.post("/ingest/run", { preHandler: deps.requireApiKey }, async (_request, reply) => {
     try {
-      const job = await deps.ingestQueue.add(
-        JOB_INGEST_POLL,
+      const job = await deps.maintenanceQueue.add(
+        JOB_MAINTENANCE_SCHEDULE,
         {},
-        { jobId: `ingest-poll-manual-${Date.now()}` },
+        { jobId: `schedule-manual-${Date.now()}` },
       );
       return { queued: true, jobId: job.id };
     } catch (error) {
