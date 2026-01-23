@@ -14,6 +14,7 @@ import { registerSectorRoutes } from "./routes/sectors";
 import { registerSourceRoutes } from "./routes/sources";
 import { registerConfigRoutes } from "./routes/config";
 import { registerIngestRoutes } from "./routes/ingest";
+import { registerStatsRoutes } from "./routes/stats";
 import { createRequireApiKey } from "./utils/auth";
 
 dotenv.config({ path: fileURLToPath(new URL("../.env", import.meta.url)) });
@@ -53,6 +54,7 @@ export const buildApp = async (): Promise<FastifyInstance> => {
   registerSourceRoutes(app, deps);
   registerConfigRoutes(app, deps);
   registerIngestRoutes(app, deps);
+  registerStatsRoutes(app, deps);
 
   return app;
 };

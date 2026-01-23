@@ -3,6 +3,7 @@ import { ReactNode } from "react";
 
 const navItems = [
   { to: "/", label: "Home" },
+  { to: "/monitoring", label: "Monitoring" },
   { to: "/sectors", label: "Sector Management" },
   { to: "/database", label: "Database" },
 ];

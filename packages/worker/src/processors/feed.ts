@@ -13,6 +13,27 @@ type FeedDeps = {
 
 const parser = new Parser();
 
+const recordFetchRun = async (
+  supabase: SupabaseClient,
+  payload: {
+    source_id: string;
+    status: "success" | "error";
+    started_at: string;
+    finished_at: string;
+    duration_ms: number;
+    item_count?: number;
+    error_message?: string;
+  },
+) => {
+  const { error } = await supabase.from("feed_fetch_runs").insert(payload);
+  if (error) {
+    console.error(
+      `[${payload.source_id}] failed to record fetch run`,
+      error,
+    );
+  }
+};
+
 export const createFeedWorker = ({ connection, supabase }: FeedDeps) =>
   new Worker(
     QUEUE_FEED,
@@ -26,10 +47,20 @@ export const createFeedWorker = ({ connection, supabase }: FeedDeps) =>
         sourceId: string;
         maxAgeDays: number;
       };
+      const startedAt = new Date();
       let feed;
       try {
         feed = await parser.parseURL(url);
       } catch (error) {
+        const finishedAt = new Date();
+        await recordFetchRun(supabase, {
+          source_id: sourceId,
+          status: "error",
+          started_at: startedAt.toISOString(),
+          finished_at: finishedAt.toISOString(),
+          duration_ms: finishedAt.getTime() - startedAt.getTime(),
+          error_message: error instanceof Error ? error.message : String(error),
+        });
         console.error(`[${sourceId}] failed to parse ${url}`, error);
         return;
       }
@@ -62,18 +93,36 @@ export const createFeedWorker = ({ connection, supabase }: FeedDeps) =>
         })
         .filter((item): item is NonNullable<typeof item> => Boolean(item));
 
-      if (itemsToInsert.length === 0) {
-        return;
+      if (itemsToInsert.length > 0) {
+        const { error } = await supabase.from("feed_items").upsert(itemsToInsert, {
+          onConflict: "url",
+          ignoreDuplicates: true,
+        });
+
+        if (error) {
+          const finishedAt = new Date();
+          await recordFetchRun(supabase, {
+            source_id: sourceId,
+            status: "error",
+            started_at: startedAt.toISOString(),
+            finished_at: finishedAt.toISOString(),
+            duration_ms: finishedAt.getTime() - startedAt.getTime(),
+            item_count: itemsToInsert.length,
+            error_message: error.message,
+          });
+          throw error;
+        }
       }
 
-      const { error } = await supabase.from("feed_items").upsert(itemsToInsert, {
-        onConflict: "url",
-        ignoreDuplicates: true,
+      const finishedAt = new Date();
+      await recordFetchRun(supabase, {
+        source_id: sourceId,
+        status: "success",
+        started_at: startedAt.toISOString(),
+        finished_at: finishedAt.toISOString(),
+        duration_ms: finishedAt.getTime() - startedAt.getTime(),
+        item_count: itemsToInsert.length,
       });
-
-      if (error) {
-        throw error;
-      }
 
       console.log(
         `[${sourceId}] upserted ${itemsToInsert.length} items from ${feed.title ?? url}`,

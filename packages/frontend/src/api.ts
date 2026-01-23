@@ -159,6 +159,32 @@ export const setFeedItemsTtl = async (days: number): Promise<number> => {
   return Number(data.days ?? days);
 };
 
+export const getFeedFetchRunsTtl = async (): Promise<number> => {
+  const res = await fetch(`${API_URL}/config/feed-fetch-runs-ttl`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load fetch runs TTL");
+  }
+  const data = await res.json();
+  return Number(data.hours ?? 336);
+};
+
+export const setFeedFetchRunsTtl = async (hours: number): Promise<number> => {
+  const res = await fetch(`${API_URL}/config/feed-fetch-runs-ttl`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify({ hours }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to update fetch runs TTL");
+  }
+  const data = await res.json();
+  return Number(data.hours ?? hours);
+};
+
 export const updateSector = async (
   id: string,
   payload: { default_max_age_days?: number },
@@ -171,6 +197,62 @@ export const updateSector = async (
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || "Failed to update sector");
+  }
+  return res.json();
+};
+
+export type StatsOverview = {
+  total_sources: number;
+  active_sources: number;
+  items_last_24h: number;
+  stale_sources: number;
+  queues: {
+    feed: {
+      waiting: number;
+      active: number;
+      delayed: number;
+      failed: number;
+    };
+  };
+};
+
+export type StatsSource = {
+  id: string;
+  name: string | null;
+  url: string;
+  active: boolean;
+  sector: { id: string; name: string; slug: string } | null;
+  expected_interval_minutes: number | null;
+  last_success_at: string | null;
+  last_run: {
+    status: "success" | "error";
+    started_at: string;
+    finished_at: string | null;
+    duration_ms: number | null;
+    item_count: number | null;
+    error_message: string | null;
+  } | null;
+  is_stale: boolean;
+};
+
+export const getStatsOverview = async (): Promise<StatsOverview> => {
+  const res = await fetch(`${API_URL}/stats/overview`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load stats overview");
+  }
+  return res.json();
+};
+
+export const getStatsSources = async (): Promise<StatsSource[]> => {
+  const res = await fetch(`${API_URL}/stats/sources`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load source stats");
   }
   return res.json();
 };

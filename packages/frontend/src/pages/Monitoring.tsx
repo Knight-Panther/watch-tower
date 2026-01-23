@@ -1,0 +1,341 @@
+import { useMemo, useState } from "react";
+import type { StatsOverview, StatsSource } from "../api";
+
+type MonitoringProps = {
+  overview: StatsOverview | null;
+  sources: StatsSource[];
+  isLoading: boolean;
+  error: string | null;
+  lastUpdated: string | null;
+  onRefresh: () => void;
+  autoRefreshEnabled: boolean;
+  onToggleAutoRefresh: () => void;
+};
+
+type StatusFilter = "all" | "stale" | "error" | "ok";
+
+const formatRelative = (value: string | null) => {
+  if (!value) {
+    return "Never";
+  }
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) {
+    return "Unknown";
+  }
+  const diffMs = Date.now() - timestamp;
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) {
+    return "Just now";
+  }
+  if (diffMin < 60) {
+    return `${diffMin}m ago`;
+  }
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) {
+    return `${diffHours}h ago`;
+  }
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+};
+
+const formatDuration = (value: number | null) => {
+  if (value === null || Number.isNaN(value)) {
+    return "—";
+  }
+  if (value < 1000) {
+    return `${value}ms`;
+  }
+  if (value < 60000) {
+    return `${(value / 1000).toFixed(1)}s`;
+  }
+  return `${Math.round(value / 60000)}m`;
+};
+
+export default function Monitoring({
+  overview,
+  sources,
+  isLoading,
+  error,
+  lastUpdated,
+  onRefresh,
+  autoRefreshEnabled,
+  onToggleAutoRefresh,
+}: MonitoringProps) {
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [activeOnly, setActiveOnly] = useState(true);
+  const [sectorFilter, setSectorFilter] = useState("all");
+  const [search, setSearch] = useState("");
+
+  const sectors = useMemo(() => {
+    const entries = new Map<string, string>();
+    sources.forEach((source) => {
+      if (source.sector) {
+        entries.set(source.sector.id, source.sector.name);
+      }
+    });
+    return Array.from(entries.entries()).sort((a, b) =>
+      a[1].localeCompare(b[1]),
+    );
+  }, [sources]);
+
+  const filteredSources = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return sources.filter((source) => {
+      if (activeOnly && !source.active) {
+        return false;
+      }
+      if (sectorFilter !== "all" && source.sector?.id !== sectorFilter) {
+        return false;
+      }
+      if (statusFilter === "stale" && !source.is_stale) {
+        return false;
+      }
+      if (statusFilter === "error" && source.last_run?.status !== "error") {
+        return false;
+      }
+      if (statusFilter === "ok" && (source.is_stale || source.last_run?.status === "error")) {
+        return false;
+      }
+      if (!query) {
+        return true;
+      }
+      const haystack = `${source.name ?? ""} ${source.url}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [sources, activeOnly, sectorFilter, statusFilter, search]);
+
+  return (
+    <div className="grid gap-4">
+      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-3xl font-semibold tracking-tight">Monitoring</h1>
+            <p className="mt-1 text-sm text-slate-400">
+              Source health, queue pressure, and freshness.
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-slate-500">
+              {lastUpdated ? `Updated ${lastUpdated}` : "Not updated yet"}
+            </span>
+            <button
+              onClick={onToggleAutoRefresh}
+              className={`rounded-full border px-3 py-1 text-xs transition ${
+                autoRefreshEnabled
+                  ? "border-emerald-500/40 text-emerald-200"
+                  : "border-slate-700 text-slate-300"
+              }`}
+            >
+              {autoRefreshEnabled ? "Auto-refresh on" : "Auto-refresh off"}
+            </button>
+            <button
+              onClick={onRefresh}
+              className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:border-slate-500"
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+        {error ? (
+          <p className="mt-3 text-sm text-red-400">{error}</p>
+        ) : null}
+      </section>
+
+      <section className="grid gap-3 md:grid-cols-5">
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Total sources</p>
+          <p className="mt-2 text-2xl font-semibold text-slate-100">
+            {overview?.total_sources ?? "—"}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Active sources</p>
+          <p className="mt-2 text-2xl font-semibold text-slate-100">
+            {overview?.active_sources ?? "—"}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Items 24h</p>
+          <p className="mt-2 text-2xl font-semibold text-slate-100">
+            {overview?.items_last_24h ?? "—"}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Stale sources</p>
+          <p className="mt-2 text-2xl font-semibold text-slate-100">
+            {overview?.stale_sources ?? "—"}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+          <p className="text-xs uppercase tracking-wide text-slate-500">Queue backlog</p>
+          <p className="mt-2 text-sm text-slate-300">
+            W:{overview?.queues.feed.waiting ?? "—"} A:{overview?.queues.feed.active ?? "—"} D:
+            {overview?.queues.feed.delayed ?? "—"} F:
+            <span
+              className={
+                (overview?.queues.feed.failed ?? 0) > 0
+                  ? "text-red-300"
+                  : "text-slate-300"
+              }
+            >
+              {overview?.queues.feed.failed ?? "—"}
+            </span>
+          </p>
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold">Sources</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search name or URL"
+              className="w-52 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 outline-none focus:border-slate-600"
+            />
+            <select
+              value={sectorFilter}
+              onChange={(event) => setSectorFilter(event.target.value)}
+              className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200"
+            >
+              <option value="all">All sectors</option>
+              {sectors.map(([id, name]) => (
+                <option key={id} value={id}>
+                  {name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
+              className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200"
+            >
+              <option value="all">All status</option>
+              <option value="ok">OK</option>
+              <option value="stale">Stale</option>
+              <option value="error">Error</option>
+            </select>
+            <button
+              onClick={() => setActiveOnly((prev) => !prev)}
+              className={`rounded-full border px-3 py-1 text-xs transition ${
+                activeOnly
+                  ? "border-emerald-500/40 text-emerald-200"
+                  : "border-slate-700 text-slate-300"
+              }`}
+            >
+              {activeOnly ? "Active only" : "All sources"}
+            </button>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3">
+          {filteredSources.map((source) => {
+            const statusLabel = source.is_stale
+              ? "Stale"
+              : source.last_run?.status === "error"
+                ? "Error"
+                : "OK";
+            const statusTone = source.is_stale
+              ? "border-amber-500/40 text-amber-200"
+              : source.last_run?.status === "error"
+                ? "border-red-500/40 text-red-200"
+                : "border-emerald-500/40 text-emerald-200";
+            return (
+              <div
+                key={source.id}
+                className={`grid gap-3 rounded-xl border border-slate-800 bg-slate-950/70 p-4 md:grid-cols-[2.2fr,1.2fr,1fr,1fr,1.4fr] ${
+                  source.active ? "" : "opacity-70"
+                }`}
+              >
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className={`rounded-full border px-2 py-0.5 text-[10px] ${statusTone}`}>
+                      {statusLabel}
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      {source.active ? "Active" : "Inactive"}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm font-semibold text-slate-100">
+                    {source.name ?? "Untitled source"}
+                  </p>
+                  <p className="text-xs text-slate-400">{source.url}</p>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Sector: {source.sector?.name ?? "Unassigned"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                    Interval
+                  </p>
+                  <p className="mt-2 text-sm text-slate-200">
+                    {source.expected_interval_minutes ?? "—"} min
+                  </p>
+                  <p className="mt-2 text-[10px] uppercase tracking-wide text-slate-500">
+                    Last success
+                  </p>
+                  <p className="mt-1 text-xs text-slate-300">
+                    {formatRelative(source.last_success_at)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                    Last run
+                  </p>
+                  <p className="mt-2 text-xs text-slate-300">
+                    {source.last_run
+                      ? formatRelative(source.last_run.finished_at ?? source.last_run.started_at)
+                      : "Never"}
+                  </p>
+                  <p className="mt-2 text-[10px] uppercase tracking-wide text-slate-500">
+                    Duration
+                  </p>
+                  <p className="mt-1 text-xs text-slate-300">
+                    {source.last_run ? formatDuration(source.last_run.duration_ms) : "—"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                    Items
+                  </p>
+                  <p className="mt-2 text-sm text-slate-200">
+                    {source.last_run?.item_count ?? "—"}
+                  </p>
+                  <p className="mt-2 text-[10px] uppercase tracking-wide text-slate-500">
+                    Error
+                  </p>
+                  <p className="mt-1 text-xs text-slate-300 line-clamp-2">
+                    {source.last_run?.status === "error"
+                      ? source.last_run.error_message ?? "Unknown error"
+                      : "—"}
+                  </p>
+                </div>
+                <div className="flex flex-col justify-between gap-2">
+                  <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                    Last update
+                  </p>
+                  <p className="text-xs text-slate-300">
+                    {source.last_run?.finished_at
+                      ? new Date(source.last_run.finished_at).toLocaleString()
+                      : "—"}
+                  </p>
+                  <div className="mt-2 rounded-xl border border-slate-800 bg-slate-900/60 p-2 text-[11px] text-slate-400">
+                    {source.last_run
+                      ? `Status: ${source.last_run.status}`
+                      : "No runs yet"}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          {filteredSources.length === 0 && !isLoading ? (
+            <p className="text-sm text-slate-400">No sources match the filters.</p>
+          ) : null}
+          {isLoading ? (
+            <p className="text-sm text-slate-400">Loading monitoring data...</p>
+          ) : null}
+        </div>
+      </section>
+    </div>
+  );
+}

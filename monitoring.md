@@ -43,7 +43,7 @@ Indexes:
 - `created_at` (to support TTL cleanup)
 
 Config:
-- Add `feed_fetch_runs_ttl_days` to `app_config` with a default (e.g., 14).
+- Add `feed_fetch_runs_ttl_hours` to `app_config` with a default (e.g., 336).
 - Allow override via `.env` if desired, or rely on `app_config` only.
 
 ## Backend Implementation Steps
@@ -66,8 +66,8 @@ This is the only place that reflects real ingestion, so it must own telemetry.
 
 ### 2) TTL cleanup in maintenance job
 File: `packages/worker/src/processors/maintenance.ts`
-- Add a new config fetch for `feed_fetch_runs_ttl_days`.
-- In `maintenance:cleanup`, delete rows older than `ttl_days`.
+- Add a new config fetch for `feed_fetch_runs_ttl_hours`.
+- In `maintenance:cleanup`, delete rows older than `ttl_hours`.
 
 Example behavior:
 - `ttl_days = 14` keeps two weeks of runs.
@@ -141,7 +141,7 @@ Simple rule to start:
 - show badge: OK / Stale / Error
 
 ## Practical Defaults
-- `feed_fetch_runs_ttl_days`: 14
+- `feed_fetch_runs_ttl_hours`: 336
 - Stale threshold: 2x expected interval
 - Polling: 60 seconds
 

@@ -33,6 +33,25 @@ const getFeedItemsTtlDays = async (supabase: SupabaseClient) => {
   return days;
 };
 
+const getFeedFetchRunsTtlHours = async (supabase: SupabaseClient) => {
+  const { data, error } = await supabase
+    .from("app_config")
+    .select("value")
+    .eq("key", "feed_fetch_runs_ttl_hours")
+    .single();
+
+  if (error) {
+    return 336;
+  }
+
+  const hours = Number(data?.value ?? 336);
+  if (Number.isNaN(hours) || hours <= 0 || hours > 2160) {
+    return 336;
+  }
+
+  return hours;
+};
+
 const clampInterval = (value: number) => Math.min(4320, Math.max(1, value));
 
 const scheduleSourceJobs = async (
@@ -158,6 +177,20 @@ export const createMaintenanceWorker = ({
 
         if (error) {
           throw error;
+        }
+
+        const runsTtlHours = await getFeedFetchRunsTtlHours(supabase);
+        const runsCutoff = new Date(
+          Date.now() - runsTtlHours * 60 * 60 * 1000,
+        ).toISOString();
+
+        const { error: runsError } = await supabase
+          .from("feed_fetch_runs")
+          .delete()
+          .lt("created_at", runsCutoff);
+
+        if (runsError) {
+          throw runsError;
         }
         return;
       }

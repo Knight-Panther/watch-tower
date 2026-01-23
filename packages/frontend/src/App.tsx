@@ -8,17 +8,24 @@ import {
   deleteSource,
   batchSourceAction,
   getFeedItemsTtl,
+  getFeedFetchRunsTtl,
   setFeedItemsTtl,
+  setFeedFetchRunsTtl,
   listSectors,
   listSources,
   runIngest,
   type Sector,
   type Source,
   updateSector,
+  getStatsOverview,
+  getStatsSources,
   updateSource,
+  type StatsOverview,
+  type StatsSource,
 } from "./api";
 import Layout from "./components/Layout";
 import Database from "./pages/Database";
+import Monitoring from "./pages/Monitoring";
 import Home from "./pages/Home";
 import SectorManagement from "./pages/SectorManagement";
 
@@ -61,9 +68,18 @@ export default function App() {
   } | null>(null);
   const [ttlDays, setTtlDays] = useState("");
   const [ttlError, setTtlError] = useState<string | null>(null);
+  const [fetchRunsTtlValue, setFetchRunsTtlValue] = useState("");
+  const [fetchRunsTtlUnit, setFetchRunsTtlUnit] = useState<"hours" | "days">("days");
+  const [fetchRunsTtlError, setFetchRunsTtlError] = useState<string | null>(null);
   const [sourceIntervalDrafts, setSourceIntervalDrafts] = useState<Record<string, string>>({});
   const [sectorMaxAgeDrafts, setSectorMaxAgeDrafts] = useState<Record<string, string>>({});
   const [confirmSectorDelete, setConfirmSectorDelete] = useState<Sector | null>(null);
+  const [statsOverview, setStatsOverview] = useState<StatsOverview | null>(null);
+  const [statsSources, setStatsSources] = useState<StatsSource[]>([]);
+  const [statsError, setStatsError] = useState<string | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsUpdatedAt, setStatsUpdatedAt] = useState<string | null>(null);
+  const [statsAutoRefresh, setStatsAutoRefresh] = useState(true);
 
   const activeCount = useMemo(
     () => sources.filter((source) => source.active).length,
@@ -74,14 +90,25 @@ export default function App() {
     setIsLoading(true);
     setError(null);
     try {
-      const [sourcesData, sectorsData, ttlValue] = await Promise.all([
+      const [sourcesData, sectorsData, ttlValue, fetchRunsTtlHours] = await Promise.all([
         listSources(),
         listSectors(),
         getFeedItemsTtl(),
+        getFeedFetchRunsTtl(),
       ]);
       setSources(sourcesData);
       setSectors(sectorsData);
       setTtlDays(String(ttlValue));
+      if (Number.isNaN(fetchRunsTtlHours)) {
+        setFetchRunsTtlUnit("days");
+        setFetchRunsTtlValue("14");
+      } else if (fetchRunsTtlHours % 24 === 0) {
+        setFetchRunsTtlUnit("days");
+        setFetchRunsTtlValue(String(fetchRunsTtlHours / 24));
+      } else {
+        setFetchRunsTtlUnit("hours");
+        setFetchRunsTtlValue(String(fetchRunsTtlHours));
+      }
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to load sources";
@@ -95,6 +122,20 @@ export default function App() {
   useEffect(() => {
     refresh();
   }, []);
+
+  useEffect(() => {
+    refreshStats();
+  }, []);
+
+  useEffect(() => {
+    if (!statsAutoRefresh) {
+      return;
+    }
+    const interval = setInterval(() => {
+      refreshStats();
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, [statsAutoRefresh]);
 
   const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -375,6 +416,54 @@ export default function App() {
     }
   };
 
+  const onFetchRunsTtlUnitChange = (nextUnit: "hours" | "days") => {
+    if (nextUnit === fetchRunsTtlUnit) {
+      return;
+    }
+    const rawValue = Number(fetchRunsTtlValue);
+    if (!Number.isNaN(rawValue)) {
+      const nextValue =
+        nextUnit === "days" ? rawValue / 24 : rawValue * 24;
+      setFetchRunsTtlValue(String(nextValue));
+    }
+    setFetchRunsTtlUnit(nextUnit);
+  };
+
+  const onSaveFetchRunsTtl = async () => {
+    const rawValue = Number(fetchRunsTtlValue);
+    if (Number.isNaN(rawValue) || rawValue <= 0) {
+      setFetchRunsTtlError("TTL must be greater than 0");
+      toast.error("TTL must be greater than 0");
+      return;
+    }
+
+    const hours =
+      fetchRunsTtlUnit === "days" ? rawValue * 24 : rawValue;
+    if (hours > 2160) {
+      setFetchRunsTtlError("TTL must be 90 days or less");
+      toast.error("TTL must be 90 days or less");
+      return;
+    }
+
+    try {
+      const updated = await setFeedFetchRunsTtl(hours);
+      if (updated % 24 === 0) {
+        setFetchRunsTtlUnit("days");
+        setFetchRunsTtlValue(String(updated / 24));
+      } else {
+        setFetchRunsTtlUnit("hours");
+        setFetchRunsTtlValue(String(updated));
+      }
+      setFetchRunsTtlError(null);
+      toast.success("Fetch runs TTL updated");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to update fetch runs TTL";
+      setFetchRunsTtlError(message);
+      toast.error(message);
+    }
+  };
+
   const selectedCount = useMemo(
     () => Object.values(selectedIds).filter(Boolean).length,
     [selectedIds],
@@ -507,6 +596,26 @@ export default function App() {
     setConfirmSectorDelete(sector);
   };
 
+  const refreshStats = async () => {
+    setStatsLoading(true);
+    setStatsError(null);
+    try {
+      const [overview, sourcesData] = await Promise.all([
+        getStatsOverview(),
+        getStatsSources(),
+      ]);
+      setStatsOverview(overview);
+      setStatsSources(sourcesData);
+      setStatsUpdatedAt(new Date().toLocaleTimeString());
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to load monitoring stats";
+      setStatsError(message);
+    } finally {
+      setStatsLoading(false);
+    }
+  };
+
   const confirmSectorDeleteAction = async () => {
     if (!confirmSectorDelete) {
       return;
@@ -590,6 +699,27 @@ export default function App() {
               ttlError={ttlError}
               onTtlChange={setTtlDays}
               onSaveTtl={onSaveTtl}
+              fetchRunsTtlValue={fetchRunsTtlValue}
+              fetchRunsTtlUnit={fetchRunsTtlUnit}
+              fetchRunsTtlError={fetchRunsTtlError}
+              onFetchRunsTtlChange={setFetchRunsTtlValue}
+              onFetchRunsTtlUnitChange={onFetchRunsTtlUnitChange}
+              onSaveFetchRunsTtl={onSaveFetchRunsTtl}
+            />
+          }
+        />
+        <Route
+          path="/monitoring"
+          element={
+            <Monitoring
+              overview={statsOverview}
+              sources={statsSources}
+              isLoading={statsLoading}
+              error={statsError}
+              lastUpdated={statsUpdatedAt}
+              onRefresh={refreshStats}
+              autoRefreshEnabled={statsAutoRefresh}
+              onToggleAutoRefresh={() => setStatsAutoRefresh((prev) => !prev)}
             />
           }
         />
