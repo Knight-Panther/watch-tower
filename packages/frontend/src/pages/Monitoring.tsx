@@ -294,10 +294,16 @@ export default function Monitoring({
                     {source.last_run ? formatDuration(source.last_run.duration_ms) : "-"}
                   </span>
                   <span className="text-[10px] uppercase tracking-wide text-slate-500">
-                    Items
+                    Item Count
                   </span>
                   <span className="text-slate-200">
                     {source.last_run?.item_count ?? "-"}
+                  </span>
+                  <span className="text-[10px] uppercase tracking-wide text-slate-500">
+                    Items Added
+                  </span>
+                  <span className="text-slate-200">
+                    {source.last_run?.item_added ?? "-"}
                   </span>
                   <span className="text-[10px] uppercase tracking-wide text-slate-500">
                     Error

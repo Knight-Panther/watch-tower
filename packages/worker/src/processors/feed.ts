@@ -22,6 +22,7 @@ const recordFetchRun = async (
     finished_at: string;
     duration_ms: number;
     item_count?: number;
+    item_added?: number;
     error_message?: string;
   },
 ) => {
@@ -93,11 +94,15 @@ export const createFeedWorker = ({ connection, supabase }: FeedDeps) =>
         })
         .filter((item): item is NonNullable<typeof item> => Boolean(item));
 
+      let itemAdded = 0;
       if (itemsToInsert.length > 0) {
-        const { error } = await supabase.from("feed_items").upsert(itemsToInsert, {
-          onConflict: "url",
-          ignoreDuplicates: true,
-        });
+        const { data: inserted, error } = await supabase
+          .from("feed_items")
+          .upsert(itemsToInsert, {
+            onConflict: "url",
+            ignoreDuplicates: true,
+          })
+          .select("id");
 
         if (error) {
           const finishedAt = new Date();
@@ -112,6 +117,7 @@ export const createFeedWorker = ({ connection, supabase }: FeedDeps) =>
           });
           throw error;
         }
+        itemAdded = inserted?.length ?? 0;
       }
 
       const finishedAt = new Date();
@@ -122,10 +128,11 @@ export const createFeedWorker = ({ connection, supabase }: FeedDeps) =>
         finished_at: finishedAt.toISOString(),
         duration_ms: finishedAt.getTime() - startedAt.getTime(),
         item_count: itemsToInsert.length,
+        item_added: itemAdded,
       });
 
       console.log(
-        `[${sourceId}] upserted ${itemsToInsert.length} items from ${feed.title ?? url}`,
+        `[${sourceId}] parsed ${itemsToInsert.length}, added ${itemAdded} new from ${feed.title ?? url}`,
       );
     },
     { connection },

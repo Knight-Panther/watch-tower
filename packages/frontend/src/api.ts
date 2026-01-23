@@ -230,6 +230,7 @@ export type StatsSource = {
     finished_at: string | null;
     duration_ms: number | null;
     item_count: number | null;
+    item_added: number | null;
     error_message: string | null;
   } | null;
   is_stale: boolean;

@@ -8,6 +8,7 @@ type FetchRunRow = {
   finished_at: string | null;
   duration_ms: number | null;
   item_count: number | null;
+  item_added: number | null;
   error_message: string | null;
   created_at: string;
 };
@@ -66,7 +67,7 @@ export const registerStatsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
         const { data: runs, error: runsError } = await deps.supabase
           .from("feed_fetch_runs")
           .select(
-            "source_id,status,started_at,finished_at,duration_ms,item_count,error_message,created_at",
+            "source_id,status,started_at,finished_at,duration_ms,item_count,item_added,error_message,created_at",
           )
           .in("source_id", sourceIds)
           .eq("status", "success")
@@ -145,7 +146,7 @@ export const registerStatsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
         const { data: runs, error: runsError } = await deps.supabase
           .from("feed_fetch_runs")
           .select(
-            "source_id,status,started_at,finished_at,duration_ms,item_count,error_message,created_at",
+            "source_id,status,started_at,finished_at,duration_ms,item_count,item_added,error_message,created_at",
           )
           .in("source_id", sourceIds)
           .order("created_at", { ascending: false });
@@ -207,6 +208,7 @@ export const registerStatsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
                 finished_at: latestRun.finished_at,
                 duration_ms: latestRun.duration_ms,
                 item_count: latestRun.item_count,
+                item_added: latestRun.item_added,
                 error_message: latestRun.error_message,
               }
             : null,
