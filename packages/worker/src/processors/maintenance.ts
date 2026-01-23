@@ -76,25 +76,24 @@ const runScheduledIngests = async (
     return;
   }
 
-  // Get latest successful run for each source
+  // Get latest run (any status) for each source
   const sourceIds = sources.map((s) => s.id);
   const { data: runs, error: runsError } = await supabase
     .from("feed_fetch_runs")
     .select("source_id,finished_at,created_at")
     .in("source_id", sourceIds)
-    .eq("status", "success")
     .order("created_at", { ascending: false });
 
   if (runsError) {
     throw runsError;
   }
 
-  const lastSuccessBySource = new Map<string, number>();
+  const lastRunBySource = new Map<string, number>();
   for (const run of runs ?? []) {
-    if (!lastSuccessBySource.has(run.source_id)) {
+    if (!lastRunBySource.has(run.source_id)) {
       const ts = Date.parse(run.finished_at ?? run.created_at);
       if (!Number.isNaN(ts)) {
-        lastSuccessBySource.set(run.source_id, ts);
+        lastRunBySource.set(run.source_id, ts);
       }
     }
   }
@@ -109,10 +108,10 @@ const runScheduledIngests = async (
     }
 
     const intervalMs = Math.min(4320, Math.max(1, intervalMinutes)) * 60 * 1000;
-    const lastSuccess = lastSuccessBySource.get(source.id);
+    const lastRun = lastRunBySource.get(source.id);
 
-    // Source is due if never fetched or interval has elapsed
-    const isDue = !lastSuccess || (now - lastSuccess) >= intervalMs;
+    // Source is due if never fetched or interval has elapsed since last attempt
+    const isDue = !lastRun || (now - lastRun) >= intervalMs;
 
     if (!isDue) {
       continue;
