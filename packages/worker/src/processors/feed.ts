@@ -11,7 +11,9 @@ type FeedDeps = {
   supabase: SupabaseClient;
 };
 
-const parser = new Parser();
+const parser = new Parser({
+  timeout: 15000,
+});
 
 const recordFetchRun = async (
   supabase: SupabaseClient,
@@ -115,7 +117,8 @@ export const createFeedWorker = ({ connection, supabase }: FeedDeps) =>
             item_count: itemsToInsert.length,
             error_message: error.message,
           });
-          throw error;
+          console.error(`[${sourceId}] upsert failed`, error.message);
+          return;
         }
         itemAdded = inserted?.length ?? 0;
       }
@@ -135,5 +138,5 @@ export const createFeedWorker = ({ connection, supabase }: FeedDeps) =>
         `[${sourceId}] parsed ${itemsToInsert.length}, added ${itemAdded} new from ${feed.title ?? url}`,
       );
     },
-    { connection },
+    { connection, concurrency: 5 },
   );

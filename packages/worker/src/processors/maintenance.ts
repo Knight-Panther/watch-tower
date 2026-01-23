@@ -76,12 +76,14 @@ const runScheduledIngests = async (
     return;
   }
 
-  // Get latest run (any status) for each source
+  // Get latest run (any status) for each source, bounded to last 7 days
   const sourceIds = sources.map((s) => s.id);
+  const lookbackCutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const { data: runs, error: runsError } = await supabase
     .from("feed_fetch_runs")
     .select("source_id,finished_at,created_at")
     .in("source_id", sourceIds)
+    .gte("created_at", lookbackCutoff)
     .order("created_at", { ascending: false });
 
   if (runsError) {

@@ -60,12 +60,10 @@ maintenanceWorker.on("failed", (job, err) => {
   console.error(`[maintenance] job ${job?.id ?? "unknown"} failed`, err.message);
 });
 
-// Clean stale state from previous runs
-await feedQueue.drain();
-await maintenanceQueue.drain();
+// Clean failed jobs from previous runs (waiting jobs are preserved)
 await feedQueue.clean(0, 0, "failed");
 await maintenanceQueue.clean(0, 0, "failed");
-console.info("[worker] cleaned stale jobs");
+console.info("[worker] cleaned failed jobs");
 
 // Set up recurring jobs (BullMQ deduplicates by jobId automatically)
 await maintenanceQueue.add(
@@ -83,3 +81,17 @@ await maintenanceQueue.add(
 // Run scheduler immediately on startup
 await maintenanceQueue.add(JOB_MAINTENANCE_SCHEDULE, {}, { jobId: "schedule-startup" });
 console.info("[worker] started, scheduler will run immediately");
+
+// Graceful shutdown: finish in-flight jobs, then close connections
+const shutdown = async () => {
+  console.info("[worker] shutting down...");
+  await feedWorker.close();
+  await maintenanceWorker.close();
+  await feedQueue.close();
+  await maintenanceQueue.close();
+  console.info("[worker] shutdown complete");
+  process.exit(0);
+};
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
