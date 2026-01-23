@@ -4,12 +4,10 @@ type SectorManagementProps = {
   sectorForm: {
     name: string;
     defaultMaxAgeDays: string;
-    ingestIntervalMinutes: string;
   };
   sectorErrors: {
     name?: string;
     defaultMaxAgeDays?: string;
-    ingestIntervalMinutes?: string;
   };
   sectors: Sector[];
   onCreateSector: (event: React.FormEvent<HTMLFormElement>) => void;
@@ -65,22 +63,6 @@ export default function SectorManagement({
               {sectorErrors.defaultMaxAgeDays}
             </p>
           ) : null}
-          <input
-            value={sectorForm.ingestIntervalMinutes}
-            onChange={(event) =>
-              onSectorFormChange({
-                ...sectorForm,
-                ingestIntervalMinutes: event.target.value,
-              })
-            }
-            placeholder="Interval minutes (1-4320, optional)"
-            className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
-          />
-          {sectorErrors.ingestIntervalMinutes ? (
-            <p className="text-xs text-red-400">
-              {sectorErrors.ingestIntervalMinutes}
-            </p>
-          ) : null}
           <div className="md:col-span-2">
             <button
               type="submit"
@@ -109,9 +91,6 @@ export default function SectorManagement({
               </div>
               <div className="flex flex-wrap items-center gap-4 text-xs text-slate-300">
                 <span>Default max age: {sector.default_max_age_days} days</span>
-                <span>
-                  Interval override: {sector.ingest_interval_minutes ?? "None"}
-                </span>
                 <button
                   onClick={() => onDeleteSector(sector)}
                   className="text-xs text-red-300 hover:text-red-200 hover:underline"

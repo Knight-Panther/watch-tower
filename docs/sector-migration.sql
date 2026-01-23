@@ -14,6 +14,3 @@ alter table rss_sources
   add column if not exists ingest_interval_minutes smallint check (ingest_interval_minutes between 1 and 4320);
 
 create unique index if not exists rss_sources_url_unique on rss_sources (url);
-
-alter table sectors
-  add column if not exists ingest_interval_minutes smallint check (ingest_interval_minutes between 1 and 4320);

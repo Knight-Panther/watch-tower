@@ -33,36 +33,16 @@ const getFeedItemsTtlDays = async (supabase: SupabaseClient) => {
   return days;
 };
 
-const getGlobalIngestInterval = async (supabase: SupabaseClient) => {
-  const { data, error } = await supabase
-    .from("app_config")
-    .select("value")
-    .eq("key", "ingest_interval_minutes")
-    .single();
-
-  if (error) {
-    return 15;
-  }
-
-  const minutes = Number(data?.value ?? 15);
-  if (Number.isNaN(minutes) || minutes < 1 || minutes > 4320) {
-    return 15;
-  }
-
-  return minutes;
-};
-
 const clampInterval = (value: number) => Math.min(4320, Math.max(1, value));
 
 const scheduleSourceJobs = async (
   supabase: SupabaseClient,
   feedQueue: Queue,
 ) => {
-  const globalInterval = await getGlobalIngestInterval(supabase);
   const { data, error } = await supabase
     .from("rss_sources")
     .select(
-      "id,url,active,ingest_interval_minutes,max_age_days,sectors(default_max_age_days,ingest_interval_minutes)",
+      "id,url,active,ingest_interval_minutes,max_age_days,sectors(default_max_age_days)",
     )
     .eq("active", true);
 
@@ -78,29 +58,31 @@ const scheduleSourceJobs = async (
       .map((job) => [job.id as string, job]),
   );
 
-  const desiredJobs = new Map(
-    (data ?? []).map((source) => {
-      const sectorMaxAge = source.sectors?.default_max_age_days;
-      const maxAgeDays = Math.min(
-        15,
-        Math.max(1, source.max_age_days ?? sectorMaxAge ?? 5),
-      );
-      const sectorInterval = source.sectors?.ingest_interval_minutes;
-      const intervalMinutes = clampInterval(
-        source.ingest_interval_minutes ?? sectorInterval ?? globalInterval,
-      );
+  const desiredJobs = new Map<
+    string,
+    { sourceId: string; url: string; maxAgeDays: number; intervalMs: number }
+  >();
 
-      return [
-        `feed-process:${source.id}`,
-        {
-          sourceId: source.id,
-          url: source.url,
-          maxAgeDays,
-          intervalMs: intervalMinutes * 60 * 1000,
-        },
-      ];
-    }),
-  );
+  for (const source of data ?? []) {
+    if (source.ingest_interval_minutes === null || source.ingest_interval_minutes === undefined) {
+      console.warn("scheduler: missing ingest interval", { sourceId: source.id });
+      continue;
+    }
+
+    const sectorMaxAge = source.sectors?.default_max_age_days;
+    const maxAgeDays = Math.min(
+      15,
+      Math.max(1, source.max_age_days ?? sectorMaxAge ?? 5),
+    );
+    const intervalMinutes = clampInterval(source.ingest_interval_minutes);
+
+    desiredJobs.set(`feed-process:${source.id}`, {
+      sourceId: source.id,
+      url: source.url,
+      maxAgeDays,
+      intervalMs: intervalMinutes * 60 * 1000,
+    });
+  }
 
   for (const job of repeatableJobs) {
     if (job.name !== JOB_FEED_PROCESS || !job.id) {

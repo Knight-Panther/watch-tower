@@ -27,7 +27,6 @@ type HomeProps = {
   selectedCount: number;
   selectedIds: Record<string, boolean>;
   isTriggering: boolean;
-  ingestIntervalMinutes: string;
   onRunIngest: () => void;
   onRefresh: () => void;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
@@ -194,7 +193,7 @@ export default function Home(props: HomeProps) {
                 ingestIntervalMinutes: event.target.value,
               })
             }
-            placeholder="Interval minutes (1-4320, optional)"
+            placeholder="Interval minutes (1-4320)"
             className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
           />
           {props.sourceErrors.ingestIntervalMinutes ? (
@@ -374,12 +373,7 @@ export default function Home(props: HomeProps) {
                         <input
                           value={
                             props.sourceIntervalDrafts[source.id] ??
-                            String(
-                              source.ingest_interval_minutes ??
-                                source.sectors?.ingest_interval_minutes ??
-                                Number(props.ingestIntervalMinutes) ??
-                                15,
-                            )
+                            String(source.ingest_interval_minutes)
                           }
                           onChange={(event) =>
                             props.onSourceIntervalDraftChange(source.id, event.target.value)
