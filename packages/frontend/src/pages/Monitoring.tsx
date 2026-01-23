@@ -243,7 +243,7 @@ export default function Monitoring({
             return (
               <div
                 key={source.id}
-                className={`grid gap-3 rounded-xl border border-slate-800 bg-slate-950/70 p-4 md:grid-cols-[2.2fr,1.2fr,1fr,1fr,1.4fr] ${
+                className={`grid gap-3 rounded-xl border border-slate-800 bg-slate-950/70 p-4 md:grid-cols-[2.2fr,3fr] ${
                   source.active ? "" : "opacity-70"
                 }`}
               >
@@ -264,66 +264,63 @@ export default function Monitoring({
                     Sector: {source.sector?.name ?? "Unassigned"}
                   </p>
                 </div>
-                <div>
-                  <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                <div className="grid grid-rows-2 grid-flow-col auto-cols-fr gap-x-4 gap-y-1 text-xs">
+                  <span className="text-[10px] uppercase tracking-wide text-slate-500">
                     Interval
-                  </p>
-                  <p className="mt-2 text-sm text-slate-200">
-                    {source.expected_interval_minutes ?? "—"} min
-                  </p>
-                  <p className="mt-2 text-[10px] uppercase tracking-wide text-slate-500">
+                  </span>
+                  <span className="text-slate-200">
+                    {source.expected_interval_minutes ?? "-"} min
+                  </span>
+                  <span className="text-[10px] uppercase tracking-wide text-slate-500">
                     Last success
-                  </p>
-                  <p className="mt-1 text-xs text-slate-300">
+                  </span>
+                  <span className="text-slate-300">
                     {formatRelative(source.last_success_at)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                  </span>
+                  <span className="text-[10px] uppercase tracking-wide text-slate-500">
                     Last run
-                  </p>
-                  <p className="mt-2 text-xs text-slate-300">
+                  </span>
+                  <span className="text-slate-300">
                     {source.last_run
-                      ? formatRelative(source.last_run.finished_at ?? source.last_run.started_at)
+                      ? formatRelative(
+                          source.last_run.finished_at ?? source.last_run.started_at,
+                        )
                       : "Never"}
-                  </p>
-                  <p className="mt-2 text-[10px] uppercase tracking-wide text-slate-500">
+                  </span>
+                  <span className="text-[10px] uppercase tracking-wide text-slate-500">
                     Duration
-                  </p>
-                  <p className="mt-1 text-xs text-slate-300">
-                    {source.last_run ? formatDuration(source.last_run.duration_ms) : "—"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                  </span>
+                  <span className="text-slate-300">
+                    {source.last_run ? formatDuration(source.last_run.duration_ms) : "-"}
+                  </span>
+                  <span className="text-[10px] uppercase tracking-wide text-slate-500">
                     Items
-                  </p>
-                  <p className="mt-2 text-sm text-slate-200">
-                    {source.last_run?.item_count ?? "—"}
-                  </p>
-                  <p className="mt-2 text-[10px] uppercase tracking-wide text-slate-500">
+                  </span>
+                  <span className="text-slate-200">
+                    {source.last_run?.item_count ?? "-"}
+                  </span>
+                  <span className="text-[10px] uppercase tracking-wide text-slate-500">
                     Error
-                  </p>
-                  <p className="mt-1 text-xs text-slate-300 line-clamp-2">
+                  </span>
+                  <span className="text-slate-300 line-clamp-1">
                     {source.last_run?.status === "error"
                       ? source.last_run.error_message ?? "Unknown error"
-                      : "—"}
-                  </p>
-                </div>
-                <div className="flex flex-col justify-between gap-2">
-                  <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                      : "-"}
+                  </span>
+                  <span className="text-[10px] uppercase tracking-wide text-slate-500">
                     Last update
-                  </p>
-                  <p className="text-xs text-slate-300">
+                  </span>
+                  <span className="text-slate-300">
                     {source.last_run?.finished_at
                       ? new Date(source.last_run.finished_at).toLocaleString()
-                      : "—"}
-                  </p>
-                  <div className="mt-2 rounded-xl border border-slate-800 bg-slate-900/60 p-2 text-[11px] text-slate-400">
-                    {source.last_run
-                      ? `Status: ${source.last_run.status}`
-                      : "No runs yet"}
-                  </div>
+                      : "-"}
+                  </span>
+                  <span className="text-[10px] uppercase tracking-wide text-slate-500">
+                    Status
+                  </span>
+                  <span className="text-slate-300">
+                    {source.last_run?.status ?? "-"}
+                  </span>
                 </div>
               </div>
             );
