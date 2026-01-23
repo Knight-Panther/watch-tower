@@ -20,6 +20,9 @@ Why:
 - `last_fetched_at` is only updated by manual ingest, so it is not a reliable indicator.
 - Storing per-run telemetry enables "stale" detection, error tracking, and throughput metrics.
 
+Note:
+- Expected intervals are **source-only** (no sector/global fallbacks).
+
 ## Data Model Additions
 Create a new table to capture each fetch run.
 
@@ -77,13 +80,13 @@ Endpoints:
 1) `GET /stats/overview`
    - total sources, active sources
    - items inserted in last 24h (from `feed_items`)
-   - stale sources count (computed from last success run vs interval)
+   - stale sources count (computed from last success run vs source interval)
    - queue counts (BullMQ: `waiting`, `active`, `delayed`, `failed`)
 
 2) `GET /stats/sources`
    - per-source telemetry:
      - latest run status, time, item_count, duration, error_message
-     - expected interval (source -> sector -> global)
+     - expected interval (source-only)
      - `is_stale` computed server-side
 
 3) `GET /stats/sectors`
@@ -113,7 +116,7 @@ Sections:
   - Stale sources
   - Queue backlog
 - Source health table
-  - Source name/url, sector, expected interval
+  - Source name/url, sector, expected interval (source-only)
   - Last run status + time
   - Items last 24h
   - Error message (if any)
