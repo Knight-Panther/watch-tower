@@ -20,7 +20,6 @@ import {
 import Layout from "./components/Layout";
 import Database from "./pages/Database";
 import Home from "./pages/Home";
-import ScheduleManager from "./pages/ScheduleManager";
 import SectorManagement from "./pages/SectorManagement";
 
 const emptySourceForm = {
@@ -580,17 +579,6 @@ export default function App() {
               onCreateSector={onCreateSector}
               onSectorFormChange={onSectorFormChange}
               onDeleteSector={onDeleteSector}
-            />
-          }
-        />
-        <Route
-          path="/schedule"
-          element={
-            <ScheduleManager
-              sectors={sectors}
-              sectorMaxAgeDrafts={sectorMaxAgeDrafts}
-              onSectorMaxAgeDraftChange={onSectorMaxAgeDraftChange}
-              onSaveSectorSettings={onSaveSectorSettings}
             />
           }
         />

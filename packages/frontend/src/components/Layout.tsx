@@ -4,7 +4,6 @@ import { ReactNode } from "react";
 const navItems = [
   { to: "/", label: "Home" },
   { to: "/sectors", label: "Sector Management" },
-  { to: "/schedule", label: "Schedule Manager" },
   { to: "/database", label: "Database" },
 ];
 
