@@ -1,0 +1,29 @@
+{
+  "name": "@watch-tower/db",
+  "version": "1.0.0",
+  "description": "Database schema and client (Drizzle ORM + PostgreSQL)",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "generate": "drizzle-kit generate",
+    "migrate": "drizzle-kit migrate",
+    "push": "drizzle-kit push",
+    "studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.44.0",
+    "pg": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.14",
+    "dotenv": "^17.2.3",
+    "drizzle-kit": "^0.30.0",
+    "typescript": "^5.9.3"
+  }
+}

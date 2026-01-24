@@ -1,23 +1,43 @@
 import type { FastifyInstance } from "fastify";
-import type { ApiDeps } from "../server";
-import { JOB_FEED_PROCESS } from "@watch-tower/shared";
+import { eq, desc, inArray } from "drizzle-orm";
+import { rssSources, sectors } from "@watch-tower/db";
+import { JOB_INGEST_FETCH } from "@watch-tower/shared";
+import type { ApiDeps } from "../server.js";
 
 const clampMaxAgeDays = (value: number) => Math.min(15, Math.max(1, value));
 
+const selectSourcesWithSector = async (deps: ApiDeps, condition?: Parameters<typeof eq>) => {
+  const rows = await deps.db
+    .select({
+      id: rssSources.id,
+      url: rssSources.url,
+      name: rssSources.name,
+      active: rssSources.active,
+      sector_id: rssSources.sectorId,
+      max_age_days: rssSources.maxAgeDays,
+      ingest_interval_minutes: rssSources.ingestIntervalMinutes,
+      created_at: rssSources.createdAt,
+      last_fetched_at: rssSources.lastFetchedAt,
+      sectors: {
+        id: sectors.id,
+        name: sectors.name,
+        slug: sectors.slug,
+        default_max_age_days: sectors.defaultMaxAgeDays,
+      },
+    })
+    .from(rssSources)
+    .leftJoin(sectors, eq(rssSources.sectorId, sectors.id))
+    .orderBy(desc(rssSources.createdAt));
+
+  return rows.map((r) => ({
+    ...r,
+    sectors: r.sectors?.id ? r.sectors : null,
+  }));
+};
+
 export const registerSourceRoutes = (app: FastifyInstance, deps: ApiDeps) => {
-  app.get("/sources", { preHandler: deps.requireApiKey }, async (_request, reply) => {
-    const { data, error } = await deps.supabase
-      .from("rss_sources")
-      .select(
-        "id,url,name,active,sector_id,max_age_days,ingest_interval_minutes,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days)",
-      )
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      return reply.code(500).send({ error: error.message });
-    }
-
-    return data ?? [];
+  app.get("/sources", { preHandler: deps.requireApiKey }, async () => {
+    return selectSourcesWithSector(deps);
   });
 
   app.post<{
@@ -30,70 +50,67 @@ export const registerSourceRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       ingest_interval_minutes: number;
     };
   }>("/sources", { preHandler: deps.requireApiKey }, async (request, reply) => {
-    const { url, name, active, sector_id, max_age_days, ingest_interval_minutes } = request.body ?? {};
+    const { url, name, active, sector_id, max_age_days, ingest_interval_minutes } =
+      request.body ?? {};
 
     if (!url) {
       return reply.code(400).send({ error: "url is required" });
     }
-
     if (!sector_id) {
       return reply.code(400).send({ error: "sector_id is required" });
     }
-
     if (ingest_interval_minutes === undefined) {
-      return reply
-        .code(400)
-        .send({ error: "ingest_interval_minutes is required" });
+      return reply.code(400).send({ error: "ingest_interval_minutes is required" });
     }
-
     if (max_age_days !== undefined && (max_age_days < 1 || max_age_days > 15)) {
       return reply.code(400).send({ error: "max_age_days must be 1-15" });
     }
     if (ingest_interval_minutes < 1 || ingest_interval_minutes > 4320) {
-      return reply
-        .code(400)
-        .send({ error: "ingest_interval_minutes must be 1-4320" });
+      return reply.code(400).send({ error: "ingest_interval_minutes must be 1-4320" });
     }
 
-    const { data, error } = await deps.supabase
-      .from("rss_sources")
-      .insert({
-        url,
-        name: name ?? null,
-        active: active ?? true,
-        sector_id: sector_id ?? null,
-        max_age_days: max_age_days ?? null,
-        ingest_interval_minutes,
-      })
-      .select(
-        "id,url,name,active,sector_id,max_age_days,ingest_interval_minutes,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days)",
-      )
-      .single();
-
-    if (error) {
-      if (error.code === "23505") {
+    let inserted;
+    try {
+      [inserted] = await deps.db
+        .insert(rssSources)
+        .values({
+          url,
+          name: name ?? null,
+          active: active ?? true,
+          sectorId: sector_id ?? null,
+          maxAgeDays: max_age_days ?? null,
+          ingestIntervalMinutes: ingest_interval_minutes,
+        })
+        .returning();
+    } catch (err: unknown) {
+      const pgErr = err as { code?: string };
+      if (pgErr.code === "23505") {
         return reply.code(409).send({ error: "RSS URL already exists" });
       }
-      return reply.code(500).send({ error: error.message });
+      throw err;
     }
 
-    if (data?.active) {
-      const sector = data.sectors as unknown as { default_max_age_days: number } | null;
-      const maxAge =
-        data.max_age_days ?? sector?.default_max_age_days ?? 5;
-      const maxAgeDays = clampMaxAgeDays(maxAge);
-      await deps.feedQueue.add(
-        JOB_FEED_PROCESS,
-        {
-          sourceId: data.id,
-          url: data.url,
-          maxAgeDays,
-        },
-        { jobId: `feed-process-${data.id}-${Date.now()}` },
+    if (inserted.active) {
+      // Look up sector default for max age
+      let sectorMaxAge = 5;
+      if (inserted.sectorId) {
+        const [sector] = await deps.db
+          .select({ defaultMaxAgeDays: sectors.defaultMaxAgeDays })
+          .from(sectors)
+          .where(eq(sectors.id, inserted.sectorId));
+        if (sector) {
+          sectorMaxAge = sector.defaultMaxAgeDays;
+        }
+      }
+      const maxAgeDays = clampMaxAgeDays(inserted.maxAgeDays ?? sectorMaxAge);
+      await deps.ingestQueue.add(
+        JOB_INGEST_FETCH,
+        { sourceId: inserted.id, url: inserted.url, maxAgeDays },
+        { jobId: `ingest-${inserted.id}-${Date.now()}` },
       );
     }
 
-    return data;
+    return inserted;
   });
 
   app.delete<{ Params: { id: string }; Querystring: { hard?: string } }>(
@@ -103,29 +120,19 @@ export const registerSourceRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       const { id } = request.params;
       const hard = request.query.hard === "true";
 
-    const { data, error } = hard
-      ? await deps.supabase
-          .from("rss_sources")
-          .delete()
-          .eq("id", id)
-          .select(
-            "id,url,name,active,sector_id,max_age_days,ingest_interval_minutes,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days)",
-          )
-          .single()
-      : await deps.supabase
-          .from("rss_sources")
-          .update({ active: false })
-          .eq("id", id)
-          .select(
-            "id,url,name,active,sector_id,max_age_days,ingest_interval_minutes,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days)",
-          )
-          .single();
+      const [row] = hard
+        ? await deps.db.delete(rssSources).where(eq(rssSources.id, id)).returning()
+        : await deps.db
+            .update(rssSources)
+            .set({ active: false })
+            .where(eq(rssSources.id, id))
+            .returning();
 
-      if (error) {
-        return reply.code(500).send({ error: error.message });
+      if (!row) {
+        return reply.code(404).send({ error: "Source not found" });
       }
 
-      return data;
+      return row;
     },
   );
 
@@ -137,27 +144,19 @@ export const registerSourceRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       return reply.code(400).send({ error: "ids are required" });
     }
     if (!action || !["deactivate", "delete"].includes(action)) {
-      return reply
-        .code(400)
-        .send({ error: "action must be deactivate or delete" });
+      return reply.code(400).send({ error: "action must be deactivate or delete" });
     }
 
-    const query =
+    const rows =
       action === "delete"
-        ? deps.supabase.from("rss_sources").delete()
-        : deps.supabase.from("rss_sources").update({ active: false });
+        ? await deps.db.delete(rssSources).where(inArray(rssSources.id, ids)).returning()
+        : await deps.db
+            .update(rssSources)
+            .set({ active: false })
+            .where(inArray(rssSources.id, ids))
+            .returning();
 
-    const { data, error } = await query
-      .in("id", ids)
-      .select(
-        "id,url,name,active,sector_id,max_age_days,ingest_interval_minutes,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days)",
-      );
-
-    if (error) {
-      return reply.code(500).send({ error: error.message });
-    }
-
-    return data ?? [];
+    return rows;
   });
 
   app.patch<{
@@ -172,16 +171,17 @@ export const registerSourceRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     };
   }>("/sources/:id", { preHandler: deps.requireApiKey }, async (request, reply) => {
     const { id } = request.params;
-    const { url, name, active, sector_id, max_age_days, ingest_interval_minutes } = request.body ?? {};
+    const { url, name, active, sector_id, max_age_days, ingest_interval_minutes } =
+      request.body ?? {};
 
-    const updates = {
-      ...(url ? { url } : {}),
-      ...(name !== undefined ? { name } : {}),
-      ...(active !== undefined ? { active } : {}),
-      ...(sector_id !== undefined ? { sector_id } : {}),
-      ...(max_age_days !== undefined ? { max_age_days } : {}),
-      ...(ingest_interval_minutes !== undefined ? { ingest_interval_minutes } : {}),
-    };
+    const updates: Record<string, unknown> = {};
+    if (url !== undefined) updates.url = url;
+    if (name !== undefined) updates.name = name;
+    if (active !== undefined) updates.active = active;
+    if (sector_id !== undefined) updates.sectorId = sector_id;
+    if (max_age_days !== undefined) updates.maxAgeDays = max_age_days;
+    if (ingest_interval_minutes !== undefined)
+      updates.ingestIntervalMinutes = ingest_interval_minutes;
 
     if (Object.keys(updates).length === 0) {
       return reply.code(400).send({ error: "No updates provided" });
@@ -198,19 +198,16 @@ export const registerSourceRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       }
     }
 
-    const { data, error } = await deps.supabase
-      .from("rss_sources")
-      .update(updates)
-      .eq("id", id)
-      .select(
-        "id,url,name,active,sector_id,max_age_days,ingest_interval_minutes,created_at,last_fetched_at,sectors(id,name,slug,default_max_age_days)",
-      )
-      .single();
+    const [row] = await deps.db
+      .update(rssSources)
+      .set(updates)
+      .where(eq(rssSources.id, id))
+      .returning();
 
-    if (error) {
-      return reply.code(500).send({ error: error.message });
+    if (!row) {
+      return reply.code(404).send({ error: "Source not found" });
     }
 
-    return data;
+    return row;
   });
 };

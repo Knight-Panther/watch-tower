@@ -4,18 +4,19 @@
   "description": "Media Watch Tower monorepo",
   "private": true,
   "type": "commonjs",
+  "packageManager": "npm@11.6.2",
   "scripts": {
-    "db:start": "npx supabase start",
-    "db:stop": "npx supabase stop",
-    "db:reset": "npx supabase db reset",
-    "db:migration": "npx supabase migration new",
-    "db:push": "npx supabase db push",
-    "redis:up": "docker compose up -d",
-    "dev:shared": "npm --workspace @watch-tower/shared run build",
-    "dev:api": "npm run dev:shared && npm --workspace @watch-tower/api run dev",
-    "dev:worker": "npm run dev:shared && npm --workspace @watch-tower/worker run dev",
-    "dev:frontend": "npm --workspace @watch-tower/frontend run dev",
-    "dev": "npm run dev:shared && concurrently -n api,worker,ui -c blue,green,magenta \"npm --workspace @watch-tower/api run dev\" \"npm --workspace @watch-tower/worker run dev\" \"npm --workspace @watch-tower/frontend run dev\"",
+    "db:generate": "npm --workspace @watch-tower/db run generate",
+    "db:migrate": "npm --workspace @watch-tower/db run migrate",
+    "db:push": "npm --workspace @watch-tower/db run push",
+    "db:studio": "npm --workspace @watch-tower/db run studio",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "dev:api": "turbo run dev --filter=@watch-tower/api",
+    "dev:worker": "turbo run dev --filter=@watch-tower/worker",
+    "dev:frontend": "turbo run dev --filter=@watch-tower/frontend",
     "lint": "eslint \"packages/**/*.{ts,tsx}\"",
     "format": "prettier --write \"packages/**/*.{ts,tsx,js,jsx,json}\""
   },
@@ -25,9 +26,9 @@
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.53.1",
     "@typescript-eslint/parser": "^8.53.1",
-    "concurrently": "^9.2.1",
     "eslint": "^9.39.2",
     "eslint-config-prettier": "^10.1.8",
-    "prettier": "^3.8.0"
+    "prettier": "^3.8.0",
+    "turbo": "^2.5.0"
   }
 }

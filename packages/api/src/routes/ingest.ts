@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import type { ApiDeps } from "../server";
+import type { ApiDeps } from "../server.js";
 import { JOB_MAINTENANCE_SCHEDULE } from "@watch-tower/shared";
 
 export const registerIngestRoutes = (app: FastifyInstance, deps: ApiDeps) => {

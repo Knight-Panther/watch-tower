@@ -3,14 +3,14 @@ import { fileURLToPath } from "url";
 import { Queue } from "bullmq";
 import {
   baseEnvSchema,
-  createSupabaseClient,
   JOB_MAINTENANCE_CLEANUP,
   JOB_MAINTENANCE_SCHEDULE,
-  QUEUE_FEED,
+  QUEUE_INGEST,
   QUEUE_MAINTENANCE,
 } from "@watch-tower/shared";
-import { createFeedWorker } from "./processors/feed";
-import { createMaintenanceWorker } from "./processors/maintenance";
+import { createDb } from "@watch-tower/db";
+import { createIngestWorker } from "./processors/feed.js";
+import { createMaintenanceWorker } from "./processors/maintenance.js";
 
 dotenv.config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) });
 
@@ -20,12 +20,9 @@ const connection = {
   port: env.REDIS_PORT,
 };
 
-const supabase = createSupabaseClient({
-  url: env.SUPABASE_URL,
-  serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
-});
+const db = createDb(env.DATABASE_URL);
 
-const feedQueue = new Queue(QUEUE_FEED, {
+const ingestQueue = new Queue(QUEUE_INGEST, {
   connection,
   defaultJobOptions: {
     attempts: 3,
@@ -45,15 +42,15 @@ const maintenanceQueue = new Queue(QUEUE_MAINTENANCE, {
   },
 });
 
-const feedWorker = createFeedWorker({ connection, supabase });
+const ingestWorker = createIngestWorker({ connection, db });
 const maintenanceWorker = createMaintenanceWorker({
   connection,
-  supabase,
-  feedQueue,
+  db,
+  ingestQueue,
 });
 
-feedWorker.on("failed", (job, err) => {
-  console.error(`[feed] job ${job?.id ?? "unknown"} failed`, err.message);
+ingestWorker.on("failed", (job, err) => {
+  console.error(`[ingest] job ${job?.id ?? "unknown"} failed`, err.message);
 });
 
 maintenanceWorker.on("failed", (job, err) => {
@@ -61,7 +58,7 @@ maintenanceWorker.on("failed", (job, err) => {
 });
 
 // Clean failed jobs from previous runs (waiting jobs are preserved)
-await feedQueue.clean(0, 0, "failed");
+await ingestQueue.clean(0, 0, "failed");
 await maintenanceQueue.clean(0, 0, "failed");
 console.info("[worker] cleaned failed jobs");
 
@@ -69,13 +66,13 @@ console.info("[worker] cleaned failed jobs");
 await maintenanceQueue.add(
   JOB_MAINTENANCE_CLEANUP,
   {},
-  { repeat: { every: 24 * 60 * 60 * 1000 }, jobId: JOB_MAINTENANCE_CLEANUP }
+  { repeat: { every: 24 * 60 * 60 * 1000 }, jobId: JOB_MAINTENANCE_CLEANUP },
 );
 
 await maintenanceQueue.add(
   JOB_MAINTENANCE_SCHEDULE,
   {},
-  { repeat: { every: 60 * 1000 }, jobId: JOB_MAINTENANCE_SCHEDULE }
+  { repeat: { every: 60 * 1000 }, jobId: JOB_MAINTENANCE_SCHEDULE },
 );
 
 // Run scheduler immediately on startup
@@ -85,9 +82,9 @@ console.info("[worker] started, scheduler will run immediately");
 // Graceful shutdown: finish in-flight jobs, then close connections
 const shutdown = async () => {
   console.info("[worker] shutting down...");
-  await feedWorker.close();
+  await ingestWorker.close();
   await maintenanceWorker.close();
-  await feedQueue.close();
+  await ingestQueue.close();
   await maintenanceQueue.close();
   console.info("[worker] shutdown complete");
   process.exit(0);

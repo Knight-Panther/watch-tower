@@ -1,42 +1,38 @@
 import type { FastifyInstance } from "fastify";
-import type { ApiDeps } from "../server";
+import { eq } from "drizzle-orm";
+import { appConfig } from "@watch-tower/db";
+import type { ApiDeps } from "../server.js";
+
+const getConfigValue = async (deps: ApiDeps, key: string, fallback: number) => {
+  const [row] = await deps.db
+    .select({ value: appConfig.value })
+    .from(appConfig)
+    .where(eq(appConfig.key, key));
+  return row ? Number(row.value) : fallback;
+};
+
+const upsertConfig = async (deps: ApiDeps, key: string, value: number) => {
+  const [row] = await deps.db
+    .insert(appConfig)
+    .values({ key, value: String(value), updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: appConfig.key,
+      set: { value: String(value), updatedAt: new Date() },
+    })
+    .returning();
+  return row;
+};
 
 export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
-  app.get(
-    "/config/feed-items-ttl",
-    { preHandler: deps.requireApiKey },
-    async (_request, reply) => {
-      const { data, error } = await deps.supabase
-        .from("app_config")
-        .select("value")
-        .eq("key", "feed_items_ttl_days")
-        .single();
+  app.get("/config/feed-items-ttl", { preHandler: deps.requireApiKey }, async () => {
+    const days = await getConfigValue(deps, "feed_items_ttl_days", 60);
+    return { days };
+  });
 
-      if (error) {
-        return reply.code(500).send({ error: error.message });
-      }
-
-      return { days: Number(data?.value ?? 60) };
-    },
-  );
-
-  app.get(
-    "/config/feed-fetch-runs-ttl",
-    { preHandler: deps.requireApiKey },
-    async (_request, reply) => {
-      const { data, error } = await deps.supabase
-        .from("app_config")
-        .select("value")
-        .eq("key", "feed_fetch_runs_ttl_hours")
-        .single();
-
-      if (error) {
-        return reply.code(500).send({ error: error.message });
-      }
-
-      return { hours: Number(data?.value ?? 336) };
-    },
-  );
+  app.get("/config/feed-fetch-runs-ttl", { preHandler: deps.requireApiKey }, async () => {
+    const hours = await getConfigValue(deps, "feed_fetch_runs_ttl_hours", 336);
+    return { hours };
+  });
 
   app.patch<{ Body: { days: number } }>(
     "/config/feed-items-ttl",
@@ -46,22 +42,8 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       if (!days || days < 30 || days > 60) {
         return reply.code(400).send({ error: "days must be between 30 and 60" });
       }
-
-      const { data, error } = await deps.supabase
-        .from("app_config")
-        .upsert({
-          key: "feed_items_ttl_days",
-          value: String(days),
-          updated_at: new Date().toISOString(),
-        })
-        .select("value")
-        .single();
-
-      if (error) {
-        return reply.code(500).send({ error: error.message });
-      }
-
-      return { days: Number(data?.value ?? days) };
+      await upsertConfig(deps, "feed_items_ttl_days", days);
+      return { days };
     },
   );
 
@@ -75,22 +57,8 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
           .code(400)
           .send({ error: "hours must be greater than 0 and at most 2160" });
       }
-
-      const { data, error } = await deps.supabase
-        .from("app_config")
-        .upsert({
-          key: "feed_fetch_runs_ttl_hours",
-          value: String(hours),
-          updated_at: new Date().toISOString(),
-        })
-        .select("value")
-        .single();
-
-      if (error) {
-        return reply.code(500).send({ error: error.message });
-      }
-
-      return { hours: Number(data?.value ?? hours) };
+      await upsertConfig(deps, "feed_fetch_runs_ttl_hours", hours);
+      return { hours };
     },
   );
 };

@@ -1,102 +1,74 @@
 import { Worker } from "bullmq";
+import { eq, and, lt, gte, desc, inArray } from "drizzle-orm";
 import {
-  JOB_FEED_PROCESS,
+  JOB_INGEST_FETCH,
   JOB_MAINTENANCE_CLEANUP,
   JOB_MAINTENANCE_SCHEDULE,
   QUEUE_MAINTENANCE,
 } from "@watch-tower/shared";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  type Database,
+  articles,
+  feedFetchRuns,
+  appConfig,
+  rssSources,
+  sectors,
+} from "@watch-tower/db";
 import type { Queue } from "bullmq";
 
 type MaintenanceDeps = {
   connection: { host: string; port: number };
-  supabase: SupabaseClient;
-  feedQueue: Queue;
+  db: Database;
+  ingestQueue: Queue;
 };
 
-const getFeedItemsTtlDays = async (supabase: SupabaseClient) => {
-  const { data, error } = await supabase
-    .from("app_config")
-    .select("value")
-    .eq("key", "feed_items_ttl_days")
-    .single();
-
-  if (error) {
-    return 60;
-  }
-
-  const days = Number(data?.value ?? 60);
-  if (Number.isNaN(days) || days < 30 || days > 60) {
-    return 60;
-  }
-
-  return days;
+const getConfigNumber = async (db: Database, key: string, fallback: number) => {
+  const [row] = await db
+    .select({ value: appConfig.value })
+    .from(appConfig)
+    .where(eq(appConfig.key, key));
+  if (!row) return fallback;
+  const num = Number(row.value);
+  return Number.isNaN(num) ? fallback : num;
 };
 
-const getFeedFetchRunsTtlHours = async (supabase: SupabaseClient) => {
-  const { data, error } = await supabase
-    .from("app_config")
-    .select("value")
-    .eq("key", "feed_fetch_runs_ttl_hours")
-    .single();
+const runScheduledIngests = async (db: Database, ingestQueue: Queue) => {
+  const sources = await db
+    .select({
+      id: rssSources.id,
+      url: rssSources.url,
+      sectorId: rssSources.sectorId,
+      ingestIntervalMinutes: rssSources.ingestIntervalMinutes,
+      maxAgeDays: rssSources.maxAgeDays,
+      sectorDefaultMaxAge: sectors.defaultMaxAgeDays,
+    })
+    .from(rssSources)
+    .leftJoin(sectors, eq(rssSources.sectorId, sectors.id))
+    .where(eq(rssSources.active, true));
 
-  if (error) {
-    return 336;
-  }
+  if (sources.length === 0) return;
 
-  const hours = Number(data?.value ?? 336);
-  if (Number.isNaN(hours) || hours <= 0 || hours > 2160) {
-    return 336;
-  }
-
-  return hours;
-};
-
-/**
- * Checks which active sources are due for ingestion and fires one-shot
- * feed jobs for each. A source is "due" if it has never been successfully
- * fetched, or if (now - last_success) >= ingest_interval.
- */
-const runScheduledIngests = async (
-  supabase: SupabaseClient,
-  feedQueue: Queue,
-) => {
-  const { data: sources, error } = await supabase
-    .from("rss_sources")
-    .select(
-      "id,url,active,ingest_interval_minutes,max_age_days,sectors(default_max_age_days)",
-    )
-    .eq("active", true);
-
-  if (error) {
-    throw error;
-  }
-
-  if (!sources || sources.length === 0) {
-    return;
-  }
-
-  // Get latest run (any status) for each source, bounded to last 7 days
+  // Get latest run for each source, bounded to last 7 days
   const sourceIds = sources.map((s) => s.id);
-  const lookbackCutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  const { data: runs, error: runsError } = await supabase
-    .from("feed_fetch_runs")
-    .select("source_id,finished_at,created_at")
-    .in("source_id", sourceIds)
-    .gte("created_at", lookbackCutoff)
-    .order("created_at", { ascending: false });
+  const lookbackCutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-  if (runsError) {
-    throw runsError;
-  }
+  const runs = await db
+    .select({
+      sourceId: feedFetchRuns.sourceId,
+      finishedAt: feedFetchRuns.finishedAt,
+      createdAt: feedFetchRuns.createdAt,
+    })
+    .from(feedFetchRuns)
+    .where(
+      and(inArray(feedFetchRuns.sourceId, sourceIds), gte(feedFetchRuns.createdAt, lookbackCutoff)),
+    )
+    .orderBy(desc(feedFetchRuns.createdAt));
 
   const lastRunBySource = new Map<string, number>();
-  for (const run of runs ?? []) {
-    if (!lastRunBySource.has(run.source_id)) {
-      const ts = Date.parse(run.finished_at ?? run.created_at);
-      if (!Number.isNaN(ts)) {
-        lastRunBySource.set(run.source_id, ts);
-      }
+  for (const run of runs) {
+    if (run.sourceId && !lastRunBySource.has(run.sourceId)) {
+      const ts = (run.finishedAt ?? run.createdAt).getTime();
+      lastRunBySource.set(run.sourceId, ts);
     }
   }
 
@@ -104,31 +76,21 @@ const runScheduledIngests = async (
   let fired = 0;
 
   for (const source of sources) {
-    const intervalMinutes = source.ingest_interval_minutes;
-    if (!intervalMinutes || intervalMinutes <= 0) {
-      continue;
-    }
+    const intervalMinutes = source.ingestIntervalMinutes;
+    if (!intervalMinutes || intervalMinutes <= 0) continue;
 
     const intervalMs = Math.min(4320, Math.max(1, intervalMinutes)) * 60 * 1000;
     const lastRun = lastRunBySource.get(source.id);
+    const isDue = !lastRun || now - lastRun >= intervalMs;
 
-    // Source is due if never fetched or interval has elapsed since last attempt
-    const isDue = !lastRun || (now - lastRun) >= intervalMs;
+    if (!isDue) continue;
 
-    if (!isDue) {
-      continue;
-    }
+    const maxAgeDays = Math.min(15, Math.max(1, source.maxAgeDays ?? source.sectorDefaultMaxAge ?? 5));
 
-    const sector = source.sectors as unknown as { default_max_age_days: number } | null;
-    const sectorMaxAge = sector?.default_max_age_days;
-    const maxAgeDays = Math.min(
-      15,
-      Math.max(1, source.max_age_days ?? sectorMaxAge ?? 5),
-    );
-
-    await feedQueue.add(JOB_FEED_PROCESS, {
+    await ingestQueue.add(JOB_INGEST_FETCH, {
       sourceId: source.id,
       url: source.url,
+      sectorId: source.sectorId,
       maxAgeDays,
     });
 
@@ -136,53 +98,29 @@ const runScheduledIngests = async (
   }
 
   if (fired > 0) {
-    console.info(`[scheduler] fired ${fired} feed jobs`);
+    console.info(`[scheduler] fired ${fired} ingest jobs`);
   }
 };
 
-export const createMaintenanceWorker = ({
-  connection,
-  supabase,
-  feedQueue,
-}: MaintenanceDeps) =>
+export const createMaintenanceWorker = ({ connection, db, ingestQueue }: MaintenanceDeps) =>
   new Worker(
     QUEUE_MAINTENANCE,
     async (job) => {
       if (job.name === JOB_MAINTENANCE_CLEANUP) {
-        const ttlDays = await getFeedItemsTtlDays(supabase);
-        const cutoff = new Date(
-          Date.now() - ttlDays * 24 * 60 * 60 * 1000,
-        ).toISOString();
+        const ttlDays = await getConfigNumber(db, "feed_items_ttl_days", 60);
+        const cutoff = new Date(Date.now() - ttlDays * 24 * 60 * 60 * 1000);
+        await db.delete(articles).where(lt(articles.createdAt, cutoff));
 
-        const { error } = await supabase
-          .from("feed_items")
-          .delete()
-          .lt("created_at", cutoff);
-
-        if (error) {
-          throw error;
-        }
-
-        const runsTtlHours = await getFeedFetchRunsTtlHours(supabase);
-        const runsCutoff = new Date(
-          Date.now() - runsTtlHours * 60 * 60 * 1000,
-        ).toISOString();
-
-        const { error: runsError } = await supabase
-          .from("feed_fetch_runs")
-          .delete()
-          .lt("created_at", runsCutoff);
-
-        if (runsError) {
-          throw runsError;
-        }
+        const runsTtlHours = await getConfigNumber(db, "feed_fetch_runs_ttl_hours", 336);
+        const runsCutoff = new Date(Date.now() - runsTtlHours * 60 * 60 * 1000);
+        await db.delete(feedFetchRuns).where(lt(feedFetchRuns.createdAt, runsCutoff));
 
         console.info("[maintenance] cleanup complete");
         return;
       }
 
       if (job.name === JOB_MAINTENANCE_SCHEDULE) {
-        await runScheduledIngests(supabase, feedQueue);
+        await runScheduledIngests(db, ingestQueue);
         return;
       }
     },

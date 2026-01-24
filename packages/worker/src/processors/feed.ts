@@ -1,54 +1,54 @@
 import { Worker } from "bullmq";
 import Parser from "rss-parser";
-import {
-  JOB_FEED_PROCESS,
-  QUEUE_FEED,
-} from "@watch-tower/shared";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { JOB_INGEST_FETCH, QUEUE_INGEST } from "@watch-tower/shared";
+import { type Database, articles, feedFetchRuns } from "@watch-tower/db";
 
-type FeedDeps = {
+type IngestDeps = {
   connection: { host: string; port: number };
-  supabase: SupabaseClient;
+  db: Database;
 };
 
-const parser = new Parser({
-  timeout: 15000,
-});
+const parser = new Parser({ timeout: 15000 });
+
+const truncateSnippet = (text: string | undefined, maxLen = 500) => {
+  if (!text) return null;
+  const cleaned = text.replace(/<[^>]*>/g, "").trim();
+  return cleaned.length > maxLen ? cleaned.slice(0, maxLen) + "..." : cleaned;
+};
 
 const recordFetchRun = async (
-  supabase: SupabaseClient,
+  db: Database,
   payload: {
-    source_id: string;
+    sourceId: string;
     status: "success" | "error";
-    started_at: string;
-    finished_at: string;
-    duration_ms: number;
-    item_count?: number;
-    item_added?: number;
-    error_message?: string;
+    startedAt: Date;
+    finishedAt: Date;
+    durationMs: number;
+    itemCount?: number;
+    itemAdded?: number;
+    errorMessage?: string;
   },
 ) => {
-  const { error } = await supabase.from("feed_fetch_runs").insert(payload);
-  if (error) {
-    console.error(
-      `[${payload.source_id}] failed to record fetch run`,
-      error,
-    );
+  try {
+    await db.insert(feedFetchRuns).values(payload);
+  } catch (err) {
+    console.error(`[${payload.sourceId}] failed to record fetch run`, err);
   }
 };
 
-export const createFeedWorker = ({ connection, supabase }: FeedDeps) =>
+export const createIngestWorker = ({ connection, db }: IngestDeps) =>
   new Worker(
-    QUEUE_FEED,
+    QUEUE_INGEST,
     async (job) => {
-      if (job.name !== JOB_FEED_PROCESS) {
+      if (job.name !== JOB_INGEST_FETCH) {
         return;
       }
 
-      const { url, sourceId, maxAgeDays } = job.data as {
+      const { url, sourceId, maxAgeDays, sectorId } = job.data as {
         url: string;
         sourceId: string;
         maxAgeDays: number;
+        sectorId?: string;
       };
       const startedAt = new Date();
       let feed;
@@ -56,13 +56,13 @@ export const createFeedWorker = ({ connection, supabase }: FeedDeps) =>
         feed = await parser.parseURL(url);
       } catch (error) {
         const finishedAt = new Date();
-        await recordFetchRun(supabase, {
-          source_id: sourceId,
+        await recordFetchRun(db, {
+          sourceId,
           status: "error",
-          started_at: startedAt.toISOString(),
-          finished_at: finishedAt.toISOString(),
-          duration_ms: finishedAt.getTime() - startedAt.getTime(),
-          error_message: error instanceof Error ? error.message : String(error),
+          startedAt,
+          finishedAt,
+          durationMs: finishedAt.getTime() - startedAt.getTime(),
+          errorMessage: error instanceof Error ? error.message : String(error),
         });
         console.error(`[${sourceId}] failed to parse ${url}`, error);
         return;
@@ -72,66 +72,60 @@ export const createFeedWorker = ({ connection, supabase }: FeedDeps) =>
       const itemsToInsert = feed.items
         .map((item) => {
           const link = item.link ?? item.guid;
-          if (!link) {
-            return null;
-          }
+          if (!link) return null;
 
           const published = item.isoDate ?? item.pubDate ?? null;
-          if (!published) {
-            return null;
-          }
+          if (!published) return null;
 
-          const publishedAt = new Date(published).getTime();
-          if (Number.isNaN(publishedAt) || publishedAt < cutoff) {
-            return null;
-          }
+          const publishedMs = new Date(published).getTime();
+          if (Number.isNaN(publishedMs) || publishedMs < cutoff) return null;
 
           return {
-            source_id: sourceId,
+            sourceId,
+            sectorId: sectorId ?? null,
             url: link,
-            title: item.title ?? null,
-            published_at: published,
-            raw: item,
+            title: item.title ?? "Untitled",
+            contentSnippet: truncateSnippet(item.contentSnippet ?? item.content),
+            publishedAt: new Date(published),
+            pipelineStage: "ingested" as const,
           };
         })
         .filter((item): item is NonNullable<typeof item> => Boolean(item));
 
       let itemAdded = 0;
       if (itemsToInsert.length > 0) {
-        const { data: inserted, error } = await supabase
-          .from("feed_items")
-          .upsert(itemsToInsert, {
-            onConflict: "url",
-            ignoreDuplicates: true,
-          })
-          .select("id");
-
-        if (error) {
+        try {
+          const inserted = await db
+            .insert(articles)
+            .values(itemsToInsert)
+            .onConflictDoNothing({ target: articles.url })
+            .returning({ id: articles.id });
+          itemAdded = inserted.length;
+        } catch (error) {
           const finishedAt = new Date();
-          await recordFetchRun(supabase, {
-            source_id: sourceId,
+          await recordFetchRun(db, {
+            sourceId,
             status: "error",
-            started_at: startedAt.toISOString(),
-            finished_at: finishedAt.toISOString(),
-            duration_ms: finishedAt.getTime() - startedAt.getTime(),
-            item_count: itemsToInsert.length,
-            error_message: error.message,
+            startedAt,
+            finishedAt,
+            durationMs: finishedAt.getTime() - startedAt.getTime(),
+            itemCount: itemsToInsert.length,
+            errorMessage: error instanceof Error ? error.message : String(error),
           });
-          console.error(`[${sourceId}] upsert failed`, error.message);
+          console.error(`[${sourceId}] insert failed`, error);
           return;
         }
-        itemAdded = inserted?.length ?? 0;
       }
 
       const finishedAt = new Date();
-      await recordFetchRun(supabase, {
-        source_id: sourceId,
+      await recordFetchRun(db, {
+        sourceId,
         status: "success",
-        started_at: startedAt.toISOString(),
-        finished_at: finishedAt.toISOString(),
-        duration_ms: finishedAt.getTime() - startedAt.getTime(),
-        item_count: itemsToInsert.length,
-        item_added: itemAdded,
+        startedAt,
+        finishedAt,
+        durationMs: finishedAt.getTime() - startedAt.getTime(),
+        itemCount: itemsToInsert.length,
+        itemAdded,
       });
 
       console.log(

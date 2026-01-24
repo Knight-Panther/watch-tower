@@ -1,219 +1,195 @@
 import type { FastifyInstance } from "fastify";
-import type { ApiDeps } from "../server";
-
-type FetchRunRow = {
-  source_id: string;
-  status: "success" | "error";
-  started_at: string;
-  finished_at: string | null;
-  duration_ms: number | null;
-  item_count: number | null;
-  item_added: number | null;
-  error_message: string | null;
-  created_at: string;
-};
-
-const getRunTimestamp = (run: FetchRunRow) =>
-  run.finished_at ?? run.created_at;
+import { eq, and, gte, desc, count, inArray } from "drizzle-orm";
+import { rssSources, articles, feedFetchRuns, sectors } from "@watch-tower/db";
+import type { ApiDeps } from "../server.js";
 
 export const registerStatsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
-  app.get(
-    "/stats/overview",
-    { preHandler: deps.requireApiKey },
-    async (_request, reply) => {
-      const now = Date.now();
-      const cutoff = new Date(now - 24 * 60 * 60 * 1000).toISOString();
+  app.get("/stats/overview", { preHandler: deps.requireApiKey }, async () => {
+    const now = Date.now();
+    const cutoff = new Date(now - 24 * 60 * 60 * 1000);
 
-      const [
-        totalSourcesRes,
-        activeSourcesRes,
-        itemsRes,
-      ] = await Promise.all([
-        deps.supabase.from("rss_sources").select("id", { count: "exact", head: true }),
-        deps.supabase
-          .from("rss_sources")
-          .select("id", { count: "exact", head: true })
-          .eq("active", true),
-        deps.supabase
-          .from("feed_items")
-          .select("id", { count: "exact", head: true })
-          .gte("created_at", cutoff),
-      ]);
+    const [totalRes, activeRes, itemsRes] = await Promise.all([
+      deps.db.select({ count: count() }).from(rssSources),
+      deps.db.select({ count: count() }).from(rssSources).where(eq(rssSources.active, true)),
+      deps.db
+        .select({ count: count() })
+        .from(articles)
+        .where(gte(articles.createdAt, cutoff)),
+    ]);
 
-      if (totalSourcesRes.error) {
-        return reply.code(500).send({ error: totalSourcesRes.error.message });
-      }
-      if (activeSourcesRes.error) {
-        return reply.code(500).send({ error: activeSourcesRes.error.message });
-      }
-      if (itemsRes.error) {
-        return reply.code(500).send({ error: itemsRes.error.message });
-      }
+    // Get active sources with their intervals
+    const activeSources = await deps.db
+      .select({
+        id: rssSources.id,
+        ingestIntervalMinutes: rssSources.ingestIntervalMinutes,
+      })
+      .from(rssSources)
+      .where(eq(rssSources.active, true));
 
-      const { data: sources, error: sourcesError } = await deps.supabase
-        .from("rss_sources")
-        .select("id,ingest_interval_minutes,active")
-        .eq("active", true);
+    const sourceIds = activeSources.map((s) => s.id);
 
-      if (sourcesError) {
-        return reply.code(500).send({ error: sourcesError.message });
-      }
+    // Get latest successful runs per source
+    type RunRow = { sourceId: string | null; finishedAt: Date | null; createdAt: Date };
+    const latestSuccessBySource = new Map<string, RunRow>();
 
-      const activeSources = sources ?? [];
-      const sourceIds = activeSources.map((source) => source.id);
-      const latestSuccessBySource = new Map<string, FetchRunRow>();
+    if (sourceIds.length > 0) {
+      const runs = await deps.db
+        .select({
+          sourceId: feedFetchRuns.sourceId,
+          finishedAt: feedFetchRuns.finishedAt,
+          createdAt: feedFetchRuns.createdAt,
+        })
+        .from(feedFetchRuns)
+        .where(
+          and(inArray(feedFetchRuns.sourceId, sourceIds), eq(feedFetchRuns.status, "success")),
+        )
+        .orderBy(desc(feedFetchRuns.createdAt));
 
-      if (sourceIds.length > 0) {
-        const { data: runs, error: runsError } = await deps.supabase
-          .from("feed_fetch_runs")
-          .select(
-            "source_id,status,started_at,finished_at,duration_ms,item_count,item_added,error_message,created_at",
-          )
-          .in("source_id", sourceIds)
-          .eq("status", "success")
-          .order("created_at", { ascending: false });
-
-        if (runsError) {
-          return reply.code(500).send({ error: runsError.message });
-        }
-
-        for (const run of runs ?? []) {
-          if (!latestSuccessBySource.has(run.source_id)) {
-            latestSuccessBySource.set(run.source_id, run);
-          }
+      for (const run of runs) {
+        if (run.sourceId && !latestSuccessBySource.has(run.sourceId)) {
+          latestSuccessBySource.set(run.sourceId, run);
         }
       }
+    }
 
-      let staleSources = 0;
-      for (const source of activeSources) {
-        const intervalMinutes = source.ingest_interval_minutes;
-        const lastSuccess = latestSuccessBySource.get(source.id);
-        if (!intervalMinutes) {
-          staleSources += 1;
-          continue;
+    let staleSources = 0;
+    for (const source of activeSources) {
+      const interval = source.ingestIntervalMinutes;
+      if (!interval) {
+        staleSources++;
+        continue;
+      }
+      const lastSuccess = latestSuccessBySource.get(source.id);
+      if (!lastSuccess) {
+        staleSources++;
+        continue;
+      }
+      const lastAt = (lastSuccess.finishedAt ?? lastSuccess.createdAt).getTime();
+      if (now > lastAt + interval * 2 * 60 * 1000) {
+        staleSources++;
+      }
+    }
+
+    const ingestQueueCounts = await deps.ingestQueue.getJobCounts(
+      "waiting",
+      "active",
+      "delayed",
+      "failed",
+    );
+
+    return {
+      total_sources: totalRes[0]?.count ?? 0,
+      active_sources: activeRes[0]?.count ?? 0,
+      items_last_24h: itemsRes[0]?.count ?? 0,
+      stale_sources: staleSources,
+      queues: {
+        feed: ingestQueueCounts,
+      },
+    };
+  });
+
+  app.get("/stats/sources", { preHandler: deps.requireApiKey }, async () => {
+    const sources = await deps.db
+      .select({
+        id: rssSources.id,
+        url: rssSources.url,
+        name: rssSources.name,
+        active: rssSources.active,
+        sectorId: rssSources.sectorId,
+        ingestIntervalMinutes: rssSources.ingestIntervalMinutes,
+        sector: {
+          id: sectors.id,
+          name: sectors.name,
+          slug: sectors.slug,
+        },
+      })
+      .from(rssSources)
+      .leftJoin(sectors, eq(rssSources.sectorId, sectors.id))
+      .orderBy(desc(rssSources.createdAt));
+
+    const sourceIds = sources.map((s) => s.id);
+
+    type RunRow = {
+      sourceId: string | null;
+      status: string;
+      startedAt: Date;
+      finishedAt: Date | null;
+      durationMs: number | null;
+      itemCount: number | null;
+      itemAdded: number | null;
+      errorMessage: string | null;
+      createdAt: Date;
+    };
+    const latestRunBySource = new Map<string, RunRow>();
+    const latestSuccessBySource = new Map<string, RunRow>();
+
+    if (sourceIds.length > 0) {
+      const runs = await deps.db
+        .select({
+          sourceId: feedFetchRuns.sourceId,
+          status: feedFetchRuns.status,
+          startedAt: feedFetchRuns.startedAt,
+          finishedAt: feedFetchRuns.finishedAt,
+          durationMs: feedFetchRuns.durationMs,
+          itemCount: feedFetchRuns.itemCount,
+          itemAdded: feedFetchRuns.itemAdded,
+          errorMessage: feedFetchRuns.errorMessage,
+          createdAt: feedFetchRuns.createdAt,
+        })
+        .from(feedFetchRuns)
+        .where(inArray(feedFetchRuns.sourceId, sourceIds))
+        .orderBy(desc(feedFetchRuns.createdAt));
+
+      for (const run of runs) {
+        if (!run.sourceId) continue;
+        if (!latestRunBySource.has(run.sourceId)) {
+          latestRunBySource.set(run.sourceId, run);
         }
-        if (!lastSuccess) {
-          staleSources += 1;
-          continue;
-        }
-        const lastSuccessAt = Date.parse(getRunTimestamp(lastSuccess));
-        if (Number.isNaN(lastSuccessAt)) {
-          staleSources += 1;
-          continue;
-        }
-        if (now > lastSuccessAt + intervalMinutes * 2 * 60 * 1000) {
-          staleSources += 1;
+        if (run.status === "success" && !latestSuccessBySource.has(run.sourceId)) {
+          latestSuccessBySource.set(run.sourceId, run);
         }
       }
+    }
 
-      const feedQueueCounts = await deps.feedQueue.getJobCounts(
-        "waiting",
-        "active",
-        "delayed",
-        "failed",
-      );
+    const now = Date.now();
+    return sources.map((source) => {
+      const latestRun = latestRunBySource.get(source.id) ?? null;
+      const latestSuccess = latestSuccessBySource.get(source.id) ?? null;
+      const intervalMinutes = source.ingestIntervalMinutes;
+      const lastSuccessAt = latestSuccess
+        ? (latestSuccess.finishedAt ?? latestSuccess.createdAt)
+        : null;
+
+      let isStale = false;
+      if (source.active) {
+        if (!intervalMinutes || !lastSuccessAt) {
+          isStale = true;
+        } else {
+          isStale = now > lastSuccessAt.getTime() + intervalMinutes * 2 * 60 * 1000;
+        }
+      }
 
       return {
-        total_sources: totalSourcesRes.count ?? 0,
-        active_sources: activeSourcesRes.count ?? 0,
-        items_last_24h: itemsRes.count ?? 0,
-        stale_sources: staleSources,
-        queues: {
-          feed: feedQueueCounts,
-        },
-      };
-    },
-  );
-
-  app.get(
-    "/stats/sources",
-    { preHandler: deps.requireApiKey },
-    async (_request, reply) => {
-      const { data: sources, error } = await deps.supabase
-        .from("rss_sources")
-        .select("id,url,name,active,sector_id,ingest_interval_minutes,sectors(id,name,slug)")
-        .order("created_at", { ascending: false });
-
-      if (error) {
-        return reply.code(500).send({ error: error.message });
-      }
-
-      const sourceIds = (sources ?? []).map((source) => source.id);
-      const latestRunBySource = new Map<string, FetchRunRow>();
-      const latestSuccessBySource = new Map<string, FetchRunRow>();
-
-      if (sourceIds.length > 0) {
-        const { data: runs, error: runsError } = await deps.supabase
-          .from("feed_fetch_runs")
-          .select(
-            "source_id,status,started_at,finished_at,duration_ms,item_count,item_added,error_message,created_at",
-          )
-          .in("source_id", sourceIds)
-          .order("created_at", { ascending: false });
-
-        if (runsError) {
-          return reply.code(500).send({ error: runsError.message });
-        }
-
-        for (const run of runs ?? []) {
-          if (!latestRunBySource.has(run.source_id)) {
-            latestRunBySource.set(run.source_id, run);
-          }
-          if (run.status === "success" && !latestSuccessBySource.has(run.source_id)) {
-            latestSuccessBySource.set(run.source_id, run);
-          }
-        }
-      }
-
-      const now = Date.now();
-      const response = (sources ?? []).map((source) => {
-        const latestRun = latestRunBySource.get(source.id) ?? null;
-        const latestSuccess = latestSuccessBySource.get(source.id) ?? null;
-        const intervalMinutes = source.ingest_interval_minutes ?? null;
-        const lastSuccessAt = latestSuccess ? getRunTimestamp(latestSuccess) : null;
-
-        let isStale = false;
-        if (source.active) {
-          if (!intervalMinutes || !lastSuccessAt) {
-            isStale = true;
-          } else {
-            const lastSuccessMs = Date.parse(lastSuccessAt);
-            if (Number.isNaN(lastSuccessMs)) {
-              isStale = true;
-            } else {
-              isStale =
-                now > lastSuccessMs + intervalMinutes * 2 * 60 * 1000;
+        id: source.id,
+        name: source.name,
+        url: source.url,
+        active: source.active,
+        sector: source.sector?.id ? source.sector : null,
+        expected_interval_minutes: intervalMinutes,
+        last_success_at: lastSuccessAt?.toISOString() ?? null,
+        last_run: latestRun
+          ? {
+              status: latestRun.status,
+              started_at: latestRun.startedAt.toISOString(),
+              finished_at: latestRun.finishedAt?.toISOString() ?? null,
+              duration_ms: latestRun.durationMs,
+              item_count: latestRun.itemCount,
+              item_added: latestRun.itemAdded,
+              error_message: latestRun.errorMessage,
             }
-          }
-        }
-
-        return {
-          id: source.id,
-          name: source.name,
-          url: source.url,
-          active: source.active,
-          sector: (() => {
-            const s = source.sectors as unknown as { id: string; name: string; slug: string } | null;
-            return s ? { id: s.id, name: s.name, slug: s.slug } : null;
-          })(),
-          expected_interval_minutes: intervalMinutes,
-          last_success_at: lastSuccessAt,
-          last_run: latestRun
-            ? {
-                status: latestRun.status,
-                started_at: latestRun.started_at,
-                finished_at: latestRun.finished_at,
-                duration_ms: latestRun.duration_ms,
-                item_count: latestRun.item_count,
-                item_added: latestRun.item_added,
-                error_message: latestRun.error_message,
-              }
-            : null,
-          is_stale: isStale,
-        };
-      });
-
-      return response;
-    },
-  );
+          : null,
+        is_stale: isStale,
+      };
+    });
+  });
 };

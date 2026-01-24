@@ -2,22 +2,24 @@
   "permissions": {
     "allow": [
       "Bash(tree:*)",
-      "Bash(xargs ls:*)",
-      "Bash(npx supabase:*)",
       "Bash(npm install)",
-      "Bash(npm run dev:shared:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm run dev:*)",
+      "Bash(npm run db:*)",
       "Bash(docker ps:*)",
-      "Bash(npm run db:start:*)",
       "Bash(docker stop:*)",
       "Bash(docker rm:*)",
       "Bash(docker compose:*)",
+      "Bash(docker network ls:*)",
+      "Bash(docker volume ls:*)",
+      "Bash(docker volume rm:*)",
+      "Bash(docker network rm:*)",
       "Bash(git status:*)",
       "Bash(git add:*)",
       "Bash(git rm:*)",
-      "Bash(git commit -m \"$\\(cat <<''EOF''\nclean slate: supabase local dev, unified env, consolidated migrations\n\n- Delete scattered SQL files, docs/, media.md, monitoring.md, .gemini-clipboard/\n- Consolidate schema into supabase/migrations/20250101000000_initial_schema.sql\n- Set up Supabase local dev \\(config.toml, seed.sql\\)\n- Single root .env for all packages \\(API, worker, frontend\\)\n- Root docker-compose.yml for Redis\n- Unified dev scripts \\(db:start, db:reset, db:push, dev\\)\n- Remove unused LLM env vars from shared schema\n- Add missing dotenv dep to worker\n- Link remote Supabase project for db:push workflow\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
-      "Bash(npm run db:reset:*)",
-      "Bash(npm run build:*)",
-      "Bash(npm run dev:*)"
+      "Bash(npm run db:push:*)",
+      "Bash(npm install:*)",
+      "Bash(npx drizzle-kit:*)"
     ]
   }
 }

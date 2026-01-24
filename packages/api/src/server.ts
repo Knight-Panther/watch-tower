@@ -3,41 +3,34 @@ import { fileURLToPath } from "url";
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import { Queue } from "bullmq";
-import {
-  baseEnvSchema,
-  createSupabaseClient,
-  QUEUE_FEED,
-  QUEUE_MAINTENANCE,
-} from "@watch-tower/shared";
-import { registerHealthRoutes } from "./routes/health";
-import { registerSectorRoutes } from "./routes/sectors";
-import { registerSourceRoutes } from "./routes/sources";
-import { registerConfigRoutes } from "./routes/config";
-import { registerIngestRoutes } from "./routes/ingest";
-import { registerStatsRoutes } from "./routes/stats";
-import { createRequireApiKey } from "./utils/auth";
+import { baseEnvSchema, QUEUE_INGEST, QUEUE_MAINTENANCE } from "@watch-tower/shared";
+import { createDb, type Database } from "@watch-tower/db";
+import { registerHealthRoutes } from "./routes/health.js";
+import { registerSectorRoutes } from "./routes/sectors.js";
+import { registerSourceRoutes } from "./routes/sources.js";
+import { registerConfigRoutes } from "./routes/config.js";
+import { registerIngestRoutes } from "./routes/ingest.js";
+import { registerStatsRoutes } from "./routes/stats.js";
+import { createRequireApiKey } from "./utils/auth.js";
 
 dotenv.config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) });
 
 export type ApiDeps = {
-  supabase: ReturnType<typeof createSupabaseClient>;
+  db: Database;
   maintenanceQueue: Queue;
-  feedQueue: Queue;
+  ingestQueue: Queue;
   requireApiKey: ReturnType<typeof createRequireApiKey>;
 };
 
 export const buildApp = async (): Promise<FastifyInstance> => {
   const env = baseEnvSchema.parse(process.env);
-  const supabase = createSupabaseClient({
-    url: env.SUPABASE_URL,
-    serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
-  });
+  const db = createDb(env.DATABASE_URL);
 
   const queueConnection = {
     host: env.REDIS_HOST,
     port: env.REDIS_PORT,
   };
-  const feedQueue = new Queue(QUEUE_FEED, { connection: queueConnection });
+  const ingestQueue = new Queue(QUEUE_INGEST, { connection: queueConnection });
   const maintenanceQueue = new Queue(QUEUE_MAINTENANCE, { connection: queueConnection });
 
   const app = Fastify({ logger: true });
@@ -47,7 +40,7 @@ export const buildApp = async (): Promise<FastifyInstance> => {
   });
 
   const requireApiKey = createRequireApiKey(env.API_KEY ?? "");
-  const deps: ApiDeps = { supabase, maintenanceQueue, feedQueue, requireApiKey };
+  const deps: ApiDeps = { db, maintenanceQueue, ingestQueue, requireApiKey };
 
   registerHealthRoutes(app);
   registerSectorRoutes(app, deps);

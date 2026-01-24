@@ -1,5 +1,7 @@
 import type { FastifyInstance } from "fastify";
-import type { ApiDeps } from "../server";
+import { eq, asc } from "drizzle-orm";
+import { sectors, rssSources } from "@watch-tower/db";
+import type { ApiDeps } from "../server.js";
 
 const slugify = (value: string) =>
   value
@@ -9,17 +11,8 @@ const slugify = (value: string) =>
     .replace(/^-+|-+$/g, "");
 
 export const registerSectorRoutes = (app: FastifyInstance, deps: ApiDeps) => {
-  app.get("/sectors", { preHandler: deps.requireApiKey }, async (_request, reply) => {
-    const { data, error } = await deps.supabase
-      .from("sectors")
-      .select("id,name,slug,default_max_age_days,created_at")
-      .order("name", { ascending: true });
-
-    if (error) {
-      return reply.code(500).send({ error: error.message });
-    }
-
-    return data ?? [];
+  app.get("/sectors", { preHandler: deps.requireApiKey }, async () => {
+    return deps.db.select().from(sectors).orderBy(asc(sectors.name));
   });
 
   app.post<{
@@ -38,24 +31,24 @@ export const registerSectorRoutes = (app: FastifyInstance, deps: ApiDeps) => {
         .code(400)
         .send({ error: "default_max_age_days must be between 1 and 15" });
     }
-    const { data, error } = await deps.supabase
-      .from("sectors")
-      .insert({
-        name,
-        slug: slugify(name),
-        default_max_age_days: default_max_age_days ?? 5,
-      })
-      .select("id,name,slug,default_max_age_days,created_at")
-      .single();
 
-    if (error) {
-      if (error.code === "23505") {
+    try {
+      const [row] = await deps.db
+        .insert(sectors)
+        .values({
+          name,
+          slug: slugify(name),
+          defaultMaxAgeDays: default_max_age_days ?? 5,
+        })
+        .returning();
+      return row;
+    } catch (err: unknown) {
+      const pgErr = err as { code?: string };
+      if (pgErr.code === "23505") {
         return reply.code(409).send({ error: "Sector already exists" });
       }
-      return reply.code(500).send({ error: error.message });
+      throw err;
     }
-
-    return data;
   });
 
   app.patch<{
@@ -73,26 +66,22 @@ export const registerSectorRoutes = (app: FastifyInstance, deps: ApiDeps) => {
         .code(400)
         .send({ error: "default_max_age_days must be between 1 and 15" });
     }
-    const updates = {
-      ...(default_max_age_days !== undefined ? { default_max_age_days } : {}),
-    };
 
-    if (Object.keys(updates).length === 0) {
+    if (default_max_age_days === undefined) {
       return reply.code(400).send({ error: "No updates provided" });
     }
 
-    const { data, error } = await deps.supabase
-      .from("sectors")
-      .update(updates)
-      .eq("id", id)
-      .select("id,name,slug,default_max_age_days,created_at")
-      .single();
+    const [row] = await deps.db
+      .update(sectors)
+      .set({ defaultMaxAgeDays: default_max_age_days })
+      .where(eq(sectors.id, id))
+      .returning();
 
-    if (error) {
-      return reply.code(500).send({ error: error.message });
+    if (!row) {
+      return reply.code(404).send({ error: "Sector not found" });
     }
 
-    return data;
+    return row;
   });
 
   app.delete<{
@@ -100,30 +89,21 @@ export const registerSectorRoutes = (app: FastifyInstance, deps: ApiDeps) => {
   }>("/sectors/:id", { preHandler: deps.requireApiKey }, async (request, reply) => {
     const { id } = request.params;
 
-    const { error: clearError } = await deps.supabase
-      .from("rss_sources")
-      .update({ sector_id: null })
-      .eq("sector_id", id);
+    // Clear sector_id from sources before deleting
+    await deps.db
+      .update(rssSources)
+      .set({ sectorId: null })
+      .where(eq(rssSources.sectorId, id));
 
-    if (clearError) {
-      return reply.code(500).send({ error: clearError.message });
-    }
+    const [row] = await deps.db
+      .delete(sectors)
+      .where(eq(sectors.id, id))
+      .returning();
 
-    const { data, error } = await deps.supabase
-      .from("sectors")
-      .delete()
-      .eq("id", id)
-      .select("id,name,slug,default_max_age_days,created_at")
-      .maybeSingle();
-
-    if (error) {
-      return reply.code(500).send({ error: error.message });
-    }
-
-    if (!data) {
+    if (!row) {
       return reply.code(404).send({ error: "Sector not found" });
     }
 
-    return data;
+    return row;
   });
 };
