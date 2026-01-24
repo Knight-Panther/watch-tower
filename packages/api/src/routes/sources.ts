@@ -208,6 +208,29 @@ export const registerSourceRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       return reply.code(404).send({ error: "Source not found" });
     }
 
-    return row;
+    // Re-query with sector join to return full shape matching GET /sources
+    const [full] = await deps.db
+      .select({
+        id: rssSources.id,
+        url: rssSources.url,
+        name: rssSources.name,
+        active: rssSources.active,
+        sector_id: rssSources.sectorId,
+        max_age_days: rssSources.maxAgeDays,
+        ingest_interval_minutes: rssSources.ingestIntervalMinutes,
+        created_at: rssSources.createdAt,
+        last_fetched_at: rssSources.lastFetchedAt,
+        sectors: {
+          id: sectors.id,
+          name: sectors.name,
+          slug: sectors.slug,
+          default_max_age_days: sectors.defaultMaxAgeDays,
+        },
+      })
+      .from(rssSources)
+      .leftJoin(sectors, eq(rssSources.sectorId, sectors.id))
+      .where(eq(rssSources.id, id));
+
+    return { ...full, sectors: full.sectors?.id ? full.sectors : null };
   });
 };

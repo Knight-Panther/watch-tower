@@ -277,16 +277,16 @@ export default function App() {
       maxAgeValue = parsed;
     }
 
-    const sectorId =
-      sectorDrafts[source.id] ?? source.sector_id ?? "";
+    const sectorDraft = sectorDrafts[source.id];
+    const sectorId = sectorDraft ?? source.sector_id ?? "";
 
-    if (!sectorId) {
+    const sectorChanged = sectorId !== (source.sector_id ?? "");
+
+    if (sectorChanged && !sectorId) {
       setError("Select a sector to save");
       toast.error("Select a sector to save");
       return;
     }
-
-    const sectorChanged = sectorId !== (source.sector_id ?? "");
     const maxAgeChanged =
       maxAgeValue !==
       (source.max_age_days ?? source.sectors?.default_max_age_days ?? 5);
@@ -317,15 +317,24 @@ export default function App() {
 
     try {
       const updated = await updateSource(source.id, {
-        sector_id: sectorId,
+        ...(sectorChanged ? { sector_id: sectorId } : {}),
         max_age_days: maxAgeValue,
         ingest_interval_minutes: intervalValue,
       });
       setSources((prev) =>
         prev.map((item) => (item.id === source.id ? updated : item)),
       );
-      setMaxAgeDrafts((prev) => ({ ...prev, [source.id]: rawValue }));
+      setMaxAgeDrafts((prev) => {
+        const next = { ...prev };
+        delete next[source.id];
+        return next;
+      });
       setSectorDrafts((prev) => {
+        const next = { ...prev };
+        delete next[source.id];
+        return next;
+      });
+      setSourceIntervalDrafts((prev) => {
         const next = { ...prev };
         delete next[source.id];
         return next;
