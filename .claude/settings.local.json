@@ -19,7 +19,10 @@
       "Bash(git rm:*)",
       "Bash(npm run db:push:*)",
       "Bash(npm install:*)",
-      "Bash(npx drizzle-kit:*)"
+      "Bash(npx drizzle-kit:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(powershell -Command:*)"
     ]
   }
 }

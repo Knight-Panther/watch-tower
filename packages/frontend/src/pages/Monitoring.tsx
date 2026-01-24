@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { StatsOverview, StatsSource } from "../api";
+import Spinner from "../components/Spinner";
 
 type MonitoringProps = {
   overview: StatsOverview | null;
@@ -335,7 +336,9 @@ export default function Monitoring({
             <p className="text-sm text-slate-400">No sources match the filters.</p>
           ) : null}
           {isLoading ? (
-            <p className="text-sm text-slate-400">Loading monitoring data...</p>
+            <div className="flex items-center gap-2 text-sm text-slate-400">
+              <Spinner /> Loading monitoring data...
+            </div>
           ) : null}
         </div>
       </section>

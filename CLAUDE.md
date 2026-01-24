@@ -58,6 +58,7 @@ npm run db:generate        # Generate migrations from schema changes
 npm run db:migrate         # Run pending migrations
 npm run db:push            # Push schema directly (dev only)
 npm run db:studio          # Open Drizzle Studio (DB GUI)
+npm run db:seed            # Seed app_config + sample data
 
 # Development (Turborepo)
 npm run dev                # Run all services in parallel
@@ -140,10 +141,10 @@ REDIS_PORT=6379
 API_KEY=local-dev-key
 PORT=3001
 
-# LLM Providers
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
-LLM_PROVIDER=claude          # 'claude' | 'openai'
+# LLM Providers (Phase 4 — not yet used)
+# OPENAI_API_KEY=sk-...
+# ANTHROPIC_API_KEY=sk-ant-...
+# LLM_PROVIDER=claude          # 'claude' | 'openai'
 
 # Frontend
 VITE_API_URL=http://localhost:3001
@@ -190,3 +191,17 @@ npm run dev                # Start API + Worker + Frontend
 3. **Denormalized sector_id on articles** — avoids JOIN through rss_sources on every vector/LLM query
 4. **Separate packages for llm/embeddings/social** — clean interfaces, testable, swappable providers
 5. **Turborepo** — handles build dependency graph automatically, caches builds
+
+## Priority Tasks
+
+Implementation tasks are tracked in the `priority-tasks/` folder at the project root.
+
+- **Active tasks**: `taskN.md` files contain detailed implementation steps
+- **Completed tasks**: Renamed to `taskN_done.md` after all items are implemented
+- **Always check this folder first** when starting a new session to understand pending work
+
+Current tasks:
+- (none pending)
+
+Completed:
+- `task1_done.md` — Infrastructure hardening & reliability

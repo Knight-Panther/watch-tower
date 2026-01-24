@@ -1,4 +1,7 @@
+import Spinner from "../components/Spinner";
+
 type DatabaseProps = {
+  isLoading: boolean;
   ttlDays: string;
   ttlError: string | null;
   onTtlChange: (value: string) => void;
@@ -12,6 +15,7 @@ type DatabaseProps = {
 };
 
 export default function Database({
+  isLoading,
   ttlDays,
   ttlError,
   onTtlChange,
@@ -23,6 +27,17 @@ export default function Database({
   onFetchRunsTtlUnitChange,
   onSaveFetchRunsTtl,
 }: DatabaseProps) {
+  if (isLoading) {
+    return (
+      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+        <h1 className="text-3xl font-semibold tracking-tight">Database</h1>
+        <div className="mt-6 flex items-center gap-2 text-sm text-slate-400">
+          <Spinner /> Loading settings...
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
       <h1 className="text-3xl font-semibold tracking-tight">Database</h1>

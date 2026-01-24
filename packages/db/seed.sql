@@ -15,3 +15,8 @@ INSERT INTO rss_sources (url, name, active, sector_id, ingest_interval_minutes, 
   ('https://www.wired.com/feed/rss', 'Wired', true,
     (SELECT id FROM sectors WHERE slug = 'science'), 15, 5)
 ON CONFLICT (url) DO NOTHING;
+
+INSERT INTO app_config (key, value, updated_at) VALUES
+  ('feed_items_ttl_days', '60', NOW()),
+  ('feed_fetch_runs_ttl_hours', '336', NOW())
+ON CONFLICT (key) DO NOTHING;

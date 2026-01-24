@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { Sector, Source } from "../api";
+import Spinner from "../components/Spinner";
 
 type HomeProps = {
   sources: Source[];
@@ -279,9 +280,7 @@ export default function Home(props: HomeProps) {
             >
               Delete selected
             </button>
-            {props.isLoading ? (
-              <span className="text-xs text-slate-400">Loading...</span>
-            ) : null}
+            {props.isLoading ? <Spinner /> : null}
           </div>
         </div>
 

@@ -7,6 +7,7 @@ import {
   deleteSector,
   deleteSource,
   batchSourceAction,
+  getConstraints,
   getFeedItemsTtl,
   getFeedFetchRunsTtl,
   setFeedItemsTtl,
@@ -14,6 +15,7 @@ import {
   listSectors,
   listSources,
   runIngest,
+  type Constraints,
   type Sector,
   type Source,
   updateSector,
@@ -42,6 +44,7 @@ export default function App() {
   const [sources, setSources] = useState<Source[]>([]);
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [constraints, setConstraints] = useState<Constraints | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sourceForm, setSourceForm] = useState(emptySourceForm);
   const [sourceErrors, setSourceErrors] = useState<{
@@ -90,14 +93,17 @@ export default function App() {
     setIsLoading(true);
     setError(null);
     try {
-      const [sourcesData, sectorsData, ttlValue, fetchRunsTtlHours] = await Promise.all([
-        listSources(),
-        listSectors(),
-        getFeedItemsTtl(),
-        getFeedFetchRunsTtl(),
-      ]);
+      const [sourcesData, sectorsData, ttlValue, fetchRunsTtlHours, constraintsData] =
+        await Promise.all([
+          listSources(),
+          listSectors(),
+          getFeedItemsTtl(),
+          getFeedFetchRunsTtl(),
+          getConstraints(),
+        ]);
       setSources(sourcesData);
       setSectors(sectorsData);
+      setConstraints(constraintsData);
       setTtlDays(String(ttlValue));
       if (Number.isNaN(fetchRunsTtlHours)) {
         setFetchRunsTtlUnit("days");
@@ -154,19 +160,23 @@ export default function App() {
       return;
     }
 
+    const maxAgeMin = constraints?.maxAge.min ?? 1;
+    const maxAgeMax = constraints?.maxAge.max ?? 15;
     const maxAge =
       sourceForm.maxAgeDays.trim() === ""
         ? null
         : Number(sourceForm.maxAgeDays);
-    if (maxAge !== null && (Number.isNaN(maxAge) || maxAge < 1 || maxAge > 15)) {
+    if (maxAge !== null && (Number.isNaN(maxAge) || maxAge < maxAgeMin || maxAge > maxAgeMax)) {
       setSourceErrors((prev) => ({
         ...prev,
-        maxAgeDays: "Max age must be between 1 and 15",
+        maxAgeDays: `Max age must be between ${maxAgeMin} and ${maxAgeMax}`,
       }));
-      setError("Max age must be between 1 and 15");
+      setError(`Max age must be between ${maxAgeMin} and ${maxAgeMax}`);
       return;
     }
 
+    const intervalMin = constraints?.interval.min ?? 1;
+    const intervalMax = constraints?.interval.max ?? 4320;
     const intervalRaw = sourceForm.ingestIntervalMinutes.trim();
     if (!intervalRaw) {
       setSourceErrors((prev) => ({
@@ -177,12 +187,12 @@ export default function App() {
       return;
     }
     const intervalValue = Number(intervalRaw);
-    if (Number.isNaN(intervalValue) || intervalValue < 1 || intervalValue > 4320) {
+    if (Number.isNaN(intervalValue) || intervalValue < intervalMin || intervalValue > intervalMax) {
       setSourceErrors((prev) => ({
         ...prev,
-        ingestIntervalMinutes: "Interval must be 1-4320",
+        ingestIntervalMinutes: `Interval must be ${intervalMin}-${intervalMax}`,
       }));
-      setError("Interval must be between 1 and 4320 minutes");
+      setError(`Interval must be between ${intervalMin} and ${intervalMax} minutes`);
       return;
     }
 
@@ -254,12 +264,14 @@ export default function App() {
           5,
       );
 
+    const maMin = constraints?.maxAge.min ?? 1;
+    const maMax = constraints?.maxAge.max ?? 15;
     let maxAgeValue: number | null = null;
     if (rawValue.trim() !== "") {
       const parsed = Number(rawValue);
-      if (Number.isNaN(parsed) || parsed < 1 || parsed > 15) {
-        setError("Max age must be between 1 and 15");
-        toast.error("Max age must be between 1 and 15");
+      if (Number.isNaN(parsed) || parsed < maMin || parsed > maMax) {
+        setError(`Max age must be between ${maMin} and ${maMax}`);
+        toast.error(`Max age must be between ${maMin} and ${maMax}`);
         return;
       }
       maxAgeValue = parsed;
@@ -279,6 +291,8 @@ export default function App() {
       maxAgeValue !==
       (source.max_age_days ?? source.sectors?.default_max_age_days ?? 5);
 
+    const intMin = constraints?.interval.min ?? 1;
+    const intMax = constraints?.interval.max ?? 4320;
     const intervalValueRaw =
       sourceIntervalDrafts[source.id] ??
       String(source.ingest_interval_minutes);
@@ -288,9 +302,9 @@ export default function App() {
       return;
     }
     const intervalValue = Number(intervalValueRaw);
-    if (Number.isNaN(intervalValue) || intervalValue < 1 || intervalValue > 4320) {
-      setError("Interval must be between 1 and 4320 minutes");
-      toast.error("Interval must be between 1 and 4320 minutes");
+    if (Number.isNaN(intervalValue) || intervalValue < intMin || intervalValue > intMax) {
+      setError(`Interval must be between ${intMin} and ${intMax} minutes`);
+      toast.error(`Interval must be between ${intMin} and ${intMax} minutes`);
       return;
     }
     const intervalChanged =
@@ -352,13 +366,15 @@ export default function App() {
       return;
     }
 
+    const sectorMaMin = constraints?.maxAge.min ?? 1;
+    const sectorMaMax = constraints?.maxAge.max ?? 15;
     const maxAge = Number(sectorForm.defaultMaxAgeDays);
-    if (Number.isNaN(maxAge) || maxAge < 1 || maxAge > 15) {
+    if (Number.isNaN(maxAge) || maxAge < sectorMaMin || maxAge > sectorMaMax) {
       setSectorErrors((prev) => ({
         ...prev,
-        defaultMaxAgeDays: "Default max age must be 1-15",
+        defaultMaxAgeDays: `Default max age must be ${sectorMaMin}-${sectorMaMax}`,
       }));
-      setError("Default max age must be between 1 and 15");
+      setError(`Default max age must be between ${sectorMaMin} and ${sectorMaMax}`);
       return;
     }
 
@@ -397,10 +413,12 @@ export default function App() {
   };
 
   const onSaveTtl = async () => {
+    const ttlMin = constraints?.feedItemsTtl.min ?? 30;
+    const ttlMax = constraints?.feedItemsTtl.max ?? 60;
     const value = Number(ttlDays);
-    if (Number.isNaN(value) || value < 30 || value > 60) {
-      setTtlError("TTL must be between 30 and 60 days");
-      toast.error("TTL must be between 30 and 60 days");
+    if (Number.isNaN(value) || value < ttlMin || value > ttlMax) {
+      setTtlError(`TTL must be between ${ttlMin} and ${ttlMax} days`);
+      toast.error(`TTL must be between ${ttlMin} and ${ttlMax} days`);
       return;
     }
     try {
@@ -437,11 +455,13 @@ export default function App() {
       return;
     }
 
+    const fetchRunsMax = constraints?.fetchRunsTtl.max ?? 2160;
     const hours =
       fetchRunsTtlUnit === "days" ? rawValue * 24 : rawValue;
-    if (hours > 2160) {
-      setFetchRunsTtlError("TTL must be 90 days or less");
-      toast.error("TTL must be 90 days or less");
+    if (hours > fetchRunsMax) {
+      const maxDays = Math.floor(fetchRunsMax / 24);
+      setFetchRunsTtlError(`TTL must be ${maxDays} days or less`);
+      toast.error(`TTL must be ${maxDays} days or less`);
       return;
     }
 
@@ -556,11 +576,13 @@ export default function App() {
       return;
     }
 
+    const saveMaMin = constraints?.maxAge.min ?? 1;
+    const saveMaMax = constraints?.maxAge.max ?? 15;
     const maxAgeRaw =
       sectorMaxAgeDrafts[sectorId] ?? String(sector.default_max_age_days);
     const maxAgeValue = Number(maxAgeRaw);
-    if (Number.isNaN(maxAgeValue) || maxAgeValue < 1 || maxAgeValue > 15) {
-      toast.error("Default max age must be between 1 and 15");
+    if (Number.isNaN(maxAgeValue) || maxAgeValue < saveMaMin || maxAgeValue > saveMaMax) {
+      toast.error(`Default max age must be between ${saveMaMin} and ${saveMaMax}`);
       return;
     }
 
@@ -695,6 +717,7 @@ export default function App() {
           path="/database"
           element={
             <Database
+              isLoading={isLoading}
               ttlDays={ttlDays}
               ttlError={ttlError}
               onTtlChange={setTtlDays}

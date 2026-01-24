@@ -258,6 +258,23 @@ export const getStatsSources = async (): Promise<StatsSource[]> => {
   return res.json();
 };
 
+export type Constraints = {
+  feedItemsTtl: { min: number; max: number; unit: string };
+  fetchRunsTtl: { min: number; max: number; unit: string };
+  interval: { min: number; max: number; unit: string };
+  maxAge: { min: number; max: number; unit: string };
+};
+
+export const getConstraints = async (): Promise<Constraints> => {
+  const res = await fetch(`${API_URL}/config/constraints`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    throw new Error("Failed to load constraints");
+  }
+  return res.json();
+};
+
 export const deleteSector = async (id: string): Promise<Sector> => {
   const res = await fetch(`${API_URL}/sectors/${id}`, {
     method: "DELETE",

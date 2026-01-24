@@ -2,13 +2,19 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "./schema.js";
 
-export type Database = ReturnType<typeof createDb>;
+type DbResult = {
+  db: ReturnType<typeof drizzle<typeof schema>>;
+  close: () => Promise<void>;
+};
 
-export const createDb = (connectionString: string) => {
+export type Database = DbResult["db"];
+
+export const createDb = (connectionString: string): DbResult => {
   const pool = new pg.Pool({
     connectionString,
     max: 10,
   });
 
-  return drizzle(pool, { schema });
+  const db = drizzle(pool, { schema });
+  return { db, close: () => pool.end() };
 };
