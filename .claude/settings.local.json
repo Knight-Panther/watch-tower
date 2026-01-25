@@ -23,7 +23,8 @@
       "Bash(netstat:*)",
       "Bash(findstr:*)",
       "Bash(powershell -Command:*)",
-      "Bash(npm run infra:up:*)"
+      "Bash(npm run infra:up:*)",
+      "Bash(node -e:*)"
     ]
   },
   "hooks": {

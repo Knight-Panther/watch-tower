@@ -27,7 +27,7 @@ export const findSimilarArticles = async (
     limit?: number; // Max results (default 5)
     excludeIds?: string[]; // Article IDs to exclude (e.g., self)
     maxAgeDays?: number; // Only compare against recent articles (default 30)
-    currentArticleCreatedAt?: Date; // Only match against older articles
+    currentArticleCreatedAt?: Date | string; // Only match against older articles (accepts ISO string from raw SQL)
   } = {},
 ): Promise<SimilarArticle[]> => {
   const {
@@ -48,8 +48,9 @@ export const findSimilarArticles = async (
       : "";
 
   // Build created_at filter for current article
+  // Handle both Date objects and ISO strings from raw SQL results
   const createdAtClause = currentArticleCreatedAt
-    ? `AND created_at < '${currentArticleCreatedAt.toISOString()}'`
+    ? `AND created_at < '${currentArticleCreatedAt instanceof Date ? currentArticleCreatedAt.toISOString() : currentArticleCreatedAt}'`
     : "";
 
   // Raw SQL for pgvector cosine distance operator

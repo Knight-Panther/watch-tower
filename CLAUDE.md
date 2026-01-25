@@ -130,6 +130,9 @@ Core tables (PostgreSQL + pgvector):
 ## Environment Variables
 
 ```env
+# Environment
+NODE_ENV=development          # development | production (affects rate limiting, etc.)
+
 # Database (PostgreSQL)
 DATABASE_URL=postgres://watchtower:watchtower@127.0.0.1:5432/watchtower
 

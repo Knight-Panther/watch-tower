@@ -83,16 +83,20 @@ export const buildApp = async () => {
     methods: ["GET", "POST", "PATCH", "DELETE"],
   });
 
-  // Rate limiting: 100 requests per minute per IP
-  await app.register(rateLimit, {
-    max: 100,
-    timeWindow: "1 minute",
-    errorResponseBuilder: () => ({
-      statusCode: 429,
-      error: "Too Many Requests",
-      message: "Rate limit exceeded. Try again later.",
-    }),
-  });
+  // Rate limiting: disabled in dev, 200/min in production
+  // Only affects API HTTP requests, not internal worker processing
+  const isDev = process.env.NODE_ENV !== "production";
+  if (!isDev) {
+    await app.register(rateLimit, {
+      max: 200,
+      timeWindow: "1 minute",
+      errorResponseBuilder: () => ({
+        statusCode: 429,
+        error: "Too Many Requests",
+        message: "Rate limit exceeded. Try again later.",
+      }),
+    });
+  }
 
   const requireApiKey = createRequireApiKey(env.API_KEY ?? "");
   const deps: ApiDeps = { db, redis, redisConnection, maintenanceQueue, ingestQueue, requireApiKey };

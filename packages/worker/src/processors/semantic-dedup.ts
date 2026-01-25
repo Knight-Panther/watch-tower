@@ -26,7 +26,7 @@ type ClaimedArticle = {
   id: string;
   title: string;
   contentSnippet: string | null;
-  createdAt: Date;
+  createdAt: string; // ISO string from raw SQL RETURNING (not Date)
 };
 
 export const createSemanticDedupWorker = ({
