@@ -21,13 +21,25 @@ dotenv.config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) }
 const main = async () => {
   const env = baseEnvSchema.parse(process.env);
   setLogLevel(env.LOG_LEVEL);
+
+  // BullMQ connection config with resilience settings
   const connection = {
     host: env.REDIS_HOST,
     port: env.REDIS_PORT,
+    maxRetriesPerRequest: null, // Required for BullMQ blocking operations
+    retryStrategy: (times: number) => Math.min(times * 100, 3000), // Exponential backoff, max 3s
   };
 
   // Redis pre-flight check
   const redis = new Redis(connection);
+
+  redis.on("error", (err) => {
+    logger.error("[worker] redis error", err.message);
+  });
+  redis.on("reconnecting", () => {
+    logger.warn("[worker] redis reconnecting...");
+  });
+
   try {
     await redis.ping();
     logger.info("[worker] redis connected");
@@ -74,12 +86,25 @@ const main = async () => {
     ingestQueue,
   });
 
+  // Worker error handlers
   ingestWorker.on("failed", (job, err) => {
     logger.error(`[ingest] job ${job?.id ?? "unknown"} failed`, err.message);
+  });
+  ingestWorker.on("error", (err) => {
+    logger.error("[ingest] worker error", err.message);
+  });
+  ingestWorker.on("stalled", (jobId) => {
+    logger.warn(`[ingest] job ${jobId} stalled - will be retried`);
   });
 
   maintenanceWorker.on("failed", (job, err) => {
     logger.error(`[maintenance] job ${job?.id ?? "unknown"} failed`, err.message);
+  });
+  maintenanceWorker.on("error", (err) => {
+    logger.error("[maintenance] worker error", err.message);
+  });
+  maintenanceWorker.on("stalled", (jobId) => {
+    logger.warn(`[maintenance] job ${jobId} stalled - will be retried`);
   });
 
   // Clean failed jobs from previous runs (waiting jobs are preserved)
@@ -130,6 +155,11 @@ const main = async () => {
 
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
+
+  // Windows: handle Ctrl+C in terminal (SIGBREAK)
+  if (process.platform === "win32") {
+    process.on("SIGBREAK", shutdown);
+  }
 };
 
 main().catch((err) => {

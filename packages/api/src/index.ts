@@ -23,3 +23,8 @@ const shutdown = async () => {
 
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
+
+// Windows: handle Ctrl+C in terminal (SIGBREAK)
+if (process.platform === "win32") {
+  process.on("SIGBREAK", shutdown);
+}
