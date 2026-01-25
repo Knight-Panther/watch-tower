@@ -7,14 +7,19 @@ import {
   baseEnvSchema,
   JOB_MAINTENANCE_CLEANUP,
   JOB_MAINTENANCE_SCHEDULE,
+  JOB_SEMANTIC_BATCH,
   QUEUE_INGEST,
   QUEUE_MAINTENANCE,
+  QUEUE_SEMANTIC_DEDUP,
+  QUEUE_LLM_BRAIN,
   setLogLevel,
   logger,
 } from "@watch-tower/shared";
 import { createDb } from "@watch-tower/db";
+import { createEmbeddingProvider } from "@watch-tower/embeddings";
 import { createIngestWorker } from "./processors/feed.js";
 import { createMaintenanceWorker } from "./processors/maintenance.js";
+import { createSemanticDedupWorker } from "./processors/semantic-dedup.js";
 
 dotenv.config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) });
 
@@ -79,12 +84,54 @@ const main = async () => {
     },
   });
 
+  // Semantic dedup queue
+  const semanticDedupQueue = new Queue(QUEUE_SEMANTIC_DEDUP, {
+    connection,
+    defaultJobOptions: {
+      attempts: 3,
+      backoff: { type: "exponential", delay: 5000 },
+      removeOnComplete: 100,
+      removeOnFail: 50,
+    },
+  });
+
+  // LLM queue (placeholder for Stage 3)
+  const llmQueue = new Queue(QUEUE_LLM_BRAIN, {
+    connection,
+    defaultJobOptions: {
+      attempts: 3,
+      backoff: { type: "exponential", delay: 10000 },
+      removeOnComplete: 100,
+      removeOnFail: 50,
+    },
+  });
+
+  // Embedding provider (skip if no API key)
+  const embeddingProvider = env.OPENAI_API_KEY
+    ? createEmbeddingProvider({
+        provider: "openai",
+        apiKey: env.OPENAI_API_KEY,
+        model: env.EMBEDDING_MODEL,
+      })
+    : null;
+
   const ingestWorker = createIngestWorker({ connection, db });
   const maintenanceWorker = createMaintenanceWorker({
     connection,
     db,
     ingestQueue,
   });
+
+  // Semantic dedup worker (only if embeddings enabled)
+  const semanticDedupWorker = embeddingProvider
+    ? createSemanticDedupWorker({
+        connection,
+        db,
+        embeddingProvider,
+        llmQueue,
+        similarityThreshold: env.SIMILARITY_THRESHOLD,
+      })
+    : null;
 
   // Worker error handlers
   ingestWorker.on("failed", (job, err) => {
@@ -107,9 +154,22 @@ const main = async () => {
     logger.warn(`[maintenance] job ${jobId} stalled - will be retried`);
   });
 
+  if (semanticDedupWorker) {
+    semanticDedupWorker.on("failed", (job, err) => {
+      logger.error(`[semantic-dedup] job ${job?.id ?? "unknown"} failed`, err.message);
+    });
+    semanticDedupWorker.on("error", (err) => {
+      logger.error("[semantic-dedup] worker error", err.message);
+    });
+    semanticDedupWorker.on("stalled", (jobId) => {
+      logger.warn(`[semantic-dedup] job ${jobId} stalled - will be retried`);
+    });
+  }
+
   // Clean failed jobs from previous runs (waiting jobs are preserved)
   await ingestQueue.clean(0, 0, "failed");
   await maintenanceQueue.clean(0, 0, "failed");
+  await semanticDedupQueue.clean(0, 0, "failed");
   logger.info("[worker] cleaned failed jobs");
 
   // Set up recurring jobs (BullMQ deduplicates by jobId automatically)
@@ -127,6 +187,19 @@ const main = async () => {
 
   // Run scheduler immediately on startup
   await maintenanceQueue.add(JOB_MAINTENANCE_SCHEDULE, {}, { jobId: "schedule-startup" });
+
+  // Set up semantic dedup recurring job (every 60 seconds)
+  if (semanticDedupWorker) {
+    await semanticDedupQueue.add(
+      JOB_SEMANTIC_BATCH,
+      {},
+      { repeat: { every: 60 * 1000 }, jobId: JOB_SEMANTIC_BATCH },
+    );
+    logger.info("[worker] semantic dedup enabled");
+  } else {
+    logger.info("[worker] semantic dedup disabled (no OPENAI_API_KEY)");
+  }
+
   logger.info("[worker] started successfully");
 
   // Graceful shutdown: finish in-flight jobs, then close connections
@@ -142,8 +215,11 @@ const main = async () => {
     try {
       await ingestWorker.close();
       await maintenanceWorker.close();
+      await semanticDedupWorker?.close();
       await ingestQueue.close();
       await maintenanceQueue.close();
+      await semanticDedupQueue.close();
+      await llmQueue.close();
       await closeDb();
     } finally {
       clearTimeout(timeoutHandle);

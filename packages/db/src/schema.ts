@@ -10,8 +10,27 @@ import {
   jsonb,
   uniqueIndex,
   index,
+  customType,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+
+// ─── Custom Types ────────────────────────────────────────────────────────────
+
+// pgvector custom type for embedding storage
+const vector = customType<{ data: number[]; driverData: string }>({
+  dataType(config) {
+    const dimensions = (config as { dimensions?: number })?.dimensions ?? 1536;
+    return `vector(${dimensions})`;
+  },
+  toDriver(value: number[]): string {
+    return `[${value.join(",")}]`;
+  },
+  fromDriver(value: string): number[] {
+    // Handle both "[1,2,3]" and "1,2,3" formats
+    const cleaned = value.replace(/^\[|\]$/g, "");
+    return cleaned.split(",").map(Number);
+  },
+});
 
 // ─── Sectors ─────────────────────────────────────────────────────────────────
 
@@ -51,6 +70,8 @@ export const articles = pgTable(
     publishedAt: timestamp("published_at", { withTimezone: true }),
     pipelineStage: text("pipeline_stage").notNull().default("ingested"),
     // Semantic dedup fields
+    embedding: vector("embedding", { dimensions: 1536 }),
+    embeddingModel: text("embedding_model"),
     isSemanticDuplicate: boolean("is_semantic_duplicate").notNull().default(false),
     duplicateOfId: uuid("duplicate_of_id"),
     similarityScore: real("similarity_score"),

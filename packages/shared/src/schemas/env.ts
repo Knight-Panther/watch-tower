@@ -7,6 +7,13 @@ export const baseEnvSchema = z.object({
   API_KEY: z.string().optional(),
   PORT: z.coerce.number().int().positive().default(3001),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+  // Embeddings (OpenAI) - empty string treated as undefined for rollback safety
+  OPENAI_API_KEY: z
+    .string()
+    .optional()
+    .transform((val) => (val === "" ? undefined : val)),
+  EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
+  SIMILARITY_THRESHOLD: z.coerce.number().min(0).max(1).default(0.85),
 });
 
 export type BaseEnv = z.infer<typeof baseEnvSchema>;

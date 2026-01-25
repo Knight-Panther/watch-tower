@@ -1,5 +1,6 @@
 import { Worker } from "bullmq";
 import { eq, and, lt, gte, desc, inArray } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import {
   JOB_INGEST_FETCH,
   JOB_MAINTENANCE_CLEANUP,
@@ -127,6 +128,20 @@ export const createMaintenanceWorker = ({ connection, db, ingestQueue }: Mainten
         const runsTtlHours = await getConfigNumber(db, "feed_fetch_runs_ttl_hours", 336);
         const runsCutoff = new Date(Date.now() - runsTtlHours * 60 * 60 * 1000);
         await db.delete(feedFetchRuns).where(lt(feedFetchRuns.createdAt, runsCutoff));
+
+        // Reset stale 'embedding' stage articles (from crashed workers)
+        // Using created_at with 10 min threshold since we don't have updated_at
+        const staleEmbeddingThreshold = new Date(Date.now() - 10 * 60 * 1000);
+        const resetResult = await db.execute(sql`
+          UPDATE articles
+          SET pipeline_stage = 'ingested'
+          WHERE pipeline_stage = 'embedding'
+            AND created_at < ${staleEmbeddingThreshold}
+          RETURNING id
+        `);
+        if (resetResult.rows.length > 0) {
+          logger.warn(`[maintenance] reset ${resetResult.rows.length} stale embedding articles`);
+        }
 
         logger.info("[maintenance] cleanup complete");
         return;
