@@ -6,6 +6,7 @@ export const baseEnvSchema = z.object({
   REDIS_PORT: z.coerce.number().int().positive(),
   API_KEY: z.string().optional(),
   PORT: z.coerce.number().int().positive().default(3001),
+  LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 });
 
 export type BaseEnv = z.infer<typeof baseEnvSchema>;

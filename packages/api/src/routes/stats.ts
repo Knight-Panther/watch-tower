@@ -3,8 +3,18 @@ import { eq, and, gte, desc, count, inArray } from "drizzle-orm";
 import { rssSources, articles, feedFetchRuns, sectors } from "@watch-tower/db";
 import type { ApiDeps } from "../server.js";
 
+const CACHE_KEY_OVERVIEW = "stats:overview";
+const CACHE_KEY_SOURCES = "stats:sources";
+const CACHE_TTL_SECONDS = 10;
+
 export const registerStatsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
   app.get("/stats/overview", { preHandler: deps.requireApiKey }, async () => {
+    // Check cache first
+    const cached = await deps.redis.get(CACHE_KEY_OVERVIEW);
+    if (cached) {
+      return JSON.parse(cached);
+    }
+
     const now = Date.now();
     const cutoff = new Date(now - 24 * 60 * 60 * 1000);
 
@@ -77,7 +87,7 @@ export const registerStatsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       "failed",
     );
 
-    return {
+    const result = {
       total_sources: totalRes[0]?.count ?? 0,
       active_sources: activeRes[0]?.count ?? 0,
       items_last_24h: itemsRes[0]?.count ?? 0,
@@ -86,9 +96,19 @@ export const registerStatsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
         feed: ingestQueueCounts,
       },
     };
+
+    // Cache result
+    await deps.redis.setex(CACHE_KEY_OVERVIEW, CACHE_TTL_SECONDS, JSON.stringify(result));
+    return result;
   });
 
   app.get("/stats/sources", { preHandler: deps.requireApiKey }, async () => {
+    // Check cache first
+    const cached = await deps.redis.get(CACHE_KEY_SOURCES);
+    if (cached) {
+      return JSON.parse(cached);
+    }
+
     const sources = await deps.db
       .select({
         id: rssSources.id,
@@ -152,7 +172,7 @@ export const registerStatsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     }
 
     const now = Date.now();
-    return sources.map((source) => {
+    const result = sources.map((source) => {
       const latestRun = latestRunBySource.get(source.id) ?? null;
       const latestSuccess = latestSuccessBySource.get(source.id) ?? null;
       const intervalMinutes = source.ingestIntervalMinutes;
@@ -191,5 +211,9 @@ export const registerStatsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
         is_stale: isStale,
       };
     });
+
+    // Cache result
+    await deps.redis.setex(CACHE_KEY_SOURCES, CACHE_TTL_SECONDS, JSON.stringify(result));
+    return result;
   });
 };

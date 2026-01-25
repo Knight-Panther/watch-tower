@@ -5,6 +5,7 @@ import {
   JOB_MAINTENANCE_CLEANUP,
   JOB_MAINTENANCE_SCHEDULE,
   QUEUE_MAINTENANCE,
+  logger,
 } from "@watch-tower/shared";
 import {
   type Database,
@@ -73,6 +74,7 @@ const runScheduledIngests = async (db: Database, ingestQueue: Queue) => {
   }
 
   const now = Date.now();
+  const TOLERANCE_MS = 15_000; // 15s tolerance to account for scheduler granularity
   let fired = 0;
 
   for (const source of sources) {
@@ -81,24 +83,35 @@ const runScheduledIngests = async (db: Database, ingestQueue: Queue) => {
 
     const intervalMs = Math.min(4320, Math.max(1, intervalMinutes)) * 60 * 1000;
     const lastRun = lastRunBySource.get(source.id);
-    const isDue = !lastRun || now - lastRun >= intervalMs;
+    const elapsed = lastRun ? now - lastRun : Infinity;
+    const isDue = !lastRun || elapsed >= intervalMs - TOLERANCE_MS;
+
+    logger.debug(
+      `[scheduler] ${source.id.slice(0, 8)}: interval=${intervalMinutes}m, elapsed=${Math.round(elapsed / 1000)}s, due=${isDue}`,
+    );
 
     if (!isDue) continue;
 
     const maxAgeDays = Math.min(15, Math.max(1, source.maxAgeDays ?? source.sectorDefaultMaxAge ?? 5));
 
-    await ingestQueue.add(JOB_INGEST_FETCH, {
-      sourceId: source.id,
-      url: source.url,
-      sectorId: source.sectorId,
-      maxAgeDays,
-    });
+    // Time bucket prevents duplicate jobs within same interval window
+    const timeBucket = Math.floor(now / intervalMs);
+    await ingestQueue.add(
+      JOB_INGEST_FETCH,
+      {
+        sourceId: source.id,
+        url: source.url,
+        sectorId: source.sectorId,
+        maxAgeDays,
+      },
+      { jobId: `ingest-${source.id}-${timeBucket}` },
+    );
 
     fired++;
   }
 
   if (fired > 0) {
-    console.info(`[scheduler] fired ${fired} ingest jobs`);
+    logger.info(`[scheduler] fired ${fired} ingest jobs`);
   }
 };
 
@@ -115,7 +128,7 @@ export const createMaintenanceWorker = ({ connection, db, ingestQueue }: Mainten
         const runsCutoff = new Date(Date.now() - runsTtlHours * 60 * 60 * 1000);
         await db.delete(feedFetchRuns).where(lt(feedFetchRuns.createdAt, runsCutoff));
 
-        console.info("[maintenance] cleanup complete");
+        logger.info("[maintenance] cleanup complete");
         return;
       }
 

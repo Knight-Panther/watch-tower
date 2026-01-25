@@ -1,21 +1,23 @@
+import { logger } from "@watch-tower/shared";
 import { buildApp } from "./server.js";
 
-const { app, port, closeDb, ingestQueue, maintenanceQueue } = await buildApp();
+const { app, port, closeDb, closeRedis, ingestQueue, maintenanceQueue } = await buildApp();
 
 await app.listen({ port, host: "0.0.0.0" });
-console.info(`[api] listening on port ${port}`);
+logger.info(`[api] listening on port ${port}`);
 
 const shutdown = async () => {
-  console.info("[api] shutting down...");
+  logger.info("[api] shutting down...");
   setTimeout(() => {
-    console.error("[api] forced exit after timeout");
+    logger.error("[api] forced exit after timeout");
     process.exit(1);
   }, 10_000).unref();
   await app.close();
   await ingestQueue.close();
   await maintenanceQueue.close();
+  await closeRedis();
   await closeDb();
-  console.info("[api] shutdown complete");
+  logger.info("[api] shutdown complete");
   process.exit(0);
 };
 

@@ -137,10 +137,43 @@ export default function App() {
     if (!statsAutoRefresh) {
       return;
     }
-    const interval = setInterval(() => {
-      refreshStats();
-    }, 60_000);
-    return () => clearInterval(interval);
+
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const startPolling = () => {
+      if (intervalId) return;
+      intervalId = setInterval(() => {
+        refreshStats();
+      }, 30_000);
+    };
+
+    const stopPolling = () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopPolling();
+      } else {
+        refreshStats(); // Immediate refresh when tab becomes visible
+        startPolling();
+      }
+    };
+
+    // Start polling if tab is visible
+    if (!document.hidden) {
+      startPolling();
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      stopPolling();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [statsAutoRefresh]);
 
   const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {

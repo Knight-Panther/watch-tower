@@ -9,6 +9,8 @@ import {
   JOB_MAINTENANCE_SCHEDULE,
   QUEUE_INGEST,
   QUEUE_MAINTENANCE,
+  setLogLevel,
+  logger,
 } from "@watch-tower/shared";
 import { createDb } from "@watch-tower/db";
 import { createIngestWorker } from "./processors/feed.js";
@@ -18,6 +20,7 @@ dotenv.config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) }
 
 const main = async () => {
   const env = baseEnvSchema.parse(process.env);
+  setLogLevel(env.LOG_LEVEL);
   const connection = {
     host: env.REDIS_HOST,
     port: env.REDIS_PORT,
@@ -27,9 +30,9 @@ const main = async () => {
   const redis = new Redis(connection);
   try {
     await redis.ping();
-    console.info("[worker] redis connected");
+    logger.info("[worker] redis connected");
   } catch (err) {
-    console.error("[worker] redis unreachable, exiting", err);
+    logger.error("[worker] redis unreachable, exiting", err);
     process.exit(1);
   }
   await redis.quit();
@@ -38,9 +41,9 @@ const main = async () => {
   const { db, close: closeDb } = createDb(env.DATABASE_URL);
   try {
     await db.execute(sql`SELECT 1`);
-    console.info("[worker] database connected");
+    logger.info("[worker] database connected");
   } catch (err) {
-    console.error("[worker] database unreachable, exiting", err);
+    logger.error("[worker] database unreachable, exiting", err);
     process.exit(1);
   }
 
@@ -72,17 +75,17 @@ const main = async () => {
   });
 
   ingestWorker.on("failed", (job, err) => {
-    console.error(`[ingest] job ${job?.id ?? "unknown"} failed`, err.message);
+    logger.error(`[ingest] job ${job?.id ?? "unknown"} failed`, err.message);
   });
 
   maintenanceWorker.on("failed", (job, err) => {
-    console.error(`[maintenance] job ${job?.id ?? "unknown"} failed`, err.message);
+    logger.error(`[maintenance] job ${job?.id ?? "unknown"} failed`, err.message);
   });
 
   // Clean failed jobs from previous runs (waiting jobs are preserved)
   await ingestQueue.clean(0, 0, "failed");
   await maintenanceQueue.clean(0, 0, "failed");
-  console.info("[worker] cleaned failed jobs");
+  logger.info("[worker] cleaned failed jobs");
 
   // Set up recurring jobs (BullMQ deduplicates by jobId automatically)
   await maintenanceQueue.add(
@@ -94,22 +97,34 @@ const main = async () => {
   await maintenanceQueue.add(
     JOB_MAINTENANCE_SCHEDULE,
     {},
-    { repeat: { every: 60 * 1000 }, jobId: JOB_MAINTENANCE_SCHEDULE },
+    { repeat: { every: 30 * 1000 }, jobId: JOB_MAINTENANCE_SCHEDULE },
   );
 
   // Run scheduler immediately on startup
   await maintenanceQueue.add(JOB_MAINTENANCE_SCHEDULE, {}, { jobId: "schedule-startup" });
-  console.info("[worker] started successfully");
+  logger.info("[worker] started successfully");
 
   // Graceful shutdown: finish in-flight jobs, then close connections
   const shutdown = async () => {
-    console.info("[worker] shutting down...");
-    await ingestWorker.close();
-    await maintenanceWorker.close();
-    await ingestQueue.close();
-    await maintenanceQueue.close();
-    await closeDb();
-    console.info("[worker] shutdown complete");
+    logger.info("[worker] shutting down...");
+
+    // Force exit after 30s if graceful shutdown hangs
+    const timeoutHandle = setTimeout(() => {
+      logger.error("[worker] forced exit after timeout");
+      process.exit(1);
+    }, 30_000).unref();
+
+    try {
+      await ingestWorker.close();
+      await maintenanceWorker.close();
+      await ingestQueue.close();
+      await maintenanceQueue.close();
+      await closeDb();
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
+
+    logger.info("[worker] shutdown complete");
     process.exit(0);
   };
 
@@ -118,6 +133,6 @@ const main = async () => {
 };
 
 main().catch((err) => {
-  console.error("[worker] startup failed", err);
+  logger.error("[worker] startup failed", err);
   process.exit(1);
 });

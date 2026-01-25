@@ -1,6 +1,6 @@
 import { Worker } from "bullmq";
 import Parser from "rss-parser";
-import { JOB_INGEST_FETCH, QUEUE_INGEST } from "@watch-tower/shared";
+import { JOB_INGEST_FETCH, QUEUE_INGEST, logger } from "@watch-tower/shared";
 import { type Database, articles, feedFetchRuns } from "@watch-tower/db";
 
 type IngestDeps = {
@@ -41,7 +41,7 @@ const recordFetchRun = async (
       errorMessage: payload.errorMessage ?? null,
     });
   } catch (err) {
-    console.error(`[${payload.sourceId}] failed to record fetch run`, err);
+    logger.error(`[${payload.sourceId}] failed to record fetch run`, err);
   }
 };
 
@@ -73,7 +73,7 @@ export const createIngestWorker = ({ connection, db }: IngestDeps) =>
           durationMs: finishedAt.getTime() - startedAt.getTime(),
           errorMessage: error instanceof Error ? error.message : String(error),
         });
-        console.error(`[${sourceId}] failed to parse ${url}`, error);
+        logger.error(`[${sourceId}] failed to parse ${url}`, error);
         return;
       }
 
@@ -121,7 +121,7 @@ export const createIngestWorker = ({ connection, db }: IngestDeps) =>
             itemCount: itemsToInsert.length,
             errorMessage: error instanceof Error ? error.message : String(error),
           });
-          console.error(`[${sourceId}] insert failed`, error);
+          logger.error(`[${sourceId}] insert failed`, error);
           return;
         }
       }
@@ -137,7 +137,7 @@ export const createIngestWorker = ({ connection, db }: IngestDeps) =>
         itemAdded,
       });
 
-      console.log(
+      logger.debug(
         `[${sourceId}] parsed ${itemsToInsert.length}, added ${itemAdded} new from ${feed.title ?? url}`,
       );
     },

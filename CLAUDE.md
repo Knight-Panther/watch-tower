@@ -140,6 +140,7 @@ REDIS_PORT=6379
 # API
 API_KEY=local-dev-key
 PORT=3001
+LOG_LEVEL=info                # debug | info | warn | error
 
 # LLM Providers (Phase 4 — not yet used)
 # OPENAI_API_KEY=sk-...
@@ -149,6 +150,25 @@ PORT=3001
 # Frontend
 VITE_API_URL=http://localhost:3001
 VITE_API_KEY=local-dev-key
+```
+
+## Logging
+
+Control log verbosity via `LOG_LEVEL` environment variable:
+
+| Level | Output |
+|-------|--------|
+| `debug` | All logs including verbose per-feed parsing details |
+| `info` | Startup, shutdown, scheduler events (default) |
+| `warn` | Warnings only |
+| `error` | Errors only |
+
+```bash
+# Verbose debugging
+LOG_LEVEL=debug npm run dev:worker
+
+# Production (errors only)
+LOG_LEVEL=error npm run dev:worker
 ```
 
 ## Cost Optimization Strategy
@@ -205,3 +225,120 @@ Current tasks:
 
 Completed:
 - `task1_done.md` — Infrastructure hardening & reliability
+
+---
+
+## Codex Delegation Pattern
+
+This project uses a two-agent workflow: **Claude** (senior architect) + **Codex** (implementation assistant).
+
+### When to Delegate to Codex
+
+| Delegate | Do NOT Delegate |
+|----------|-----------------|
+| Adding constants/exports to existing files | Architectural decisions |
+| Repetitive edits across multiple files | New feature design |
+| Adding similar patterns (new routes, new workers) | Debugging complex issues |
+| Writing boilerplate from clear specs | Anything requiring judgment calls |
+| Running tests and reporting results | Database migrations |
+| Adding types to existing code | Security-sensitive code |
+| **Code scanning** (summarize files, find patterns, list exports) | Complex debugging requiring context |
+
+### How to Delegate (Automated)
+
+Claude runs Codex directly via Bash - no copy/paste needed:
+
+```bash
+# Read-only tasks (analysis, code search)
+codex exec --full-auto -C "c:\Users\VM-Dev\Desktop\watch-tower" -o codex-result.txt "TASK..."
+
+# Write tasks (file edits) - required for any file modifications
+codex exec --dangerously-bypass-approvals-and-sandbox -C "c:\Users\VM-Dev\Desktop\watch-tower" -o codex-result.txt "TASK..."
+```
+
+**Note:** `--full-auto` creates a read-only sandbox on Windows. For file writes, use the bypass flag with tightly scoped tasks.
+
+**Workflow:**
+1. Claude runs `codex exec` via Bash tool (2 min timeout)
+2. Codex executes task, output saved to `codex-result.txt`
+3. Claude reads result file to verify changes
+4. Claude reviews changes, runs lint/build if needed
+5. If blocked, Claude provides hints and re-delegates
+
+### Delegation Prompt Template
+
+```
+TASK: [One-line description of what to do]
+
+SCOPE:
+- packages/[package]/src/[file].ts
+
+CONTEXT:
+- This project uses [relevant pattern]
+- See existing code in [reference file] for style
+
+PATTERN:
+```typescript
+// Example of the pattern to follow
+const example = ...
+```
+
+OUTPUT:
+- Modified [file] with [change]
+- Run `npm run lint` to verify
+
+CONSTRAINTS:
+- Do NOT modify any other files
+- Do NOT add new dependencies
+- Match existing code style exactly
+```
+
+### After Delegation
+
+1. **Read the result file** (`codex-result.txt`)
+2. **Review changes** - check for scope creep or pattern violations
+3. **Run verification** - `npm run lint && npm run build`
+4. **Integrate or fix** - merge good changes, provide debug hints if blocked
+
+### Codex Rules Reference
+
+Codex follows strict rules defined in `CODEX.md`:
+- Execute exactly what is asked
+- Never make architectural decisions
+- Report blockers instead of guessing
+- Stay within specified SCOPE
+- Follow existing code patterns
+
+### Example Delegations
+
+**Good (write task):**
+```
+TASK: Add QUEUE_SEMANTIC constant to shared package
+SCOPE: packages/shared/src/index.ts
+PATTERN: Follow existing QUEUE_* constants (line 5-8)
+OUTPUT: New export `QUEUE_SEMANTIC = "pipeline:semantic-dedup"`
+```
+
+**Good (scan task - saves Claude tokens):**
+```
+TASK: Analyze packages/api/src/routes/stats.ts
+OUTPUT: List all database queries, what tables they touch, and any potential N+1 issues
+```
+
+**Bad:**
+```
+TASK: Improve the API performance
+```
+(Too vague - no scope, no pattern, requires judgment)
+
+### Debugging Assistance
+
+If Codex reports BLOCKED, provide targeted hints:
+
+```
+CODEX REPORTED: Type error on line 45
+HINT: The function expects `Database` type from @watch-tower/db, not the raw pg Pool.
+Import it with: import type { Database } from "@watch-tower/db";
+```
+
+Then re-delegate with the hint included in CONTEXT.

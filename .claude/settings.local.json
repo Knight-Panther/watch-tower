@@ -22,7 +22,8 @@
       "Bash(npx drizzle-kit:*)",
       "Bash(netstat:*)",
       "Bash(findstr:*)",
-      "Bash(powershell -Command:*)"
+      "Bash(powershell -Command:*)",
+      "Bash(codex exec --full-auto -C \"c:\\\\Users\\\\VM-Dev\\\\Desktop\\\\watch-tower\" -o \"c:\\\\Users\\\\VM-Dev\\\\Desktop\\\\watch-tower\\\\codex-result.txt\" \"TASK: Add a getLogLevel function to the logger module\n\nSCOPE: packages/shared/src/logger.ts\n\nCONTEXT:\n- The file already has setLogLevel\\(level\\) function at line 12\n- currentLevel variable holds the state at line 10\n- Follow the same export pattern as setLogLevel\n\nPATTERN:\nexport const setLogLevel = \\(level: LogLevel\\) => {\n  currentLevel = level;\n};\n\nOUTPUT:\n- Add getLogLevel function that returns the current LogLevel\n- Place it right after setLogLevel\n- Export it\n\nCONSTRAINTS:\n- Do NOT modify any other files\n- Match existing code style \\(arrow function, same formatting\\)\n\")"
     ]
   }
 }
