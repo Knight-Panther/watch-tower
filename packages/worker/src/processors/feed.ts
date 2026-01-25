@@ -30,7 +30,16 @@ const recordFetchRun = async (
   },
 ) => {
   try {
-    await db.insert(feedFetchRuns).values(payload);
+    await db.insert(feedFetchRuns).values({
+      sourceId: payload.sourceId,
+      status: payload.status,
+      startedAt: payload.startedAt,
+      finishedAt: payload.finishedAt,
+      durationMs: payload.durationMs,
+      itemCount: payload.itemCount ?? null,
+      itemAdded: payload.itemAdded ?? null,
+      errorMessage: payload.errorMessage ?? null,
+    });
   } catch (err) {
     console.error(`[${payload.sourceId}] failed to record fetch run`, err);
   }
