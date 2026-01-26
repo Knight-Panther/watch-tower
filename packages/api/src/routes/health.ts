@@ -8,7 +8,11 @@ export const registerHealthRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     let redisStatus = "ok";
     let dbStatus = "ok";
 
-    const redis = new Redis({ ...deps.redisConnection, lazyConnect: true, maxRetriesPerRequest: 1 });
+    const redis = new Redis({
+      ...deps.redisConnection,
+      lazyConnect: true,
+      maxRetriesPerRequest: 1,
+    });
     try {
       await redis.connect();
       await redis.ping();

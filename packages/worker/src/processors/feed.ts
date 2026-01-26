@@ -2,10 +2,12 @@ import { Worker } from "bullmq";
 import Parser from "rss-parser";
 import { JOB_INGEST_FETCH, QUEUE_INGEST, logger } from "@watch-tower/shared";
 import { type Database, articles, feedFetchRuns } from "@watch-tower/db";
+import type { EventPublisher } from "../events.js";
 
 type IngestDeps = {
   connection: { host: string; port: number };
   db: Database;
+  eventPublisher: EventPublisher;
 };
 
 const parser = new Parser({ timeout: 15000 });
@@ -45,7 +47,7 @@ const recordFetchRun = async (
   }
 };
 
-export const createIngestWorker = ({ connection, db }: IngestDeps) =>
+export const createIngestWorker = ({ connection, db, eventPublisher }: IngestDeps) =>
   new Worker(
     QUEUE_INGEST,
     async (job) => {
@@ -127,14 +129,28 @@ export const createIngestWorker = ({ connection, db }: IngestDeps) =>
       }
 
       const finishedAt = new Date();
+      const durationMs = finishedAt.getTime() - startedAt.getTime();
+
       await recordFetchRun(db, {
         sourceId,
         status: "success",
         startedAt,
         finishedAt,
-        durationMs: finishedAt.getTime() - startedAt.getTime(),
+        durationMs,
         itemCount: itemsToInsert.length,
         itemAdded,
+      });
+
+      // Publish event for real-time UI
+      await eventPublisher.publish({
+        type: "source:fetched",
+        data: {
+          sourceId,
+          sourceName: feed.title ?? null,
+          articlesFound: itemsToInsert.length,
+          articlesAdded: itemAdded,
+          durationMs,
+        },
       });
 
       logger.debug(

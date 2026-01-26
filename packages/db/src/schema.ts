@@ -116,7 +116,10 @@ export const postBatches = pgTable("post_batches", {
   status: text("status").notNull().default("draft"),
   format: text("format").notNull().default("top5"),
   contentText: text("content_text"),
-  articleIds: uuid("article_ids").array().notNull().default(sql`'{}'::uuid[]`),
+  articleIds: uuid("article_ids")
+    .array()
+    .notNull()
+    .default(sql`'{}'::uuid[]`),
   approvedBy: text("approved_by"),
   approvedAt: timestamp("approved_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -130,7 +133,10 @@ export const socialAccounts = pgTable("social_accounts", {
   accountName: text("account_name").notNull(),
   credentials: jsonb("credentials").notNull().default({}),
   isActive: boolean("is_active").notNull().default(true),
-  sectorIds: uuid("sector_ids").array().notNull().default(sql`'{}'::uuid[]`),
+  sectorIds: uuid("sector_ids")
+    .array()
+    .notNull()
+    .default(sql`'{}'::uuid[]`),
   rateLimitPerHour: smallint("rate_limit_per_hour").notNull().default(4),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

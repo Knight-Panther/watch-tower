@@ -20,6 +20,7 @@ import { createEmbeddingProvider } from "@watch-tower/embeddings";
 import { createIngestWorker } from "./processors/feed.js";
 import { createMaintenanceWorker } from "./processors/maintenance.js";
 import { createSemanticDedupWorker } from "./processors/semantic-dedup.js";
+import { createEventPublisher } from "./events.js";
 
 dotenv.config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) });
 
@@ -35,7 +36,7 @@ const main = async () => {
     retryStrategy: (times: number) => Math.min(times * 100, 3000), // Exponential backoff, max 3s
   };
 
-  // Redis pre-flight check
+  // Redis connection for pub/sub events (kept open for event publishing)
   const redis = new Redis(connection);
 
   redis.on("error", (err) => {
@@ -52,7 +53,9 @@ const main = async () => {
     logger.error("[worker] redis unreachable, exiting", err);
     process.exit(1);
   }
-  await redis.quit();
+
+  // Event publisher for real-time UI updates
+  const eventPublisher = createEventPublisher(redis);
 
   // DB init + verification
   const { db, close: closeDb } = createDb(env.DATABASE_URL);
@@ -115,7 +118,7 @@ const main = async () => {
       })
     : null;
 
-  const ingestWorker = createIngestWorker({ connection, db });
+  const ingestWorker = createIngestWorker({ connection, db, eventPublisher });
   const maintenanceWorker = createMaintenanceWorker({
     connection,
     db,
@@ -130,6 +133,7 @@ const main = async () => {
         embeddingProvider,
         llmQueue,
         similarityThreshold: env.SIMILARITY_THRESHOLD,
+        eventPublisher,
       })
     : null;
 
@@ -220,6 +224,7 @@ const main = async () => {
       await maintenanceQueue.close();
       await semanticDedupQueue.close();
       await llmQueue.close();
+      await redis.quit();
       await closeDb();
     } finally {
       clearTimeout(timeoutHandle);

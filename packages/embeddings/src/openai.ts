@@ -36,9 +36,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
       });
 
       // Sort by index to ensure order matches input
-      const sorted = response.data
-        .sort((a, b) => a.index - b.index)
-        .map((item) => item.embedding);
+      const sorted = response.data.sort((a, b) => a.index - b.index).map((item) => item.embedding);
       results.push(...sorted);
     }
 

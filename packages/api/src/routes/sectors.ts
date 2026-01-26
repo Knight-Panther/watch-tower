@@ -27,9 +27,7 @@ export const registerSectorRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       default_max_age_days !== undefined &&
       (default_max_age_days < 1 || default_max_age_days > 15)
     ) {
-      return reply
-        .code(400)
-        .send({ error: "default_max_age_days must be between 1 and 15" });
+      return reply.code(400).send({ error: "default_max_age_days must be between 1 and 15" });
     }
 
     try {
@@ -62,9 +60,7 @@ export const registerSectorRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       default_max_age_days !== undefined &&
       (default_max_age_days < 1 || default_max_age_days > 15)
     ) {
-      return reply
-        .code(400)
-        .send({ error: "default_max_age_days must be between 1 and 15" });
+      return reply.code(400).send({ error: "default_max_age_days must be between 1 and 15" });
     }
 
     if (default_max_age_days === undefined) {
@@ -90,15 +86,9 @@ export const registerSectorRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     const { id } = request.params;
 
     // Clear sector_id from sources before deleting
-    await deps.db
-      .update(rssSources)
-      .set({ sectorId: null })
-      .where(eq(rssSources.sectorId, id));
+    await deps.db.update(rssSources).set({ sectorId: null }).where(eq(rssSources.sectorId, id));
 
-    const [row] = await deps.db
-      .delete(sectors)
-      .where(eq(sectors.id, id))
-      .returning();
+    const [row] = await deps.db.delete(sectors).where(eq(sectors.id, id)).returning();
 
     if (!row) {
       return reply.code(404).send({ error: "Sector not found" });

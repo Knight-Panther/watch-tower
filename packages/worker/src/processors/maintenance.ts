@@ -116,6 +116,25 @@ const runScheduledIngests = async (db: Database, ingestQueue: Queue) => {
   }
 };
 
+/**
+ * Reset articles stuck in 'embedding' stage (from crashed workers).
+ * Uses created_at with 10 min threshold since we don't have updated_at.
+ */
+const resetZombieArticles = async (db: Database) => {
+  const staleEmbeddingThreshold = new Date(Date.now() - 10 * 60 * 1000);
+  const resetResult = await db.execute(sql`
+    UPDATE articles
+    SET pipeline_stage = 'ingested'
+    WHERE pipeline_stage = 'embedding'
+      AND created_at < ${staleEmbeddingThreshold}
+    RETURNING id
+  `);
+  if (resetResult.rows.length > 0) {
+    logger.warn(`[maintenance] reset ${resetResult.rows.length} zombie embedding articles`);
+  }
+  return resetResult.rows.length;
+};
+
 export const createMaintenanceWorker = ({ connection, db, ingestQueue }: MaintenanceDeps) =>
   new Worker(
     QUEUE_MAINTENANCE,
@@ -129,25 +148,16 @@ export const createMaintenanceWorker = ({ connection, db, ingestQueue }: Mainten
         const runsCutoff = new Date(Date.now() - runsTtlHours * 60 * 60 * 1000);
         await db.delete(feedFetchRuns).where(lt(feedFetchRuns.createdAt, runsCutoff));
 
-        // Reset stale 'embedding' stage articles (from crashed workers)
-        // Using created_at with 10 min threshold since we don't have updated_at
-        const staleEmbeddingThreshold = new Date(Date.now() - 10 * 60 * 1000);
-        const resetResult = await db.execute(sql`
-          UPDATE articles
-          SET pipeline_stage = 'ingested'
-          WHERE pipeline_stage = 'embedding'
-            AND created_at < ${staleEmbeddingThreshold}
-          RETURNING id
-        `);
-        if (resetResult.rows.length > 0) {
-          logger.warn(`[maintenance] reset ${resetResult.rows.length} stale embedding articles`);
-        }
+        // Also run zombie cleanup during daily maintenance
+        await resetZombieArticles(db);
 
         logger.info("[maintenance] cleanup complete");
         return;
       }
 
       if (job.name === JOB_MAINTENANCE_SCHEDULE) {
+        // Run zombie cleanup on every scheduler tick (every 30s) for fast recovery
+        await resetZombieArticles(db);
         await runScheduledIngests(db, ingestQueue);
         return;
       }

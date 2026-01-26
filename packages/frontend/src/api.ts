@@ -102,10 +102,7 @@ export const runIngest = async (): Promise<{ queued: boolean; jobId?: string }> 
   return res.json();
 };
 
-export const deleteSource = async (
-  id: string,
-  hard = false,
-): Promise<Source> => {
+export const deleteSource = async (id: string, hard = false): Promise<Source> => {
   const res = await fetch(`${API_URL}/sources/${id}?hard=${hard}`, {
     method: "DELETE",
     headers: authHeaders,

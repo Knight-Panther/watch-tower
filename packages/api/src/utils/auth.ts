@@ -7,8 +7,13 @@ export const createRequireApiKey =
       return reply.code(500).send({ error: "Server misconfigured: API_KEY not set" });
     }
 
-    const provided = request.headers["x-api-key"];
-    if (typeof provided !== "string" || provided.length === 0) {
+    // Check header first, then query param (for SSE which doesn't support headers)
+    const headerKey = request.headers["x-api-key"];
+    const queryKey = (request.query as Record<string, unknown>)?.api_key;
+    const provided =
+      typeof headerKey === "string" ? headerKey : typeof queryKey === "string" ? queryKey : "";
+
+    if (provided.length === 0) {
       return reply.code(401).send({ error: "Unauthorized" });
     }
 

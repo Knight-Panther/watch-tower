@@ -13,3 +13,6 @@ export const JOB_DISTRIBUTION_BUILD = "distribution-build";
 export const JOB_DISTRIBUTION_POST = "distribution-post";
 export const JOB_MAINTENANCE_CLEANUP = "maintenance-cleanup";
 export const JOB_MAINTENANCE_SCHEDULE = "maintenance-schedule";
+
+// Redis pub/sub channels for real-time events
+export const REDIS_CHANNEL_EVENTS = "watch-tower:events";

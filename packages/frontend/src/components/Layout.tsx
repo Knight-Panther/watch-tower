@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { ReactNode } from "react";
+import type { ConnectionStatus } from "../hooks/useServerEvents";
 
 const navItems = [
   { to: "/", label: "Home" },
@@ -10,16 +11,39 @@ const navItems = [
 
 type LayoutProps = {
   children: ReactNode;
+  connectionStatus?: ConnectionStatus;
 };
 
-export default function Layout({ children }: LayoutProps) {
+const statusColors: Record<ConnectionStatus, string> = {
+  connected: "bg-emerald-500",
+  connecting: "bg-amber-500 animate-pulse",
+  disconnected: "bg-slate-500",
+  error: "bg-red-500",
+};
+
+const statusLabels: Record<ConnectionStatus, string> = {
+  connected: "Live",
+  connecting: "Connecting...",
+  disconnected: "Offline",
+  error: "Error",
+};
+
+export default function Layout({ children, connectionStatus }: LayoutProps) {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <header className="sticky top-0 z-40 border-b border-slate-900/70 bg-slate-950/80 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-4">
-          <div>
-            <p className="text-lg font-semibold">Media Watch Tower</p>
-            <p className="text-xs text-slate-500">TELO Tower</p>
+          <div className="flex items-center gap-3">
+            <div>
+              <p className="text-lg font-semibold">Media Watch Tower</p>
+              <p className="text-xs text-slate-500">TELO Tower</p>
+            </div>
+            {connectionStatus && (
+              <div className="flex items-center gap-1.5 rounded-full border border-slate-800 px-2.5 py-1">
+                <span className={`h-2 w-2 rounded-full ${statusColors[connectionStatus]}`} />
+                <span className="text-xs text-slate-400">{statusLabels[connectionStatus]}</span>
+              </div>
+            )}
           </div>
           <nav className="flex flex-wrap gap-2 text-sm">
             {navItems.map((item) => (

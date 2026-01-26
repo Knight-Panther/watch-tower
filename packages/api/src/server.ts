@@ -6,7 +6,13 @@ import rateLimit from "@fastify/rate-limit";
 import { Redis } from "ioredis";
 import { Queue } from "bullmq";
 import { sql } from "drizzle-orm";
-import { baseEnvSchema, QUEUE_INGEST, QUEUE_MAINTENANCE, setLogLevel, logger } from "@watch-tower/shared";
+import {
+  baseEnvSchema,
+  QUEUE_INGEST,
+  QUEUE_MAINTENANCE,
+  setLogLevel,
+  logger,
+} from "@watch-tower/shared";
 import { createDb, type Database } from "@watch-tower/db";
 import { registerHealthRoutes } from "./routes/health.js";
 import { registerSectorRoutes } from "./routes/sectors.js";
@@ -14,6 +20,7 @@ import { registerSourceRoutes } from "./routes/sources.js";
 import { registerConfigRoutes } from "./routes/config.js";
 import { registerIngestRoutes } from "./routes/ingest.js";
 import { registerStatsRoutes } from "./routes/stats.js";
+import { registerEventsRoutes } from "./routes/events.js";
 import { createRequireApiKey } from "./utils/auth.js";
 
 dotenv.config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) });
@@ -99,7 +106,14 @@ export const buildApp = async () => {
   }
 
   const requireApiKey = createRequireApiKey(env.API_KEY ?? "");
-  const deps: ApiDeps = { db, redis, redisConnection, maintenanceQueue, ingestQueue, requireApiKey };
+  const deps: ApiDeps = {
+    db,
+    redis,
+    redisConnection,
+    maintenanceQueue,
+    ingestQueue,
+    requireApiKey,
+  };
 
   registerHealthRoutes(app, deps);
   registerSectorRoutes(app, deps);
@@ -107,6 +121,7 @@ export const buildApp = async () => {
   registerConfigRoutes(app, deps);
   registerIngestRoutes(app, deps);
   registerStatsRoutes(app, deps);
+  registerEventsRoutes(app, deps);
 
   const closeRedis = () => redis.quit();
   return { app, port: env.PORT, closeDb, closeRedis, ingestQueue, maintenanceQueue };

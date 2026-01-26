@@ -21,10 +21,7 @@ export const registerStatsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     const [totalRes, activeRes, itemsRes] = await Promise.all([
       deps.db.select({ count: count() }).from(rssSources),
       deps.db.select({ count: count() }).from(rssSources).where(eq(rssSources.active, true)),
-      deps.db
-        .select({ count: count() })
-        .from(articles)
-        .where(gte(articles.createdAt, cutoff)),
+      deps.db.select({ count: count() }).from(articles).where(gte(articles.createdAt, cutoff)),
     ]);
 
     // Get active sources with their intervals
@@ -50,9 +47,7 @@ export const registerStatsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
           createdAt: feedFetchRuns.createdAt,
         })
         .from(feedFetchRuns)
-        .where(
-          and(inArray(feedFetchRuns.sourceId, sourceIds), eq(feedFetchRuns.status, "success")),
-        )
+        .where(and(inArray(feedFetchRuns.sourceId, sourceIds), eq(feedFetchRuns.status, "success")))
         .orderBy(desc(feedFetchRuns.createdAt));
 
       for (const run of runs) {
