@@ -224,10 +224,11 @@ Implementation tasks are tracked in the `priority-tasks/` folder at the project 
 - **Always check this folder first** when starting a new session to understand pending work
 
 Current tasks:
-- (none pending)
+- `task3.md` — Stage 3: LLM Brain Pipeline (scoring + summarization)
 
 Completed:
 - `task1_done.md` — Infrastructure hardening & reliability
+- `task2_done.md` — Stage 2: Semantic Dedup Pipeline
 
 ---
 
