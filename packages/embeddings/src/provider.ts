@@ -1,6 +1,9 @@
 import { OpenAIEmbeddingProvider } from "./openai.js";
 
 export interface EmbeddingProvider {
+  /** Provider name for tracking (e.g., "openai") */
+  readonly name: string;
+
   /** Model identifier for tracking */
   readonly model: string;
 

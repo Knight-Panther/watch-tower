@@ -175,6 +175,41 @@ export const feedFetchRuns = pgTable("feed_fetch_runs", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// ─── LLM Telemetry ──────────────────────────────────────────────────────────
+
+export const llmTelemetry = pgTable(
+  "llm_telemetry",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+
+    // What was processed (nullable for batch operations like embeddings)
+    articleId: uuid("article_id").references(() => articles.id, { onDelete: "set null" }),
+    operation: text("operation").notNull(), // 'score_and_summarize', 'embed_batch'
+
+    // Provider info
+    provider: text("provider").notNull(), // 'deepseek', 'openai', 'claude'
+    model: text("model").notNull(), // 'deepseek-chat', 'gpt-4o-mini'
+    isFallback: boolean("is_fallback").notNull().default(false),
+
+    // Token counts
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    totalTokens: integer("total_tokens"),
+
+    // Cost (in USD microdollars for precision: $1 = 1,000,000 microdollars)
+    costMicrodollars: integer("cost_microdollars"),
+
+    // Timing
+    latencyMs: integer("latency_ms"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_llm_telemetry_created").on(table.createdAt),
+    index("idx_llm_telemetry_provider").on(table.provider),
+    index("idx_llm_telemetry_operation").on(table.operation),
+  ],
+);
+
 // ─── App Config ──────────────────────────────────────────────────────────────
 
 export const appConfig = pgTable("app_config", {

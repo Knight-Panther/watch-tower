@@ -11,6 +11,12 @@ export interface LLMProvider {
   /** Model identifier for tracking */
   readonly model: string;
 
+  /** Fallback provider name (only set on LLMProviderWithFallback) */
+  readonly fallbackName?: string | null;
+
+  /** Fallback model (only set on LLMProviderWithFallback) */
+  readonly fallbackModel?: string | null;
+
   /** Score a single article */
   score(request: ScoringRequest): Promise<ScoringResult>;
 }

@@ -24,10 +24,19 @@ import {
   updateSource,
   type StatsOverview,
   type StatsSource,
+  getTelemetrySummary,
+  getTelemetryByProvider,
+  getTelemetryByOperation,
+  getTelemetryDaily,
+  type TelemetrySummary,
+  type TelemetryByProvider,
+  type TelemetryByOperation,
+  type TelemetryDaily,
 } from "./api";
 import Layout from "./components/Layout";
 import Database from "./pages/Database";
 import Monitoring from "./pages/Monitoring";
+import Telemetry from "./pages/Telemetry";
 import Home from "./pages/Home";
 import SectorManagement from "./pages/SectorManagement";
 
@@ -84,6 +93,15 @@ export default function App() {
   const [statsUpdatedAt, setStatsUpdatedAt] = useState<string | null>(null);
   const [statsAutoRefresh, setStatsAutoRefresh] = useState(true);
 
+  // Telemetry state
+  const [telemetrySummary, setTelemetrySummary] = useState<TelemetrySummary | null>(null);
+  const [telemetryByProvider, setTelemetryByProvider] = useState<TelemetryByProvider | null>(null);
+  const [telemetryByOperation, setTelemetryByOperation] = useState<TelemetryByOperation | null>(null);
+  const [telemetryDaily, setTelemetryDaily] = useState<TelemetryDaily | null>(null);
+  const [telemetryLoading, setTelemetryLoading] = useState(false);
+  const [telemetryError, setTelemetryError] = useState<string | null>(null);
+  const [telemetryUpdatedAt, setTelemetryUpdatedAt] = useState<string | null>(null);
+
   const activeCount = useMemo(
     () => sources.filter((source) => source.active).length,
     [sources],
@@ -131,6 +149,10 @@ export default function App() {
 
   useEffect(() => {
     refreshStats();
+  }, []);
+
+  useEffect(() => {
+    refreshTelemetry();
   }, []);
 
   useEffect(() => {
@@ -680,6 +702,30 @@ export default function App() {
     }
   };
 
+  const refreshTelemetry = async () => {
+    setTelemetryLoading(true);
+    setTelemetryError(null);
+    try {
+      const [summary, byProvider, byOperation, daily] = await Promise.all([
+        getTelemetrySummary(),
+        getTelemetryByProvider(30),
+        getTelemetryByOperation(30),
+        getTelemetryDaily(30),
+      ]);
+      setTelemetrySummary(summary);
+      setTelemetryByProvider(byProvider);
+      setTelemetryByOperation(byOperation);
+      setTelemetryDaily(daily);
+      setTelemetryUpdatedAt(new Date().toLocaleTimeString());
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to load telemetry data";
+      setTelemetryError(message);
+    } finally {
+      setTelemetryLoading(false);
+    }
+  };
+
   const confirmSectorDeleteAction = async () => {
     if (!confirmSectorDelete) {
       return;
@@ -785,6 +831,21 @@ export default function App() {
               onRefresh={refreshStats}
               autoRefreshEnabled={statsAutoRefresh}
               onToggleAutoRefresh={() => setStatsAutoRefresh((prev) => !prev)}
+            />
+          }
+        />
+        <Route
+          path="/telemetry"
+          element={
+            <Telemetry
+              summary={telemetrySummary}
+              byProvider={telemetryByProvider}
+              byOperation={telemetryByOperation}
+              daily={telemetryDaily}
+              isLoading={telemetryLoading}
+              error={telemetryError}
+              lastUpdated={telemetryUpdatedAt}
+              onRefresh={refreshTelemetry}
             />
           }
         />

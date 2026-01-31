@@ -14,6 +14,7 @@ const MAX_BATCH_SIZE = 100;
 
 export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   private client: OpenAI;
+  readonly name = "openai" as const;
   readonly model: string;
   readonly dimensions: number;
 

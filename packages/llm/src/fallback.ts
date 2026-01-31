@@ -120,6 +120,9 @@ const analyzeError = (error: unknown): RetryableErrorResult => {
 export class LLMProviderWithFallback implements LLMProvider {
   readonly name: string;
   readonly model: string;
+  // Expose fallback provider info for telemetry
+  readonly fallbackName: string | null;
+  readonly fallbackModel: string | null;
 
   constructor(
     private primary: LLMProvider,
@@ -127,6 +130,8 @@ export class LLMProviderWithFallback implements LLMProvider {
   ) {
     this.name = fallback ? `${primary.name}→${fallback.name}` : primary.name;
     this.model = primary.model;
+    this.fallbackName = fallback?.name ?? null;
+    this.fallbackModel = fallback?.model ?? null;
   }
 
   private async tryFallback(
@@ -149,6 +154,7 @@ export class LLMProviderWithFallback implements LLMProvider {
       reasoning: result.reasoning
         ? `[via ${this.fallback.name}] ${result.reasoning}`
         : `[via ${this.fallback.name}]`,
+      isFallback: true, // Mark for telemetry
     };
   }
 

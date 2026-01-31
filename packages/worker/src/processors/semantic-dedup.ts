@@ -6,8 +6,9 @@ import {
   JOB_LLM_SCORE_BATCH,
   logger,
 } from "@watch-tower/shared";
-import { type Database } from "@watch-tower/db";
+import { type Database, llmTelemetry } from "@watch-tower/db";
 import { type EmbeddingProvider, findSimilarArticles } from "@watch-tower/embeddings";
+import { calculateEmbeddingCost } from "@watch-tower/llm";
 import type { Queue } from "bullmq";
 import type { EventPublisher } from "../events.js";
 
@@ -106,6 +107,7 @@ export const createSemanticDedupWorker = ({
       );
 
       let embeddings: number[][];
+      const embedStartTime = Date.now();
       try {
         embeddings = await embeddingProvider.embedBatch(texts);
       } catch (err) {
@@ -118,6 +120,34 @@ export const createSemanticDedupWorker = ({
         `);
         logger.error("[semantic-dedup] embedding generation failed, reset articles", err);
         throw err; // Will retry via BullMQ
+      }
+      const embedLatencyMs = Date.now() - embedStartTime;
+
+      // Log embedding telemetry for cost tracking
+      // Estimate tokens: ~4 chars per token for English text
+      const totalChars = texts.reduce((sum, t) => sum + t.length, 0);
+      const estimatedTokens = Math.ceil(totalChars / 4);
+
+      // Wrap telemetry insert in try/catch - telemetry failure should not abort pipeline
+      try {
+        await db.insert(llmTelemetry).values({
+          articleId: null, // Batch operation, not tied to single article
+          operation: "embed_batch",
+          provider: embeddingProvider.name,
+          model: embeddingProvider.model,
+          isFallback: false,
+          inputTokens: estimatedTokens,
+          outputTokens: 0, // Embeddings have no output tokens
+          totalTokens: estimatedTokens,
+          costMicrodollars: calculateEmbeddingCost(
+            embeddingProvider.name,
+            embeddingProvider.model,
+            estimatedTokens,
+          ),
+          latencyMs: embedLatencyMs,
+        });
+      } catch (telemetryErr) {
+        logger.error("[semantic-dedup] failed to log telemetry, continuing pipeline", telemetryErr);
       }
 
       // 4. TWO-PHASE DEDUP APPROACH (fixes concurrent worker race condition)

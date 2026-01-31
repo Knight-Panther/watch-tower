@@ -34,6 +34,8 @@ export class ClaudeLLMProvider implements LLMProvider {
       sector: request.sectorName ?? "General",
     });
 
+    const startTime = Date.now();
+
     try {
       const response = await this.client.messages.create({
         model: this.model,
@@ -41,11 +43,22 @@ export class ClaudeLLMProvider implements LLMProvider {
         messages: [{ role: "user", content: prompt }],
       });
 
+      const latencyMs = Date.now() - startTime;
+
       // Extract text from response
       const text = response.content
         .filter((block) => block.type === "text")
         .map((block) => block.text)
         .join("");
+
+      // Extract usage from response (Anthropic format)
+      const usage = response.usage
+        ? {
+            inputTokens: response.usage.input_tokens,
+            outputTokens: response.usage.output_tokens,
+            totalTokens: response.usage.input_tokens + response.usage.output_tokens,
+          }
+        : undefined;
 
       // Parse and validate with zod
       const parsed = parseScoringResponse(text);
@@ -61,6 +74,8 @@ export class ClaudeLLMProvider implements LLMProvider {
           summary: null,
           reasoning: `Parse error: ${parsed.error}`,
           error: parsed.error,
+          usage,
+          latencyMs,
         };
       }
 
@@ -69,6 +84,8 @@ export class ClaudeLLMProvider implements LLMProvider {
         score: parsed.data.score,
         summary: parsed.data.summary ?? null,
         reasoning: parsed.data.reasoning,
+        usage,
+        latencyMs,
       };
     } catch (err) {
       logger.error(`[claude] API error for ${request.articleId}`, err);

@@ -45,6 +45,8 @@ export class OpenAILLMProvider implements LLMProvider {
       sector: request.sectorName ?? "General",
     });
 
+    const startTime = Date.now();
+
     try {
       // Check if model supports JSON mode
       const supportsJsonMode = JSON_MODE_MODELS.some((m) => this.model.includes(m));
@@ -56,8 +58,18 @@ export class OpenAILLMProvider implements LLMProvider {
         ...(supportsJsonMode && { response_format: { type: "json_object" } }),
       });
 
+      const latencyMs = Date.now() - startTime;
       const text = response.choices[0]?.message?.content ?? "";
       const parsed = parseScoringResponse(text);
+
+      // Extract usage from response
+      const usage = response.usage
+        ? {
+            inputTokens: response.usage.prompt_tokens,
+            outputTokens: response.usage.completion_tokens,
+            totalTokens: response.usage.total_tokens,
+          }
+        : undefined;
 
       if (!parsed.success) {
         logger.warn(
@@ -69,6 +81,8 @@ export class OpenAILLMProvider implements LLMProvider {
           summary: null,
           reasoning: `Parse error: ${parsed.error}`,
           error: parsed.error,
+          usage,
+          latencyMs,
         };
       }
 
@@ -77,6 +91,8 @@ export class OpenAILLMProvider implements LLMProvider {
         score: parsed.data.score,
         summary: parsed.data.summary ?? null,
         reasoning: parsed.data.reasoning,
+        usage,
+        latencyMs,
       };
     } catch (err) {
       logger.error(`[${this.name}] API error for ${request.articleId}`, err);

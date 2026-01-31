@@ -2,7 +2,9 @@ import { Worker } from "bullmq";
 import { sql } from "drizzle-orm";
 import { QUEUE_LLM_BRAIN, JOB_LLM_SCORE_BATCH, logger } from "@watch-tower/shared";
 import type { Database } from "@watch-tower/db";
+import { llmTelemetry } from "@watch-tower/db";
 import type { LLMProvider, ScoringRequest, ScoringResult } from "@watch-tower/llm";
+import { calculateLLMCost } from "@watch-tower/llm";
 import type { EventPublisher } from "../events.js";
 
 type LLMBrainDeps = {
@@ -199,6 +201,45 @@ export const createLLMBrainWorker = ({
               pipeline_stage = ${stage}
             WHERE id = ${r.articleId}::uuid
           `);
+
+          // Log telemetry for cost tracking
+          if (r.usage) {
+            // Determine actual provider/model used (fallback or primary)
+            // Extract primary provider name from combined "deepseek→openai" format
+            const primaryProvider = llmProvider.name.split("→")[0];
+            const actualProvider = r.isFallback
+              ? (llmProvider.fallbackName ?? primaryProvider)
+              : primaryProvider;
+            const actualModel = r.isFallback
+              ? (llmProvider.fallbackModel ?? llmProvider.model)
+              : llmProvider.model;
+
+            // Wrap telemetry insert in try/catch - telemetry failure should not abort pipeline
+            try {
+              await db.insert(llmTelemetry).values({
+                articleId: r.articleId,
+                operation: "score_and_summarize",
+                provider: actualProvider,
+                model: actualModel,
+                isFallback: r.isFallback ?? false,
+                inputTokens: r.usage.inputTokens,
+                outputTokens: r.usage.outputTokens,
+                totalTokens: r.usage.totalTokens,
+                costMicrodollars: calculateLLMCost(
+                  actualProvider,
+                  actualModel,
+                  r.usage.inputTokens,
+                  r.usage.outputTokens,
+                ),
+                latencyMs: r.latencyMs,
+              });
+            } catch (telemetryErr) {
+              logger.error(
+                `[llm-brain] failed to log telemetry for ${r.articleId}, continuing`,
+                telemetryErr,
+              );
+            }
+          }
         }
 
         // Publish events for real-time dashboard

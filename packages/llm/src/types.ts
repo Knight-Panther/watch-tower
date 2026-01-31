@@ -12,6 +12,15 @@ export type ScoringResult = {
   summary: string | null; // Generated summary (Phase 4)
   reasoning?: string; // Optional: why this score (for debugging)
   error?: string; // Error message if scoring failed
+
+  // Telemetry (populated from LLM API response)
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+  };
+  latencyMs?: number; // API response time in milliseconds
+  isFallback?: boolean; // True if fallback provider was used
 };
 
 /**
