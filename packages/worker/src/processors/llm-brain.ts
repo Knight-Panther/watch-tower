@@ -77,10 +77,13 @@ export const createLLMBrainWorker = ({
       ];
 
       // Fetch sector names in one query (avoid N+1)
+      // Format as PostgreSQL array literal: {uuid1,uuid2,...}
+      const sectorIdsLiteral = `{${sectorIds.join(",")}}`;
+
       const sectorMap = new Map<string, string>();
       if (sectorIds.length > 0) {
         const sectorsResult = await db.execute(sql`
-          SELECT id, name FROM sectors WHERE id = ANY(${sectorIds}::uuid[])
+          SELECT id, name FROM sectors WHERE id = ANY(${sectorIdsLiteral}::uuid[])
         `);
         for (const row of sectorsResult.rows as { id: string; name: string }[]) {
           sectorMap.set(row.id, row.name);
@@ -97,7 +100,7 @@ export const createLLMBrainWorker = ({
             auto_approve_threshold as "autoApprove",
             auto_reject_threshold as "autoReject"
           FROM scoring_rules
-          WHERE sector_id = ANY(${sectorIds}::uuid[])
+          WHERE sector_id = ANY(${sectorIdsLiteral}::uuid[])
         `);
 
         for (const row of rulesResult.rows as {
@@ -170,41 +173,33 @@ export const createLLMBrainWorker = ({
       const now = new Date();
 
       if (successes.length > 0) {
-        // Build VALUES for bulk update with per-article threshold logic
-        const values = successes
-          .map((r) => {
-            const thresholds = getThresholds(r.articleId);
-            let stage: string;
-            let approvedAt: string | null = null;
+        // Update articles one by one to avoid SQL escaping issues with raw VALUES
+        for (const r of successes) {
+          const thresholds = getThresholds(r.articleId);
+          let stage: string;
+          let approvedAt: Date | null = null;
 
-            if (r.score >= thresholds.approve) {
-              stage = "approved";
-              approvedAt = `'${now.toISOString()}'::timestamptz`;
-            } else if (r.score <= thresholds.reject) {
-              stage = "rejected";
-            } else {
-              stage = "scored"; // Manual review needed
-            }
+          if (r.score >= thresholds.approve) {
+            stage = "approved";
+            approvedAt = now;
+          } else if (r.score <= thresholds.reject) {
+            stage = "rejected";
+          } else {
+            stage = "scored"; // Manual review needed
+          }
 
-            // Escape single quotes in summary
-            const escapedSummary = r.summary ? r.summary.replace(/'/g, "''") : null;
-
-            return `('${r.articleId}'::uuid, ${r.score}, ${escapedSummary ? `'${escapedSummary}'` : "NULL"}, '${scoringModel}', '${now.toISOString()}'::timestamptz, ${approvedAt ?? "NULL"}, '${stage}')`;
-          })
-          .join(", ");
-
-        await db.execute(sql`
-          UPDATE articles AS a
-          SET
-            importance_score = v.score,
-            llm_summary = v.summary,
-            scoring_model = v.model,
-            scored_at = v.scored_at,
-            approved_at = v.approved_at,
-            pipeline_stage = v.stage
-          FROM (VALUES ${sql.raw(values)}) AS v(id, score, summary, model, scored_at, approved_at, stage)
-          WHERE a.id = v.id
-        `);
+          await db.execute(sql`
+            UPDATE articles
+            SET
+              importance_score = ${r.score},
+              llm_summary = ${r.summary ?? null},
+              scoring_model = ${scoringModel},
+              scored_at = ${now},
+              approved_at = ${approvedAt},
+              pipeline_stage = ${stage}
+            WHERE id = ${r.articleId}::uuid
+          `);
+        }
 
         // Publish events for real-time dashboard
         for (const result of successes) {

@@ -291,12 +291,12 @@ const main = async () => {
     logger.info("[worker] semantic dedup disabled (no OPENAI_API_KEY)");
   }
 
-  // Set up LLM brain recurring job (every 60 seconds)
+  // Set up LLM brain recurring job (every 10 seconds for faster processing)
   if (llmBrainWorker) {
     await llmQueue.add(
       JOB_LLM_SCORE_BATCH,
       {},
-      { repeat: { every: 60 * 1000 }, jobId: "llm-score-recurring" },
+      { repeat: { every: 10 * 1000 }, jobId: "llm-score-recurring" },
     );
     logger.info(`[worker] llm brain enabled (${llmProvider!.name}/${llmProvider!.model})`);
   } else {
