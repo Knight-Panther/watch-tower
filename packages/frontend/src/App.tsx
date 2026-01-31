@@ -70,7 +70,7 @@ export default function App() {
   const [isTriggering, setIsTriggering] = useState(false);
   const [maxAgeDrafts, setMaxAgeDrafts] = useState<Record<string, string>>({});
   const [sectorDrafts, setSectorDrafts] = useState<Record<string, string>>({});
-  const [filters, setFilters] = useState({ sectorId: "", maxAgeDays: "" });
+  const [filters, setFilters] = useState({ sectorId: "", maxAgeDays: "", search: "" });
   const [confirmDeleteSource, setConfirmDeleteSource] = useState<Source | null>(null);
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
   const [confirmBatchAction, setConfirmBatchAction] = useState<{
@@ -106,6 +106,12 @@ export default function App() {
     () => sources.filter((source) => source.active).length,
     [sources],
   );
+
+  const statsLookup = useMemo(() => {
+    const map = new Map<string, StatsSource>();
+    statsSources.forEach((s) => map.set(s.id, s));
+    return map;
+  }, [statsSources]);
 
   const refresh = async () => {
     setIsLoading(true);
@@ -759,6 +765,7 @@ export default function App() {
             <Home
               sources={sources}
               sectors={sectors}
+              statsLookup={statsLookup}
               activeCount={activeCount}
               isLoading={isLoading}
               error={error}

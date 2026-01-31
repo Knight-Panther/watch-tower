@@ -83,10 +83,13 @@ export const registerSourceRoutes = (app: FastifyInstance, deps: ApiDeps) => {
         })
         .returning();
     } catch (err: unknown) {
-      const pgErr = err as { code?: string };
-      if (pgErr.code === "23505") {
+      // Drizzle ORM may wrap PostgreSQL errors differently - check multiple locations
+      const pgErr = err as { code?: string; cause?: { code?: string }; message?: string };
+      const errorCode = pgErr.code || pgErr.cause?.code;
+      if (errorCode === "23505" || pgErr.message?.includes("duplicate key")) {
         return reply.code(409).send({ error: "RSS URL already exists" });
       }
+      request.log.error(err, "Failed to create source");
       throw err;
     }
 

@@ -1,10 +1,11 @@
 import { useMemo } from "react";
-import type { Sector, Source } from "../api";
+import type { Sector, Source, StatsSource } from "../api";
 import Spinner from "../components/Spinner";
 
 type HomeProps = {
   sources: Source[];
   sectors: Sector[];
+  statsLookup: Map<string, StatsSource>;
   activeCount: number;
   isLoading: boolean;
   error: string | null;
@@ -24,7 +25,7 @@ type HomeProps = {
   maxAgeDrafts: Record<string, string>;
   sourceIntervalDrafts: Record<string, string>;
   sectorDrafts: Record<string, string>;
-  filters: { sectorId: string; maxAgeDays: string };
+  filters: { sectorId: string; maxAgeDays: string; search: string };
   selectedCount: number;
   selectedIds: Record<string, boolean>;
   isTriggering: boolean;
@@ -34,7 +35,7 @@ type HomeProps = {
   onToggle: (source: Source) => void;
   onDeletePermanent: (source: Source) => void;
   onSaveChanges: (source: Source) => void;
-  onFilterChange: (next: { sectorId: string; maxAgeDays: string }) => void;
+  onFilterChange: (next: { sectorId: string; maxAgeDays: string; search: string }) => void;
   onSourceFormChange: (next: HomeProps["sourceForm"]) => void;
   onMaxAgeDraftChange: (id: string, value: string) => void;
   onSourceIntervalDraftChange: (id: string, value: string) => void;
@@ -52,6 +53,7 @@ export default function Home(props: HomeProps) {
     const maxAgeValid =
       maxAgeFilter === null ||
       (!Number.isNaN(maxAgeFilter) && maxAgeFilter >= 1 && maxAgeFilter <= 15);
+    const searchQuery = props.filters.search.trim().toLowerCase();
 
     return props.sources.filter((source) => {
       if (props.filters.sectorId && source.sector_id !== props.filters.sectorId) {
@@ -63,7 +65,15 @@ export default function Home(props: HomeProps) {
       if (maxAgeFilter !== null) {
         const effectiveMaxAge =
           source.max_age_days ?? source.sectors?.default_max_age_days ?? 5;
-        return effectiveMaxAge === maxAgeFilter;
+        if (effectiveMaxAge !== maxAgeFilter) {
+          return false;
+        }
+      }
+      if (searchQuery) {
+        const haystack = `${source.name ?? ""} ${source.url}`.toLowerCase();
+        if (!haystack.includes(searchQuery)) {
+          return false;
+        }
       }
       return true;
     });
@@ -199,7 +209,18 @@ export default function Home(props: HomeProps) {
 
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
         <h2 className="text-lg font-semibold">Filters</h2>
-        <div className="mt-4 grid gap-4 md:grid-cols-[2fr,1fr]">
+        <div className="mt-4 grid gap-4 md:grid-cols-[2fr,1fr,1fr]">
+          <input
+            value={props.filters.search}
+            onChange={(event) =>
+              props.onFilterChange({
+                ...props.filters,
+                search: event.target.value,
+              })
+            }
+            placeholder="Search name or URL"
+            className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
+          />
           <select
             value={props.filters.sectorId}
             onChange={(event) =>
@@ -282,28 +303,59 @@ export default function Home(props: HomeProps) {
         ) : null}
 
         <div className="mt-4 grid gap-3">
-          {filteredSources.map((source) => (
+          {filteredSources.map((source) => {
+            const stats = props.statsLookup.get(source.id);
+            const healthStatus = stats?.is_stale
+              ? "stale"
+              : stats?.last_run?.status === "error"
+                ? "error"
+                : stats?.last_run
+                  ? "ok"
+                  : "unknown";
+            const healthDot =
+              healthStatus === "ok"
+                ? "bg-emerald-400"
+                : healthStatus === "error"
+                  ? "bg-red-400"
+                  : healthStatus === "stale"
+                    ? "bg-amber-400"
+                    : "bg-slate-500";
+            const healthTitle =
+              healthStatus === "ok"
+                ? "Healthy"
+                : healthStatus === "error"
+                  ? stats?.last_run?.error_message ?? "Last fetch failed"
+                  : healthStatus === "stale"
+                    ? "Stale - no recent updates"
+                    : "No fetch data yet";
+            return (
             <div
               key={source.id}
-              className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-950/70 px-4 py-3"
+              className="flex items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-950/70 px-4 py-3"
             >
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 min-w-0 flex-shrink">
                 <input
                   type="checkbox"
                   checked={Boolean(props.selectedIds[source.id])}
                   onChange={(event) =>
                     props.onSelectToggle(source.id, event.target.checked)
                   }
-                  className="h-4 w-4 accent-emerald-400"
+                  className="h-4 w-4 flex-shrink-0 accent-emerald-400"
                 />
-                <div>
-                  <p className="text-sm font-semibold">
+                <span
+                  className={`h-2 w-2 flex-shrink-0 rounded-full ${healthDot}`}
+                  title={healthTitle}
+                />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold truncate">
                     {source.name ?? "Untitled source"}
                   </p>
-                  <p className="text-xs text-slate-400">{source.url}</p>
+                  <p className="text-xs text-slate-400 truncate" title={source.url}>
+                    {source.url}
+                  </p>
                 </div>
               </div>
-              <div className="flex flex-wrap items-end gap-3">
+              <div className="flex items-end gap-3 ml-auto flex-shrink-0">
                 <div className="flex flex-col gap-1">
                   <span className="text-[10px] uppercase tracking-wide text-slate-500">
                     Sector
@@ -383,7 +435,8 @@ export default function Home(props: HomeProps) {
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
           {!props.isLoading && props.sources.length === 0 ? (
             <p className="text-sm text-slate-400">No sources yet.</p>
           ) : null}
