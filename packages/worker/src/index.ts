@@ -8,6 +8,7 @@ import {
   JOB_MAINTENANCE_CLEANUP,
   JOB_MAINTENANCE_SCHEDULE,
   JOB_SEMANTIC_BATCH,
+  JOB_LLM_SCORE_BATCH,
   QUEUE_INGEST,
   QUEUE_MAINTENANCE,
   QUEUE_SEMANTIC_DEDUP,
@@ -17,9 +18,11 @@ import {
 } from "@watch-tower/shared";
 import { createDb } from "@watch-tower/db";
 import { createEmbeddingProvider } from "@watch-tower/embeddings";
+import { createLLMProviderWithFallback } from "@watch-tower/llm";
 import { createIngestWorker } from "./processors/feed.js";
 import { createMaintenanceWorker } from "./processors/maintenance.js";
 import { createSemanticDedupWorker } from "./processors/semantic-dedup.js";
+import { createLLMBrainWorker } from "./processors/llm-brain.js";
 import { createEventPublisher } from "./events.js";
 
 dotenv.config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) });
@@ -137,6 +140,77 @@ const main = async () => {
       })
     : null;
 
+  // LLM provider configuration
+  // Resolve API key based on provider
+  const getApiKeyForProvider = (provider: string): string | undefined => {
+    switch (provider) {
+      case "claude":
+        return env.ANTHROPIC_API_KEY;
+      case "openai":
+        return env.OPENAI_API_KEY;
+      case "deepseek":
+        return env.DEEPSEEK_API_KEY;
+      default:
+        return undefined;
+    }
+  };
+
+  // Resolve model based on provider (per-provider env vars)
+  const getModelForProvider = (provider: string): string | undefined => {
+    switch (provider) {
+      case "claude":
+        return env.LLM_CLAUDE_MODEL;
+      case "openai":
+        return env.LLM_OPENAI_MODEL;
+      case "deepseek":
+        return env.LLM_DEEPSEEK_MODEL;
+      default:
+        return undefined;
+    }
+  };
+
+  const primaryApiKey = getApiKeyForProvider(env.LLM_PROVIDER);
+  const fallbackApiKey = env.LLM_FALLBACK_PROVIDER
+    ? getApiKeyForProvider(env.LLM_FALLBACK_PROVIDER)
+    : undefined;
+
+  // Warn if fallback is configured but API key is missing
+  if (env.LLM_FALLBACK_PROVIDER && !fallbackApiKey) {
+    logger.warn(
+      `[worker] LLM_FALLBACK_PROVIDER set to '${env.LLM_FALLBACK_PROVIDER}' but no API key found. Fallback disabled.`,
+    );
+  }
+
+  const llmProvider = primaryApiKey
+    ? createLLMProviderWithFallback({
+        primary: {
+          provider: env.LLM_PROVIDER,
+          apiKey: primaryApiKey,
+          model: getModelForProvider(env.LLM_PROVIDER),
+        },
+        fallback:
+          env.LLM_FALLBACK_PROVIDER && fallbackApiKey
+            ? {
+                provider: env.LLM_FALLBACK_PROVIDER,
+                apiKey: fallbackApiKey,
+                model: env.LLM_FALLBACK_MODEL ?? getModelForProvider(env.LLM_FALLBACK_PROVIDER),
+              }
+            : undefined,
+      })
+    : null;
+
+  // LLM brain worker (only if provider enabled)
+  const llmBrainWorker = llmProvider
+    ? createLLMBrainWorker({
+        connection,
+        db,
+        llmProvider,
+        eventPublisher,
+        autoApproveThreshold: env.LLM_AUTO_APPROVE_THRESHOLD,
+        autoRejectThreshold: env.LLM_AUTO_REJECT_THRESHOLD,
+      })
+    : null;
+
   // Worker error handlers
   ingestWorker.on("failed", (job, err) => {
     logger.error(`[ingest] job ${job?.id ?? "unknown"} failed`, err.message);
@@ -170,10 +244,23 @@ const main = async () => {
     });
   }
 
+  if (llmBrainWorker) {
+    llmBrainWorker.on("failed", (job, err) => {
+      logger.error(`[llm-brain] job ${job?.id ?? "unknown"} failed`, err.message);
+    });
+    llmBrainWorker.on("error", (err) => {
+      logger.error("[llm-brain] worker error", err.message);
+    });
+    llmBrainWorker.on("stalled", (jobId) => {
+      logger.warn(`[llm-brain] job ${jobId} stalled - will be retried`);
+    });
+  }
+
   // Clean failed jobs from previous runs (waiting jobs are preserved)
   await ingestQueue.clean(0, 0, "failed");
   await maintenanceQueue.clean(0, 0, "failed");
   await semanticDedupQueue.clean(0, 0, "failed");
+  await llmQueue.clean(0, 0, "failed");
   logger.info("[worker] cleaned failed jobs");
 
   // Set up recurring jobs (BullMQ deduplicates by jobId automatically)
@@ -204,6 +291,21 @@ const main = async () => {
     logger.info("[worker] semantic dedup disabled (no OPENAI_API_KEY)");
   }
 
+  // Set up LLM brain recurring job (every 60 seconds)
+  if (llmBrainWorker) {
+    await llmQueue.add(
+      JOB_LLM_SCORE_BATCH,
+      {},
+      { repeat: { every: 60 * 1000 }, jobId: "llm-score-recurring" },
+    );
+    logger.info(`[worker] llm brain enabled (${llmProvider!.name}/${llmProvider!.model})`);
+  } else {
+    logger.warn(`[worker] llm brain disabled (no API key for ${env.LLM_PROVIDER})`);
+    // NOTE: If LLM is disabled, semantic-dedup still enqueues jobs.
+    // Jobs will accumulate until LLM is re-enabled.
+    // To drain: enable LLM, or manually delete jobs from queue.
+  }
+
   logger.info("[worker] started successfully");
 
   // Graceful shutdown: finish in-flight jobs, then close connections
@@ -220,6 +322,7 @@ const main = async () => {
       await ingestWorker.close();
       await maintenanceWorker.close();
       await semanticDedupWorker?.close();
+      await llmBrainWorker?.close();
       await ingestQueue.close();
       await maintenanceQueue.close();
       await semanticDedupQueue.close();

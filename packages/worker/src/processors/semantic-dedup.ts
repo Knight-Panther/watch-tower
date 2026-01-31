@@ -214,13 +214,10 @@ export const createSemanticDedupWorker = ({
         `[semantic-dedup] ${nonDuplicateIds.length}/${validArticles.length} unique articles`,
       );
 
-      // 5. Queue non-duplicates for LLM scoring
+      // 5. Trigger LLM scoring (scanner pattern — LLM brain scans DB for embedded articles)
       if (nonDuplicateIds.length > 0) {
-        const LLM_BATCH_SIZE = 10;
-        for (let i = 0; i < nonDuplicateIds.length; i += LLM_BATCH_SIZE) {
-          const batch = nonDuplicateIds.slice(i, i + LLM_BATCH_SIZE);
-          await llmQueue.add(JOB_LLM_SCORE_BATCH, { articleIds: batch });
-        }
+        // Empty payload: LLM brain processor ignores job.data and queries DB directly
+        await llmQueue.add(JOB_LLM_SCORE_BATCH, {});
       }
     },
     { connection, concurrency: 2 },

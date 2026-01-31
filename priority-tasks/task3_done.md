@@ -1,8 +1,8 @@
 # Task 3: Stage 3 — LLM Brain Pipeline
 
 **Created:** 2026-01-30
-**Status:** PENDING
-**Rename to:** `task3_done.md` when all items are implemented
+**Completed:** 2026-01-31
+**Status:** DONE
 
 ---
 
@@ -13,6 +13,7 @@ Implement the LLM scoring and summarization stage of the pipeline. This stage:
 2. Generates concise summaries for high-scoring articles
 3. Auto-approves/rejects based on configurable thresholds
 4. Advances articles through the pipeline stages
+5. **Multi-provider support** (Claude, OpenAI, DeepSeek) with automatic fallback
 
 **Pipeline position:**
 ```
@@ -1348,6 +1349,72 @@ If issues occur:
 
 ---
 
+## Phase 8: Multi-Provider Support with Fallback (ADDED)
+
+**Goal:** Support multiple LLM providers with automatic fallback on failures.
+
+### 8.1 Implemented Features
+
+| Feature | Description |
+|---------|-------------|
+| **DeepSeek provider** | Cost-effective alternative ($0.14/1M input) |
+| **Per-provider model config** | `LLM_CLAUDE_MODEL`, `LLM_OPENAI_MODEL`, `LLM_DEEPSEEK_MODEL` |
+| **Fallback on failure** | Parse errors, API errors, auth errors trigger fallback |
+| **Auth error warnings** | Specific log when 401/403 triggers fallback |
+| **Missing key warnings** | Log when fallback configured but key missing |
+| **Provider-aware logging** | `[deepseek]` instead of `[openai]` for DeepSeek calls |
+
+### 8.2 New Environment Variables
+
+```env
+# Provider selection
+LLM_PROVIDER=deepseek              # claude | openai | deepseek
+
+# Per-provider models (optional)
+LLM_CLAUDE_MODEL=claude-sonnet-4-20250514
+LLM_OPENAI_MODEL=gpt-4o-mini
+LLM_DEEPSEEK_MODEL=deepseek-chat
+
+# Fallback (optional)
+LLM_FALLBACK_PROVIDER=claude
+LLM_FALLBACK_MODEL=claude-sonnet-4-20250514
+
+# API keys
+ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-...
+DEEPSEEK_API_KEY=sk-...
+```
+
+### 8.3 Fallback Triggers
+
+| Error Type | Triggers Fallback |
+|------------|-------------------|
+| Parse error (malformed JSON) | Yes |
+| Auth error (401/403) | Yes + Warning |
+| Network errors (ECONNRESET, etc.) | Yes |
+| Rate limit (429) | Yes |
+| Server errors (5xx) | Yes |
+
+### 8.4 New Files
+
+| File | Purpose |
+|------|---------|
+| `packages/llm/src/deepseek.ts` | DeepSeek provider (OpenAI-compatible) |
+| `packages/llm/src/fallback.ts` | `LLMProviderWithFallback` wrapper |
+| `packages/llm/README.md` | Configuration guide for developers |
+
+### Phase 8 Checkpoint
+
+- [x] DeepSeek provider works
+- [x] Per-provider model selection works
+- [x] Fallback triggers on parse errors
+- [x] Fallback triggers on API errors
+- [x] Auth errors log specific warning
+- [x] Missing fallback key logs warning
+- [x] Provider-aware logging (uses `this.name`)
+
+---
+
 ## Future Enhancements (Out of Scope)
 
 - [ ] Anthropic prompt caching configuration
@@ -1359,3 +1426,5 @@ If issues occur:
 - [ ] Human feedback loop to improve prompts
 - [ ] Cost tracking per sector
 - [ ] `rejected_at` column for rejection audit trail
+- [ ] Dashboard integration for remaining API credits
+- [ ] Per-sector model preference from `scoring_rules.model_preference`

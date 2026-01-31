@@ -120,7 +120,7 @@ const runScheduledIngests = async (db: Database, ingestQueue: Queue) => {
  * Reset articles stuck in 'embedding' stage (from crashed workers).
  * Uses created_at with 10 min threshold since we don't have updated_at.
  */
-const resetZombieArticles = async (db: Database) => {
+const resetZombieEmbeddingArticles = async (db: Database) => {
   const staleEmbeddingThreshold = new Date(Date.now() - 10 * 60 * 1000);
   const resetResult = await db.execute(sql`
     UPDATE articles
@@ -133,6 +133,35 @@ const resetZombieArticles = async (db: Database) => {
     logger.warn(`[maintenance] reset ${resetResult.rows.length} zombie embedding articles`);
   }
   return resetResult.rows.length;
+};
+
+/**
+ * Reset articles stuck in 'scoring' stage (from crashed workers).
+ * Uses 10 min threshold since LLM calls are slower than embeddings.
+ * Note: 'scoring_failed' articles are NOT auto-reset — they require manual investigation.
+ */
+const resetZombieScoringArticles = async (db: Database) => {
+  const staleScoringThreshold = new Date(Date.now() - 10 * 60 * 1000);
+  const resetResult = await db.execute(sql`
+    UPDATE articles
+    SET pipeline_stage = 'embedded'
+    WHERE pipeline_stage = 'scoring'
+      AND scored_at IS NULL
+      AND created_at < ${staleScoringThreshold}
+    RETURNING id
+  `);
+  if (resetResult.rows.length > 0) {
+    logger.warn(`[maintenance] reset ${resetResult.rows.length} zombie scoring articles`);
+  }
+  return resetResult.rows.length;
+};
+
+/**
+ * Reset all zombie articles (embedding + scoring stages)
+ */
+const resetZombieArticles = async (db: Database) => {
+  await resetZombieEmbeddingArticles(db);
+  await resetZombieScoringArticles(db);
 };
 
 export const createMaintenanceWorker = ({ connection, db, ingestQueue }: MaintenanceDeps) =>

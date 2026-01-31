@@ -16,7 +16,7 @@ Independent media monitoring agent. Scans RSS feeds by sector, deduplicates (URL
 - **Frontend**: React 19 + Vite + Tailwind CSS
 - **Database**: PostgreSQL 16 + pgvector (via Drizzle ORM)
 - **Queue/Cache**: Redis 7
-- **LLM**: Provider abstraction (Anthropic Claude + OpenAI)
+- **LLM**: Provider abstraction (Claude, OpenAI, DeepSeek) with fallback support
 - **Embeddings**: OpenAI text-embedding-3-small (1536 dims)
 - **Social**: Telegram Bot API, Facebook Graph API, LinkedIn API
 - **Monorepo**: npm workspaces + Turborepo
@@ -28,7 +28,7 @@ Independent media monitoring agent. Scans RSS feeds by sector, deduplicates (URL
 packages/
 ├── db/            # Drizzle schema, migrations, client factory
 ├── shared/        # Queue constants, env schemas, shared types
-├── llm/           # LLM provider abstraction (Claude + OpenAI)
+├── llm/           # LLM provider abstraction (Claude, OpenAI, DeepSeek + fallback)
 ├── embeddings/    # Embedding generation + pgvector similarity search
 ├── social/        # Social poster abstraction (Telegram, Facebook, LinkedIn)
 ├── worker/        # Pipeline processors (ingest, dedup, score, distribute)
@@ -145,10 +145,16 @@ API_KEY=local-dev-key
 PORT=3001
 LOG_LEVEL=info                # debug | info | warn | error
 
-# LLM Providers (Phase 4 — not yet used)
-# OPENAI_API_KEY=sk-...
-# ANTHROPIC_API_KEY=sk-ant-...
-# LLM_PROVIDER=claude          # 'claude' | 'openai'
+# Embeddings (OpenAI)
+OPENAI_API_KEY=sk-...
+EMBEDDING_MODEL=text-embedding-3-small
+SIMILARITY_THRESHOLD=0.85
+
+# LLM Brain (see packages/llm/README.md for full guide)
+ANTHROPIC_API_KEY=sk-ant-...
+# DEEPSEEK_API_KEY=sk-...
+LLM_PROVIDER=claude              # 'claude' | 'openai' | 'deepseek'
+# LLM_FALLBACK_PROVIDER=openai   # Optional fallback on API failure
 
 # Frontend
 VITE_API_URL=http://localhost:3001
@@ -224,11 +230,12 @@ Implementation tasks are tracked in the `priority-tasks/` folder at the project 
 - **Always check this folder first** when starting a new session to understand pending work
 
 Current tasks:
-- `task3.md` — Stage 3: LLM Brain Pipeline (scoring + summarization)
+- None active
 
 Completed:
 - `task1_done.md` — Infrastructure hardening & reliability
 - `task2_done.md` — Stage 2: Semantic Dedup Pipeline
+- `task3_done.md` — Stage 3: LLM Brain Pipeline (scoring + summarization + multi-provider)
 
 ---
 

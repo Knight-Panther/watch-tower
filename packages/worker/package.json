@@ -15,6 +15,7 @@
   "dependencies": {
     "@watch-tower/db": "file:../db",
     "@watch-tower/embeddings": "file:../embeddings",
+    "@watch-tower/llm": "file:../llm",
     "@watch-tower/shared": "file:../shared",
     "bullmq": "^5.66.5",
     "dotenv": "^17.2.3",

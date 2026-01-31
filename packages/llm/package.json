@@ -1,0 +1,26 @@
+{
+  "name": "@watch-tower/llm",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.0",
+    "openai": "^4.70.0",
+    "zod": "^3.23.0",
+    "@watch-tower/shared": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}
