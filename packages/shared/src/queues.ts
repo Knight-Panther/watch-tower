@@ -11,6 +11,7 @@ export const JOB_SEMANTIC_BATCH = "semantic-batch";
 export const JOB_LLM_SCORE_BATCH = "llm-score-batch";
 export const JOB_DISTRIBUTION_BUILD = "distribution-build";
 export const JOB_DISTRIBUTION_POST = "distribution-post";
+export const JOB_DISTRIBUTION_IMMEDIATE = "distribution-immediate";
 export const JOB_MAINTENANCE_CLEANUP = "maintenance-cleanup";
 export const JOB_MAINTENANCE_SCHEDULE = "maintenance-schedule";
 

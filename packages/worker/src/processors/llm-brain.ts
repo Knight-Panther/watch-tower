@@ -1,6 +1,11 @@
-import { Worker } from "bullmq";
+import { Worker, Queue } from "bullmq";
 import { sql } from "drizzle-orm";
-import { QUEUE_LLM_BRAIN, JOB_LLM_SCORE_BATCH, logger } from "@watch-tower/shared";
+import {
+  QUEUE_LLM_BRAIN,
+  JOB_LLM_SCORE_BATCH,
+  JOB_DISTRIBUTION_IMMEDIATE,
+  logger,
+} from "@watch-tower/shared";
 import type { Database } from "@watch-tower/db";
 import { llmTelemetry } from "@watch-tower/db";
 import type { LLMProvider, ScoringRequest, ScoringResult } from "@watch-tower/llm";
@@ -15,6 +20,7 @@ type LLMBrainDeps = {
   autoApproveThreshold: number;
   autoRejectThreshold: number;
   batchSize?: number;
+  distributionQueue?: Queue;
 };
 
 const DEFAULT_BATCH_SIZE = 10;
@@ -41,6 +47,7 @@ export const createLLMBrainWorker = ({
   autoApproveThreshold,
   autoRejectThreshold,
   batchSize = DEFAULT_BATCH_SIZE,
+  distributionQueue,
 }: LLMBrainDeps) => {
   return new Worker(
     QUEUE_LLM_BRAIN,
@@ -269,6 +276,19 @@ export const createLLMBrainWorker = ({
               type: "article:approved",
               data: { id: result.articleId },
             });
+
+            // Queue for immediate distribution (score 5 auto-approved)
+            if (distributionQueue) {
+              await distributionQueue.add(
+                JOB_DISTRIBUTION_IMMEDIATE,
+                { articleId: result.articleId },
+                { jobId: `immediate-${result.articleId}` },
+              );
+              logger.info(
+                { articleId: result.articleId, score: result.score },
+                "[llm-brain] queued for immediate distribution",
+              );
+            }
           } else {
             await eventPublisher.publish({
               type: "article:rejected",

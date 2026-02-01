@@ -39,6 +39,7 @@ import Monitoring from "./pages/Monitoring";
 import Telemetry from "./pages/Telemetry";
 import Home from "./pages/Home";
 import SectorManagement from "./pages/SectorManagement";
+import Articles from "./pages/Articles";
 
 const emptySourceForm = {
   url: "",
@@ -856,6 +857,7 @@ export default function App() {
             />
           }
         />
+        <Route path="/articles" element={<Articles />} />
       </Routes>
 
       {confirmDeleteSource ? (

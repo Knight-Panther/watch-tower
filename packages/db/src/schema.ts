@@ -210,6 +210,32 @@ export const llmTelemetry = pgTable(
   ],
 );
 
+// ─── Article Images (for score-5 posts) ─────────────────────────────────────
+
+export const articleImages = pgTable("article_images", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  articleId: uuid("article_id")
+    .notNull()
+    .references(() => articles.id, { onDelete: "cascade" }),
+
+  // Generation details
+  provider: text("provider").notNull(), // 'dalle', 'stable', 'ideogram'
+  model: text("model"),
+  prompt: text("prompt").notNull(),
+
+  // Result
+  imageUrl: text("image_url"),
+  status: text("status").notNull().default("pending"), // 'pending', 'generating', 'ready', 'failed'
+  errorMessage: text("error_message"),
+
+  // Cost tracking (microdollars)
+  costMicrodollars: integer("cost_microdollars"),
+
+  // Timing
+  latencyMs: integer("latency_ms"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // ─── App Config ──────────────────────────────────────────────────────────────
 
 export const appConfig = pgTable("app_config", {

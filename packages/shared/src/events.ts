@@ -60,6 +60,15 @@ export type ArticleRejectedEvent = {
   };
 };
 
+export type ArticlePostedEvent = {
+  type: "article:posted";
+  data: {
+    id: string;
+    platform: string;
+    postId: string;
+  };
+};
+
 export type SourceFetchedEvent = {
   type: "source:fetched";
   data: {
@@ -83,6 +92,7 @@ export type ServerEvent =
   | ArticleScoredEvent
   | ArticleApprovedEvent
   | ArticleRejectedEvent
+  | ArticlePostedEvent
   | SourceFetchedEvent
   | StatsUpdatedEvent;
 
@@ -94,7 +104,8 @@ export const isArticleEvent = (
   | ArticleEmbeddedEvent
   | ArticleScoredEvent
   | ArticleApprovedEvent
-  | ArticleRejectedEvent => event.type.startsWith("article:");
+  | ArticleRejectedEvent
+  | ArticlePostedEvent => event.type.startsWith("article:");
 
 export const isSourceEvent = (event: ServerEvent): event is SourceFetchedEvent =>
   event.type === "source:fetched";

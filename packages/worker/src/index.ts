@@ -13,6 +13,7 @@ import {
   QUEUE_MAINTENANCE,
   QUEUE_SEMANTIC_DEDUP,
   QUEUE_LLM_BRAIN,
+  QUEUE_DISTRIBUTION,
   setLogLevel,
   logger,
 } from "@watch-tower/shared";
@@ -23,6 +24,7 @@ import { createIngestWorker } from "./processors/feed.js";
 import { createMaintenanceWorker } from "./processors/maintenance.js";
 import { createSemanticDedupWorker } from "./processors/semantic-dedup.js";
 import { createLLMBrainWorker } from "./processors/llm-brain.js";
+import { createDistributionWorker } from "./processors/distribution.js";
 import { createEventPublisher } from "./events.js";
 
 dotenv.config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) });
@@ -107,6 +109,17 @@ const main = async () => {
     defaultJobOptions: {
       attempts: 3,
       backoff: { type: "exponential", delay: 10000 },
+      removeOnComplete: 100,
+      removeOnFail: 50,
+    },
+  });
+
+  // Distribution queue for posting to social platforms
+  const distributionQueue = new Queue(QUEUE_DISTRIBUTION, {
+    connection,
+    defaultJobOptions: {
+      attempts: 3,
+      backoff: { type: "exponential", delay: 30000 }, // Longer backoff for rate limits
       removeOnComplete: 100,
       removeOnFail: 50,
     },
@@ -208,8 +221,24 @@ const main = async () => {
         eventPublisher,
         autoApproveThreshold: env.LLM_AUTO_APPROVE_THRESHOLD,
         autoRejectThreshold: env.LLM_AUTO_REJECT_THRESHOLD,
+        // Pass distribution queue only if Telegram is configured
+        distributionQueue: env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID ? distributionQueue : undefined,
       })
     : null;
+
+  // Distribution worker (only if Telegram configured)
+  const distributionWorker =
+    env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID
+      ? createDistributionWorker({
+          connection,
+          db,
+          telegramConfig: {
+            botToken: env.TELEGRAM_BOT_TOKEN,
+            defaultChatId: env.TELEGRAM_CHAT_ID,
+          },
+          eventPublisher,
+        })
+      : null;
 
   // Worker error handlers
   ingestWorker.on("failed", (job, err) => {
@@ -256,11 +285,24 @@ const main = async () => {
     });
   }
 
+  if (distributionWorker) {
+    distributionWorker.on("failed", (job, err) => {
+      logger.error(`[distribution] job ${job?.id ?? "unknown"} failed`, err.message);
+    });
+    distributionWorker.on("error", (err) => {
+      logger.error("[distribution] worker error", err.message);
+    });
+    distributionWorker.on("stalled", (jobId) => {
+      logger.warn(`[distribution] job ${jobId} stalled - will be retried`);
+    });
+  }
+
   // Clean failed jobs from previous runs (waiting jobs are preserved)
   await ingestQueue.clean(0, 0, "failed");
   await maintenanceQueue.clean(0, 0, "failed");
   await semanticDedupQueue.clean(0, 0, "failed");
   await llmQueue.clean(0, 0, "failed");
+  await distributionQueue.clean(0, 0, "failed");
   logger.info("[worker] cleaned failed jobs");
 
   // Set up recurring jobs (BullMQ deduplicates by jobId automatically)
@@ -306,6 +348,13 @@ const main = async () => {
     // To drain: enable LLM, or manually delete jobs from queue.
   }
 
+  // Distribution worker status
+  if (distributionWorker) {
+    logger.info("[worker] distribution enabled (telegram)");
+  } else {
+    logger.info("[worker] distribution disabled (no TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID)");
+  }
+
   logger.info("[worker] started successfully");
 
   // Graceful shutdown: finish in-flight jobs, then close connections
@@ -323,10 +372,12 @@ const main = async () => {
       await maintenanceWorker.close();
       await semanticDedupWorker?.close();
       await llmBrainWorker?.close();
+      await distributionWorker?.close();
       await ingestQueue.close();
       await maintenanceQueue.close();
       await semanticDedupQueue.close();
       await llmQueue.close();
+      await distributionQueue.close();
       await redis.quit();
       await closeDb();
     } finally {

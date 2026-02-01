@@ -39,6 +39,16 @@ export const baseEnvSchema = z.object({
   // Auto-approve/reject thresholds
   LLM_AUTO_APPROVE_THRESHOLD: z.coerce.number().min(1).max(5).default(5),
   LLM_AUTO_REJECT_THRESHOLD: z.coerce.number().min(1).max(5).default(2),
+
+  // Telegram distribution
+  TELEGRAM_BOT_TOKEN: z
+    .string()
+    .optional()
+    .transform((val) => (val === "" ? undefined : val)),
+  TELEGRAM_CHAT_ID: z
+    .string()
+    .optional()
+    .transform((val) => (val === "" ? undefined : val)),
 });
 
 export type BaseEnv = z.infer<typeof baseEnvSchema>;

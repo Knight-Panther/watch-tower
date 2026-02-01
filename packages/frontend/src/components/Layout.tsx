@@ -4,6 +4,7 @@ import type { ConnectionStatus } from "../hooks/useServerEvents";
 
 const navItems = [
   { to: "/", label: "Home" },
+  { to: "/articles", label: "Articles" },
   { to: "/monitoring", label: "Monitoring" },
   { to: "/telemetry", label: "Telemetry" },
   { to: "/sectors", label: "Sector Management" },

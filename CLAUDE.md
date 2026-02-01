@@ -230,12 +230,13 @@ Implementation tasks are tracked in the `priority-tasks/` folder at the project 
 - **Always check this folder first** when starting a new session to understand pending work
 
 Current tasks:
-- None active
+- `task5.md` — Articles Panel + Distribution Pipeline (Telegram)
 
 Completed:
 - `task1_done.md` — Infrastructure hardening & reliability
 - `task2_done.md` — Stage 2: Semantic Dedup Pipeline
 - `task3_done.md` — Stage 3: LLM Brain Pipeline (scoring + summarization + multi-provider)
+- `task4_done.md` — LLM Token Telemetry
 
 ---
 
