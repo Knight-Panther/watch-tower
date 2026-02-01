@@ -1,5 +1,5 @@
 import { Worker, Queue } from "bullmq";
-import { sql } from "drizzle-orm";
+import { sql, eq } from "drizzle-orm";
 import {
   QUEUE_LLM_BRAIN,
   JOB_LLM_SCORE_BATCH,
@@ -7,10 +7,23 @@ import {
   logger,
 } from "@watch-tower/shared";
 import type { Database } from "@watch-tower/db";
-import { llmTelemetry } from "@watch-tower/db";
+import { llmTelemetry, appConfig } from "@watch-tower/db";
 import type { LLMProvider, ScoringRequest, ScoringResult } from "@watch-tower/llm";
 import { calculateLLMCost } from "@watch-tower/llm";
 import type { EventPublisher } from "../events.js";
+
+/**
+ * Check if auto-posting for score 5 is enabled in app_config.
+ * Defaults to true if not set.
+ */
+const isAutoPostEnabled = async (db: Database): Promise<boolean> => {
+  const [row] = await db
+    .select({ value: appConfig.value })
+    .from(appConfig)
+    .where(eq(appConfig.key, "auto_post_score5"));
+  if (!row) return true; // Default to enabled
+  return row.value === true || row.value === "true";
+};
 
 type LLMBrainDeps = {
   connection: { host: string; port: number };
@@ -278,16 +291,25 @@ export const createLLMBrainWorker = ({
             });
 
             // Queue for immediate distribution (score 5 auto-approved)
+            // Only if auto_post_score5 is enabled in app_config
             if (distributionQueue) {
-              await distributionQueue.add(
-                JOB_DISTRIBUTION_IMMEDIATE,
-                { articleId: result.articleId },
-                { jobId: `immediate-${result.articleId}` },
-              );
-              logger.info(
-                { articleId: result.articleId, score: result.score },
-                "[llm-brain] queued for immediate distribution",
-              );
+              const autoPostEnabled = await isAutoPostEnabled(db);
+              if (autoPostEnabled) {
+                await distributionQueue.add(
+                  JOB_DISTRIBUTION_IMMEDIATE,
+                  { articleId: result.articleId },
+                  { jobId: `immediate-${result.articleId}` },
+                );
+                logger.info(
+                  { articleId: result.articleId, score: result.score },
+                  "[llm-brain] queued for immediate distribution",
+                );
+              } else {
+                logger.debug(
+                  { articleId: result.articleId, score: result.score },
+                  "[llm-brain] auto-post disabled, skipping distribution",
+                );
+              }
             }
           } else {
             await eventPublisher.publish({

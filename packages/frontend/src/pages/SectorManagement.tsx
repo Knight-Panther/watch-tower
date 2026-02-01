@@ -26,27 +26,16 @@ export default function SectorManagement({
   return (
     <>
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-        <h1 className="text-3xl font-semibold tracking-tight">
-          Sector Management
-        </h1>
-        <p className="mt-2 text-sm text-slate-400">
-          Create and manage sector defaults.
-        </p>
-        <form
-          onSubmit={onCreateSector}
-          className="mt-6 grid gap-4 md:grid-cols-[2fr,1fr]"
-        >
+        <h1 className="text-3xl font-semibold tracking-tight">Sector Management</h1>
+        <p className="mt-2 text-sm text-slate-400">Create and manage sector defaults.</p>
+        <form onSubmit={onCreateSector} className="mt-6 grid gap-4 md:grid-cols-[2fr,1fr]">
           <input
             value={sectorForm.name}
-            onChange={(event) =>
-              onSectorFormChange({ ...sectorForm, name: event.target.value })
-            }
+            onChange={(event) => onSectorFormChange({ ...sectorForm, name: event.target.value })}
             placeholder="Sector name"
             className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
           />
-          {sectorErrors.name ? (
-            <p className="text-xs text-red-400">{sectorErrors.name}</p>
-          ) : null}
+          {sectorErrors.name ? <p className="text-xs text-red-400">{sectorErrors.name}</p> : null}
           <input
             value={sectorForm.defaultMaxAgeDays}
             onChange={(event) =>
@@ -59,9 +48,7 @@ export default function SectorManagement({
             className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
           />
           {sectorErrors.defaultMaxAgeDays ? (
-            <p className="text-xs text-red-400">
-              {sectorErrors.defaultMaxAgeDays}
-            </p>
+            <p className="text-xs text-red-400">{sectorErrors.defaultMaxAgeDays}</p>
           ) : null}
           <div className="md:col-span-2">
             <button
@@ -100,9 +87,7 @@ export default function SectorManagement({
               </div>
             </div>
           ))}
-          {sectors.length === 0 ? (
-            <p className="text-sm text-slate-400">No sectors yet.</p>
-          ) : null}
+          {sectors.length === 0 ? <p className="text-sm text-slate-400">No sectors yet.</p> : null}
         </div>
       </section>
     </>

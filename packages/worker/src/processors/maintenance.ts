@@ -15,13 +15,16 @@ import {
   appConfig,
   rssSources,
   sectors,
+  postDeliveries,
 } from "@watch-tower/db";
+import { createTelegramProvider, type TelegramConfig } from "@watch-tower/social";
 import type { Queue } from "bullmq";
 
 type MaintenanceDeps = {
   connection: { host: string; port: number };
   db: Database;
   ingestQueue: Queue;
+  telegramConfig?: TelegramConfig;
 };
 
 const getConfigNumber = async (db: Database, key: string, fallback: number) => {
@@ -164,7 +167,164 @@ const resetZombieArticles = async (db: Database) => {
   await resetZombieScoringArticles(db);
 };
 
-export const createMaintenanceWorker = ({ connection, db, ingestQueue }: MaintenanceDeps) =>
+/**
+ * Reset deliveries stuck in 'posting' state (from crashed workers).
+ * Uses 5 min threshold.
+ */
+const resetZombieDeliveries = async (db: Database) => {
+  const staleThreshold = new Date(Date.now() - 5 * 60 * 1000);
+  const resetResult = await db.execute(sql`
+    UPDATE post_deliveries
+    SET status = 'scheduled'
+    WHERE status = 'posting'
+      AND created_at < ${staleThreshold}
+    RETURNING id
+  `);
+  if (resetResult.rows.length > 0) {
+    logger.warn(`[maintenance] reset ${resetResult.rows.length} zombie deliveries`);
+  }
+  return resetResult.rows.length;
+};
+
+type ArticleForPost = {
+  id: string;
+  title: string;
+  url: string;
+  llmSummary: string | null;
+  importanceScore: number | null;
+  sectorName: string | null;
+};
+
+type ClaimedDelivery = {
+  id: string;
+  articleId: string;
+  platform: string;
+};
+
+/**
+ * Process scheduled posts that are due.
+ * Claims posts atomically and posts to configured platforms.
+ */
+const processScheduledPosts = async (db: Database, telegramConfig?: TelegramConfig) => {
+  if (!telegramConfig) {
+    return; // No telegram configured, skip
+  }
+
+  // 1. ATOMIC CLAIM: Get due posts and mark as 'posting'
+  const claimResult = await db.execute(sql`
+    UPDATE post_deliveries
+    SET status = 'posting'
+    WHERE id IN (
+      SELECT id FROM post_deliveries
+      WHERE scheduled_at <= NOW()
+        AND status = 'scheduled'
+      ORDER BY scheduled_at
+      LIMIT 10
+      FOR UPDATE SKIP LOCKED
+    )
+    RETURNING id, article_id as "articleId", platform
+  `);
+
+  const claimed = claimResult.rows as ClaimedDelivery[];
+  if (claimed.length === 0) {
+    return;
+  }
+
+  logger.info(`[post-scheduler] claimed ${claimed.length} due posts`);
+
+  // Create telegram provider
+  const telegram = createTelegramProvider(telegramConfig);
+
+  // 2. Process each claimed delivery
+  for (const delivery of claimed) {
+    try {
+      // Only support telegram for now
+      if (delivery.platform !== "telegram") {
+        logger.warn(`[post-scheduler] unsupported platform: ${delivery.platform}`);
+        await db
+          .update(postDeliveries)
+          .set({ status: "failed", errorMessage: `Unsupported platform: ${delivery.platform}` })
+          .where(eq(postDeliveries.id, delivery.id));
+        continue;
+      }
+
+      // Fetch article data
+      const articleResult = await db.execute(sql`
+        SELECT
+          a.id,
+          a.title,
+          a.url,
+          a.llm_summary as "llmSummary",
+          a.importance_score as "importanceScore",
+          s.name as "sectorName"
+        FROM articles a
+        LEFT JOIN sectors s ON a.sector_id = s.id
+        WHERE a.id = ${delivery.articleId}::uuid
+      `);
+
+      const article = articleResult.rows[0] as ArticleForPost | undefined;
+      if (!article) {
+        logger.error(`[post-scheduler] article not found: ${delivery.articleId}`);
+        await db
+          .update(postDeliveries)
+          .set({ status: "failed", errorMessage: "Article not found" })
+          .where(eq(postDeliveries.id, delivery.id));
+        continue;
+      }
+
+      // Format and post
+      const text = telegram.formatSinglePost({
+        title: article.title,
+        summary: article.llmSummary || article.title,
+        url: article.url,
+        sector: article.sectorName || "News",
+      });
+
+      const postResult = await telegram.post({ text });
+
+      if (!postResult.success) {
+        logger.error(
+          { deliveryId: delivery.id, error: postResult.error },
+          "[post-scheduler] telegram post failed",
+        );
+        await db
+          .update(postDeliveries)
+          .set({ status: "failed", errorMessage: postResult.error })
+          .where(eq(postDeliveries.id, delivery.id));
+        continue;
+      }
+
+      // Success: update delivery and article
+      await db
+        .update(postDeliveries)
+        .set({
+          status: "posted",
+          sentAt: new Date(),
+          platformPostId: postResult.postId,
+        })
+        .where(eq(postDeliveries.id, delivery.id));
+
+      await db
+        .update(articles)
+        .set({ pipelineStage: "posted" })
+        .where(eq(articles.id, delivery.articleId));
+
+      logger.info(
+        { deliveryId: delivery.id, articleId: delivery.articleId, postId: postResult.postId },
+        "[post-scheduler] posted to telegram",
+      );
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Unknown error";
+      logger.error(`[post-scheduler] error processing delivery ${delivery.id}: ${errorMsg}`);
+      await db
+        .update(postDeliveries)
+        .set({ status: "failed", errorMessage: errorMsg })
+        .where(eq(postDeliveries.id, delivery.id));
+    }
+  }
+};
+
+export const createMaintenanceWorker = ({ connection, db, ingestQueue, telegramConfig }: MaintenanceDeps) =>
   new Worker(
     QUEUE_MAINTENANCE,
     async (job) => {
@@ -187,7 +347,10 @@ export const createMaintenanceWorker = ({ connection, db, ingestQueue }: Mainten
       if (job.name === JOB_MAINTENANCE_SCHEDULE) {
         // Run zombie cleanup on every scheduler tick (every 30s) for fast recovery
         await resetZombieArticles(db);
+        await resetZombieDeliveries(db);
         await runScheduledIngests(db, ingestQueue);
+        // Process any scheduled posts that are due
+        await processScheduledPosts(db, telegramConfig);
         return;
       }
     },

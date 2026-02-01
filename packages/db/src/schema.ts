@@ -108,23 +108,6 @@ export const scoringRules = pgTable("scoring_rules", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// ─── Post Batches ────────────────────────────────────────────────────────────
-
-export const postBatches = pgTable("post_batches", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  sectorId: uuid("sector_id").references(() => sectors.id, { onDelete: "set null" }),
-  status: text("status").notNull().default("draft"),
-  format: text("format").notNull().default("top5"),
-  contentText: text("content_text"),
-  articleIds: uuid("article_ids")
-    .array()
-    .notNull()
-    .default(sql`'{}'::uuid[]`),
-  approvedBy: text("approved_by"),
-  approvedAt: timestamp("approved_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
-
 // ─── Social Accounts ─────────────────────────────────────────────────────────
 
 export const socialAccounts = pgTable("social_accounts", {
@@ -142,23 +125,29 @@ export const socialAccounts = pgTable("social_accounts", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// ─── Post Deliveries ─────────────────────────────────────────────────────────
+// ─── Post Deliveries (scheduled/immediate posting) ───────────────────────────
 
-export const postDeliveries = pgTable("post_deliveries", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  batchId: uuid("batch_id")
-    .notNull()
-    .references(() => postBatches.id, { onDelete: "cascade" }),
-  socialAccountId: uuid("social_account_id")
-    .notNull()
-    .references(() => socialAccounts.id, { onDelete: "cascade" }),
-  platform: text("platform").notNull(),
-  status: text("status").notNull().default("pending"),
-  platformPostId: text("platform_post_id"),
-  errorMessage: text("error_message"),
-  sentAt: timestamp("sent_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const postDeliveries = pgTable(
+  "post_deliveries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    articleId: uuid("article_id")
+      .notNull()
+      .references(() => articles.id, { onDelete: "cascade" }),
+    platform: text("platform").notNull(), // 'telegram' | 'facebook' | 'linkedin'
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }), // null = immediate
+    status: text("status").notNull().default("scheduled"), // 'scheduled' | 'posting' | 'posted' | 'failed' | 'cancelled'
+    platformPostId: text("platform_post_id"),
+    errorMessage: text("error_message"),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_post_deliveries_due").on(table.scheduledAt),
+    index("idx_post_deliveries_article").on(table.articleId),
+    index("idx_post_deliveries_status").on(table.status),
+  ],
+);
 
 // ─── Feed Fetch Runs (telemetry) ─────────────────────────────────────────────
 

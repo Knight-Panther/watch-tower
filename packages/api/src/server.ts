@@ -23,6 +23,7 @@ import { registerStatsRoutes } from "./routes/stats.js";
 import { registerEventsRoutes } from "./routes/events.js";
 import { registerTelemetryRoutes } from "./routes/telemetry.js";
 import { registerArticlesRoutes } from "./routes/articles.js";
+import { registerScheduledRoutes } from "./routes/scheduled.js";
 import { createRequireApiKey } from "./utils/auth.js";
 
 dotenv.config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) });
@@ -126,6 +127,7 @@ export const buildApp = async () => {
   registerEventsRoutes(app, deps);
   registerTelemetryRoutes(app, deps);
   registerArticlesRoutes(app, deps);
+  registerScheduledRoutes(app, deps);
 
   const closeRedis = () => redis.quit();
   return { app, port: env.PORT, closeDb, closeRedis, ingestQueue, maintenanceQueue };

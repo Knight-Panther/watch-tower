@@ -55,9 +55,7 @@ export type UseServerEventsReturn = {
  * });
  * ```
  */
-export const useServerEvents = (
-  options: UseServerEventsOptions = {},
-): UseServerEventsReturn => {
+export const useServerEvents = (options: UseServerEventsOptions = {}): UseServerEventsReturn => {
   const {
     onEvent,
     onStatusChange,

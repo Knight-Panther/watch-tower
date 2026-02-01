@@ -74,9 +74,7 @@ export default function Monitoring({
         entries.set(source.sector.id, source.sector.name);
       }
     });
-    return Array.from(entries.entries()).sort((a, b) =>
-      a[1].localeCompare(b[1]),
-    );
+    return Array.from(entries.entries()).sort((a, b) => a[1].localeCompare(b[1]));
   }, [sources]);
 
   const filteredSources = useMemo(() => {
@@ -137,9 +135,7 @@ export default function Monitoring({
             </button>
           </div>
         </div>
-        {error ? (
-          <p className="mt-3 text-sm text-red-400">{error}</p>
-        ) : null}
+        {error ? <p className="mt-3 text-sm text-red-400">{error}</p> : null}
       </section>
 
       <section className="grid gap-3 md:grid-cols-5">
@@ -174,9 +170,7 @@ export default function Monitoring({
             {overview?.queues.feed.delayed ?? "—"} F:
             <span
               className={
-                (overview?.queues.feed.failed ?? 0) > 0
-                  ? "text-red-300"
-                  : "text-slate-300"
+                (overview?.queues.feed.failed ?? 0) > 0 ? "text-red-300" : "text-slate-300"
               }
             >
               {overview?.queues.feed.failed ?? "—"}
@@ -275,17 +269,13 @@ export default function Monitoring({
                   <span className="text-[10px] uppercase tracking-wide text-slate-500">
                     Last success
                   </span>
-                  <span className="text-slate-300">
-                    {formatRelative(source.last_success_at)}
-                  </span>
+                  <span className="text-slate-300">{formatRelative(source.last_success_at)}</span>
                   <span className="text-[10px] uppercase tracking-wide text-slate-500">
                     Last run
                   </span>
                   <span className="text-slate-300">
                     {source.last_run
-                      ? formatRelative(
-                          source.last_run.finished_at ?? source.last_run.started_at,
-                        )
+                      ? formatRelative(source.last_run.finished_at ?? source.last_run.started_at)
                       : "Never"}
                   </span>
                   <span className="text-[10px] uppercase tracking-wide text-slate-500">
@@ -297,21 +287,15 @@ export default function Monitoring({
                   <span className="text-[10px] uppercase tracking-wide text-slate-500">
                     Item Count
                   </span>
-                  <span className="text-slate-200">
-                    {source.last_run?.item_count ?? "-"}
-                  </span>
+                  <span className="text-slate-200">{source.last_run?.item_count ?? "-"}</span>
                   <span className="text-[10px] uppercase tracking-wide text-slate-500">
                     Items Added
                   </span>
-                  <span className="text-slate-200">
-                    {source.last_run?.item_added ?? "-"}
-                  </span>
-                  <span className="text-[10px] uppercase tracking-wide text-slate-500">
-                    Error
-                  </span>
+                  <span className="text-slate-200">{source.last_run?.item_added ?? "-"}</span>
+                  <span className="text-[10px] uppercase tracking-wide text-slate-500">Error</span>
                   <span className="text-slate-300 line-clamp-1">
                     {source.last_run?.status === "error"
-                      ? source.last_run.error_message ?? "Unknown error"
+                      ? (source.last_run.error_message ?? "Unknown error")
                       : "-"}
                   </span>
                   <span className="text-[10px] uppercase tracking-wide text-slate-500">
@@ -322,12 +306,8 @@ export default function Monitoring({
                       ? new Date(source.last_run.finished_at).toLocaleString()
                       : "-"}
                   </span>
-                  <span className="text-[10px] uppercase tracking-wide text-slate-500">
-                    Status
-                  </span>
-                  <span className="text-slate-300">
-                    {source.last_run?.status ?? "-"}
-                  </span>
+                  <span className="text-[10px] uppercase tracking-wide text-slate-500">Status</span>
+                  <span className="text-slate-300">{source.last_run?.status ?? "-"}</span>
                 </div>
               </div>
             );

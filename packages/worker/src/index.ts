@@ -139,6 +139,10 @@ const main = async () => {
     connection,
     db,
     ingestQueue,
+    telegramConfig:
+      env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID
+        ? { botToken: env.TELEGRAM_BOT_TOKEN, defaultChatId: env.TELEGRAM_CHAT_ID }
+        : undefined,
   });
 
   // Semantic dedup worker (only if embeddings enabled)

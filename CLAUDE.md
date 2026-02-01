@@ -82,14 +82,17 @@ Core tables (PostgreSQL + pgvector):
 | `rss_sources` | Feed URLs + ingest config |
 | `articles` | Core entity: title, snippet, embedding, score, pipeline_stage |
 | `scoring_rules` | Per-sector LLM prompt templates + thresholds |
-| `post_batches` | Grouped articles for one social post |
-| `social_accounts` | Connected platform credentials |
-| `post_deliveries` | Per-platform delivery status |
+| `social_accounts` | Connected platform credentials (future: DB-stored) |
+| `post_deliveries` | Scheduled/immediate posting per article per platform |
 | `feed_fetch_runs` | Fetch attempt telemetry |
-| `app_config` | Key-value settings |
+| `llm_telemetry` | LLM API call tracking (tokens, cost, latency) |
+| `article_images` | AI-generated images for posts (future) |
+| `app_config` | Key-value settings (incl. `auto_post_score5` toggle) |
 
 **Pipeline stages** (on `articles.pipeline_stage`):
 `ingested` → `embedded` → `scored` → `approved`/`rejected` → `posted` (or `duplicate`)
+
+**Posting is controlled by `post_deliveries`** — article stays `approved`, delivery row tracks scheduling.
 
 ## BullMQ Queues
 
@@ -98,8 +101,8 @@ Core tables (PostgreSQL + pgvector):
 | `pipeline:ingest` | `ingest-fetch` | 5 | Fetch RSS, date/URL filter, store |
 | `pipeline:semantic-dedup` | `semantic-batch` | 2 | Embed batch of 50, vector search, mark dupes |
 | `pipeline:llm-brain` | `llm-score-batch` | 1 | Score + summarize batch of 10 |
-| `pipeline:distribution` | `distribution-build/post` | 3 | Build post batch, send to platforms |
-| `maintenance` | schedule/cleanup | 1 | Recurring scheduling + TTL cleanup |
+| `pipeline:distribution` | `distribution-immediate` | 1 | Post individual articles to platforms |
+| `maintenance` | schedule/cleanup/post-scheduler | 1 | Recurring scheduling, TTL cleanup, scheduled post dispatch |
 
 **Chaining:** Each processor queries DB for unprocessed articles and queues the next stage. Database `pipeline_stage` is the source of truth (not queue state).
 
@@ -119,6 +122,7 @@ Core tables (PostgreSQL + pgvector):
 - **Provider abstraction**: Interfaces for LLM, embeddings, social platforms
 - **Pipeline stage machine**: Articles progress through stages via `pipeline_stage` column
 - **Batch processing**: Embed in batches of 50, LLM score in batches of 10
+- **Delivery-controlled posting**: `post_deliveries` table controls when/where to post (not pipeline stage)
 - **Event-driven chaining**: Each worker queues the next stage after completion
 
 ### Formatting (Prettier)
@@ -190,19 +194,29 @@ Filtering is ordered cheapest-first:
 
 Articles store only `title + content_snippet` (not full article body).
 
-## Approval Workflow
+## Approval & Posting Workflow
 
-- Score 5 → auto-approve (configurable per sector via `scoring_rules`)
+**Scoring outcomes:**
+- Score 5 → auto-approve + immediate post (if `app_config.auto_post_score5 = true`)
 - Score 1-2 → auto-reject
 - Score 3-4 → manual review in dashboard
-- Post formats: top5 or top10 bullet-point lists per sector
+
+**Manual approval flow (combined modal):**
+1. User clicks "Approve" on scored article (3-4)
+2. Modal shows: date picker, time picker, platform checkboxes
+3. On submit: article → `approved`, `post_deliveries` row created with `scheduled_at`
+4. Maintenance worker polls due deliveries every 30s and posts
+
+**Posting format:** Individual articles (no batch/digest posting)
 
 ## Social Posting
 
-- **Telegram**: Bot API, chat/channel posting
-- **Facebook**: Graph API, page posting
-- **LinkedIn**: API, organization posting
+- **Telegram**: Bot API, chat/channel posting (active)
+- **Facebook**: Graph API, page posting (planned)
+- **LinkedIn**: API, organization posting (planned)
 - Per-platform rate limiting (Redis sliding window, default 4/hour)
+- Individual article posts (no digest/batch format)
+- Scheduling via `post_deliveries.scheduled_at` column
 - Future: AI image generation per post (interface stub exists)
 
 ## Development Workflow
@@ -230,13 +244,14 @@ Implementation tasks are tracked in the `priority-tasks/` folder at the project 
 - **Always check this folder first** when starting a new session to understand pending work
 
 Current tasks:
-- `task5.md` — Articles Panel + Distribution Pipeline (Telegram)
+- `task6.md` — Scheduled Posting System
 
 Completed:
 - `task1_done.md` — Infrastructure hardening & reliability
 - `task2_done.md` — Stage 2: Semantic Dedup Pipeline
 - `task3_done.md` — Stage 3: LLM Brain Pipeline (scoring + summarization + multi-provider)
 - `task4_done.md` — LLM Token Telemetry
+- `task5_done.md` — Articles Panel + Distribution Pipeline (Telegram)
 
 ---
 

@@ -41,9 +41,7 @@ export default function Database({
   return (
     <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
       <h1 className="text-3xl font-semibold tracking-tight">Database</h1>
-      <p className="mt-2 text-sm text-slate-400">
-        Control retention and cleanup settings.
-      </p>
+      <p className="mt-2 text-sm text-slate-400">Control retention and cleanup settings.</p>
 
       <div className="mt-6 flex flex-wrap items-center gap-4">
         <input
@@ -64,9 +62,7 @@ export default function Database({
         </span>
       </div>
 
-      {ttlError ? (
-        <p className="mt-2 text-xs text-red-400">{ttlError}</p>
-      ) : null}
+      {ttlError ? <p className="mt-2 text-xs text-red-400">{ttlError}</p> : null}
 
       <div className="mt-10 flex flex-wrap items-center gap-4">
         <input
@@ -77,9 +73,7 @@ export default function Database({
         />
         <select
           value={fetchRunsTtlUnit}
-          onChange={(event) =>
-            onFetchRunsTtlUnitChange(event.target.value as "hours" | "days")
-          }
+          onChange={(event) => onFetchRunsTtlUnitChange(event.target.value as "hours" | "days")}
           className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-600"
         >
           <option value="hours">Hours</option>
@@ -97,9 +91,7 @@ export default function Database({
         </span>
       </div>
 
-      {fetchRunsTtlError ? (
-        <p className="mt-2 text-xs text-red-400">{fetchRunsTtlError}</p>
-      ) : null}
+      {fetchRunsTtlError ? <p className="mt-2 text-xs text-red-400">{fetchRunsTtlError}</p> : null}
     </section>
   );
 }

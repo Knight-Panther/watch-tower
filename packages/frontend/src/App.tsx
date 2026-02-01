@@ -40,6 +40,7 @@ import Telemetry from "./pages/Telemetry";
 import Home from "./pages/Home";
 import SectorManagement from "./pages/SectorManagement";
 import Articles from "./pages/Articles";
+import Scheduled from "./pages/Scheduled";
 
 const emptySourceForm = {
   url: "",
@@ -97,16 +98,15 @@ export default function App() {
   // Telemetry state
   const [telemetrySummary, setTelemetrySummary] = useState<TelemetrySummary | null>(null);
   const [telemetryByProvider, setTelemetryByProvider] = useState<TelemetryByProvider | null>(null);
-  const [telemetryByOperation, setTelemetryByOperation] = useState<TelemetryByOperation | null>(null);
+  const [telemetryByOperation, setTelemetryByOperation] = useState<TelemetryByOperation | null>(
+    null,
+  );
   const [telemetryDaily, setTelemetryDaily] = useState<TelemetryDaily | null>(null);
   const [telemetryLoading, setTelemetryLoading] = useState(false);
   const [telemetryError, setTelemetryError] = useState<string | null>(null);
   const [telemetryUpdatedAt, setTelemetryUpdatedAt] = useState<string | null>(null);
 
-  const activeCount = useMemo(
-    () => sources.filter((source) => source.active).length,
-    [sources],
-  );
+  const activeCount = useMemo(() => sources.filter((source) => source.active).length, [sources]);
 
   const statsLookup = useMemo(() => {
     const map = new Map<string, StatsSource>();
@@ -141,8 +141,7 @@ export default function App() {
         setFetchRunsTtlValue(String(fetchRunsTtlHours));
       }
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to load sources";
+      const message = err instanceof Error ? err.message : "Failed to load sources";
       setError(message);
       toast.error(message);
     } finally {
@@ -224,10 +223,7 @@ export default function App() {
 
     const maxAgeMin = constraints?.maxAge.min ?? 1;
     const maxAgeMax = constraints?.maxAge.max ?? 15;
-    const maxAge =
-      sourceForm.maxAgeDays.trim() === ""
-        ? null
-        : Number(sourceForm.maxAgeDays);
+    const maxAge = sourceForm.maxAgeDays.trim() === "" ? null : Number(sourceForm.maxAgeDays);
     if (maxAge !== null && (Number.isNaN(maxAge) || maxAge < maxAgeMin || maxAge > maxAgeMax)) {
       setSourceErrors((prev) => ({
         ...prev,
@@ -270,8 +266,7 @@ export default function App() {
       setSourceForm(emptySourceForm);
       toast.success("Source added");
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to create source";
+      const message = err instanceof Error ? err.message : "Failed to create source";
       if (!message.toLowerCase().includes("already exists")) {
         setError(message);
       }
@@ -284,18 +279,14 @@ export default function App() {
       const updated = await updateSource(source.id, {
         active: !source.active,
       });
-      setSources((prev) =>
-        prev.map((item) => (item.id === source.id ? updated : item)),
-      );
+      setSources((prev) => prev.map((item) => (item.id === source.id ? updated : item)));
       toast.success(source.active ? "Source deactivated" : "Source activated");
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to update source";
+      const message = err instanceof Error ? err.message : "Failed to update source";
       setError(message);
       toast.error(message);
     }
   };
-
 
   const confirmDelete = async () => {
     if (!confirmDeleteSource) {
@@ -303,13 +294,10 @@ export default function App() {
     }
     try {
       const deleted = await deleteSource(confirmDeleteSource.id, true);
-      setSources((prev) =>
-        prev.filter((item) => item.id !== deleted.id),
-      );
+      setSources((prev) => prev.filter((item) => item.id !== deleted.id));
       toast.success("Source deleted");
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to delete source";
+      const message = err instanceof Error ? err.message : "Failed to delete source";
       setError(message);
       toast.error(message);
     } finally {
@@ -320,11 +308,7 @@ export default function App() {
   const onSaveChanges = async (source: Source) => {
     const rawValue =
       maxAgeDrafts[source.id] ??
-      String(
-        source.max_age_days ??
-          source.sectors?.default_max_age_days ??
-          5,
-      );
+      String(source.max_age_days ?? source.sectors?.default_max_age_days ?? 5);
 
     const maMin = constraints?.maxAge.min ?? 1;
     const maMax = constraints?.maxAge.max ?? 15;
@@ -350,14 +334,12 @@ export default function App() {
       return;
     }
     const maxAgeChanged =
-      maxAgeValue !==
-      (source.max_age_days ?? source.sectors?.default_max_age_days ?? 5);
+      maxAgeValue !== (source.max_age_days ?? source.sectors?.default_max_age_days ?? 5);
 
     const intMin = constraints?.interval.min ?? 1;
     const intMax = constraints?.interval.max ?? 4320;
     const intervalValueRaw =
-      sourceIntervalDrafts[source.id] ??
-      String(source.ingest_interval_minutes);
+      sourceIntervalDrafts[source.id] ?? String(source.ingest_interval_minutes);
     if (!intervalValueRaw.trim()) {
       setError("Interval is required");
       toast.error("Interval is required");
@@ -369,8 +351,7 @@ export default function App() {
       toast.error(`Interval must be between ${intMin} and ${intMax} minutes`);
       return;
     }
-    const intervalChanged =
-      intervalValue !== source.ingest_interval_minutes;
+    const intervalChanged = intervalValue !== source.ingest_interval_minutes;
 
     if (!sectorChanged && !maxAgeChanged && !intervalChanged) {
       toast("No changes to save");
@@ -383,9 +364,7 @@ export default function App() {
         max_age_days: maxAgeValue,
         ingest_interval_minutes: intervalValue,
       });
-      setSources((prev) =>
-        prev.map((item) => (item.id === source.id ? updated : item)),
-      );
+      setSources((prev) => prev.map((item) => (item.id === source.id ? updated : item)));
       setMaxAgeDrafts((prev) => {
         const next = { ...prev };
         delete next[source.id];
@@ -418,8 +397,7 @@ export default function App() {
         toast.success("Interval updated");
       }
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to update source";
+      const message = err instanceof Error ? err.message : "Failed to update source";
       setError(message);
       toast.error(message);
     }
@@ -458,8 +436,7 @@ export default function App() {
       setSectorForm(emptySectorForm);
       toast.success("Sector created");
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to create sector";
+      const message = err instanceof Error ? err.message : "Failed to create sector";
       if (!message.toLowerCase().includes("already exists")) {
         setError(message);
       }
@@ -474,8 +451,7 @@ export default function App() {
       await runIngest();
       toast.success("Ingest triggered");
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to trigger ingest";
+      const message = err instanceof Error ? err.message : "Failed to trigger ingest";
       setError(message);
       toast.error(message);
     } finally {
@@ -498,8 +474,7 @@ export default function App() {
       setTtlError(null);
       toast.success("TTL updated");
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to update TTL";
+      const message = err instanceof Error ? err.message : "Failed to update TTL";
       setTtlError(message);
       toast.error(message);
     }
@@ -511,8 +486,7 @@ export default function App() {
     }
     const rawValue = Number(fetchRunsTtlValue);
     if (!Number.isNaN(rawValue)) {
-      const nextValue =
-        nextUnit === "days" ? rawValue / 24 : rawValue * 24;
+      const nextValue = nextUnit === "days" ? rawValue / 24 : rawValue * 24;
       setFetchRunsTtlValue(String(nextValue));
     }
     setFetchRunsTtlUnit(nextUnit);
@@ -527,8 +501,7 @@ export default function App() {
     }
 
     const fetchRunsMax = constraints?.fetchRunsTtl.max ?? 2160;
-    const hours =
-      fetchRunsTtlUnit === "days" ? rawValue * 24 : rawValue;
+    const hours = fetchRunsTtlUnit === "days" ? rawValue * 24 : rawValue;
     if (hours > fetchRunsMax) {
       const maxDays = Math.floor(fetchRunsMax / 24);
       setFetchRunsTtlError(`TTL must be ${maxDays} days or less`);
@@ -548,8 +521,7 @@ export default function App() {
       setFetchRunsTtlError(null);
       toast.success("Fetch runs TTL updated");
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to update fetch runs TTL";
+      const message = err instanceof Error ? err.message : "Failed to update fetch runs TTL";
       setFetchRunsTtlError(message);
       toast.error(message);
     }
@@ -620,19 +592,12 @@ export default function App() {
         setSources((prev) => prev.filter((item) => !ids.includes(item.id)));
       } else {
         const updatedMap = new Map(updated.map((item) => [item.id, item]));
-        setSources((prev) =>
-          prev.map((item) => updatedMap.get(item.id) ?? item),
-        );
+        setSources((prev) => prev.map((item) => updatedMap.get(item.id) ?? item));
       }
       setSelectedIds({});
-      toast.success(
-        action === "delete"
-          ? "Sources deleted"
-          : "Sources deactivated",
-      );
+      toast.success(action === "delete" ? "Sources deleted" : "Sources deactivated");
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to update sources";
+      const message = err instanceof Error ? err.message : "Failed to update sources";
       setError(message);
       toast.error(message);
     } finally {
@@ -649,8 +614,7 @@ export default function App() {
 
     const saveMaMin = constraints?.maxAge.min ?? 1;
     const saveMaMax = constraints?.maxAge.max ?? 15;
-    const maxAgeRaw =
-      sectorMaxAgeDrafts[sectorId] ?? String(sector.default_max_age_days);
+    const maxAgeRaw = sectorMaxAgeDrafts[sectorId] ?? String(sector.default_max_age_days);
     const maxAgeValue = Number(maxAgeRaw);
     if (Number.isNaN(maxAgeValue) || maxAgeValue < saveMaMin || maxAgeValue > saveMaMax) {
       toast.error(`Default max age must be between ${saveMaMin} and ${saveMaMax}`);
@@ -668,9 +632,7 @@ export default function App() {
       const updated = await updateSector(sectorId, {
         default_max_age_days: maxAgeValue,
       });
-      setSectors((prev) =>
-        prev.map((item) => (item.id === sectorId ? updated : item)),
-      );
+      setSectors((prev) => prev.map((item) => (item.id === sectorId ? updated : item)));
       setSectorMaxAgeDrafts((prev) => {
         const next = { ...prev };
         delete next[sectorId];
@@ -678,8 +640,7 @@ export default function App() {
       });
       toast.success("Default max age updated");
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to update sector";
+      const message = err instanceof Error ? err.message : "Failed to update sector";
       setError(message);
       toast.error(message);
     }
@@ -693,16 +654,12 @@ export default function App() {
     setStatsLoading(true);
     setStatsError(null);
     try {
-      const [overview, sourcesData] = await Promise.all([
-        getStatsOverview(),
-        getStatsSources(),
-      ]);
+      const [overview, sourcesData] = await Promise.all([getStatsOverview(), getStatsSources()]);
       setStatsOverview(overview);
       setStatsSources(sourcesData);
       setStatsUpdatedAt(new Date().toLocaleTimeString());
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to load monitoring stats";
+      const message = err instanceof Error ? err.message : "Failed to load monitoring stats";
       setStatsError(message);
     } finally {
       setStatsLoading(false);
@@ -725,8 +682,7 @@ export default function App() {
       setTelemetryDaily(daily);
       setTelemetryUpdatedAt(new Date().toLocaleTimeString());
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to load telemetry data";
+      const message = err instanceof Error ? err.message : "Failed to load telemetry data";
       setTelemetryError(message);
     } finally {
       setTelemetryLoading(false);
@@ -747,8 +703,7 @@ export default function App() {
       );
       toast.success("Sector deleted");
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to delete sector";
+      const message = err instanceof Error ? err.message : "Failed to delete sector";
       setError(message);
       toast.error(message);
     } finally {
@@ -791,8 +746,8 @@ export default function App() {
               onSourceIntervalDraftChange={onSourceIntervalDraftChange}
               onSectorDraftChange={onSectorDraftChange}
               onSelectToggle={toggleSelected}
-              onBatchDeactivate={() => runBatchAction('deactivate')}
-              onBatchDelete={() => runBatchAction('delete')}
+              onBatchDeactivate={() => runBatchAction("deactivate")}
+              onBatchDelete={() => runBatchAction("delete")}
             />
           }
         />
@@ -858,6 +813,7 @@ export default function App() {
           }
         />
         <Route path="/articles" element={<Articles />} />
+        <Route path="/scheduled" element={<Scheduled />} />
       </Routes>
 
       {confirmDeleteSource ? (
@@ -893,9 +849,8 @@ export default function App() {
           <div className="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-100 shadow-xl">
             <h3 className="text-lg font-semibold">Delete sector</h3>
             <p className="mt-2 text-sm text-slate-400">
-              Remove{" "}
-              <span className="text-slate-200">{confirmSectorDelete.name}</span>
-              ? Sources will be unassigned.
+              Remove <span className="text-slate-200">{confirmSectorDelete.name}</span>? Sources
+              will be unassigned.
             </p>
             <div className="mt-6 flex justify-end gap-3">
               <button
@@ -933,9 +888,7 @@ export default function App() {
                 onClick={confirmBatch}
                 className="rounded-full bg-red-500/20 px-4 py-2 text-sm font-semibold text-red-200"
               >
-                {confirmBatchAction.action === "delete"
-                  ? "Delete"
-                  : "Deactivate"}
+                {confirmBatchAction.action === "delete" ? "Delete" : "Deactivate"}
               </button>
             </div>
           </div>

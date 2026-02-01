@@ -363,9 +363,7 @@ export const getTelemetrySummary = async (): Promise<TelemetrySummary> => {
   return res.json();
 };
 
-export const getTelemetryByProvider = async (
-  days = 30,
-): Promise<TelemetryByProvider> => {
+export const getTelemetryByProvider = async (days = 30): Promise<TelemetryByProvider> => {
   const res = await fetch(`${API_URL}/telemetry/by-provider?days=${days}`, {
     headers: authHeaders,
   });
@@ -376,9 +374,7 @@ export const getTelemetryByProvider = async (
   return res.json();
 };
 
-export const getTelemetryByOperation = async (
-  days = 30,
-): Promise<TelemetryByOperation> => {
+export const getTelemetryByOperation = async (days = 30): Promise<TelemetryByOperation> => {
   const res = await fetch(`${API_URL}/telemetry/by-operation?days=${days}`, {
     headers: authHeaders,
   });
@@ -486,7 +482,12 @@ export const getArticleFilterOptions = async (): Promise<ArticleFilterOptions> =
 export const approveArticle = async (
   id: string,
   llm_summary?: string,
-): Promise<{ id: string; llm_summary: string | null; pipeline_stage: string; approved_at: string }> => {
+): Promise<{
+  id: string;
+  llm_summary: string | null;
+  pipeline_stage: string;
+  approved_at: string;
+}> => {
   const res = await fetch(`${API_URL}/articles/${id}/approve`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders },
@@ -539,6 +540,159 @@ export const batchRejectArticles = async (
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || "Failed to batch reject articles");
+  }
+  return res.json();
+};
+
+// ─── Scheduled Deliveries Types ──────────────────────────────────────────────
+
+export type ScheduledDelivery = {
+  id: string;
+  article_id: string;
+  platform: string;
+  scheduled_at: string | null;
+  status: string;
+  platform_post_id: string | null;
+  error_message: string | null;
+  sent_at: string | null;
+  created_at: string;
+  article_title: string;
+  article_url: string;
+  article_summary: string | null;
+  article_score: number | null;
+  source_name: string | null;
+  sector_id: string | null;
+  sector_name: string | null;
+};
+
+export type ScheduledFilters = {
+  page?: number;
+  limit?: number;
+  status?: string;
+  platform?: string;
+  sector_id?: string;
+  from?: string;
+  to?: string;
+  sort_by?: "scheduled_at" | "created_at";
+  sort_dir?: "asc" | "desc";
+};
+
+export type ScheduledResponse = {
+  data: ScheduledDelivery[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    total_pages: number;
+  };
+};
+
+export type ScheduledStats = {
+  by_status: Record<string, number>;
+  due_in_next_hour: number;
+};
+
+// ─── Scheduled Deliveries API ────────────────────────────────────────────────
+
+export const scheduleArticle = async (
+  articleId: string,
+  payload: {
+    platform: string;
+    scheduled_at?: string;
+    llm_summary?: string;
+  },
+): Promise<{
+  delivery_id: string;
+  article_id: string;
+  platform: string;
+  scheduled_at: string;
+  status: string;
+}> => {
+  const res = await fetch(`${API_URL}/articles/${articleId}/schedule`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to schedule article");
+  }
+  return res.json();
+};
+
+export const cancelArticleSchedule = async (
+  articleId: string,
+  platform?: string,
+): Promise<{ cancelled: number; deliveries: { id: string; platform: string }[] }> => {
+  const params = platform ? `?platform=${platform}` : "";
+  const res = await fetch(`${API_URL}/articles/${articleId}/schedule${params}`, {
+    method: "DELETE",
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to cancel schedule");
+  }
+  return res.json();
+};
+
+export const getScheduledDeliveries = async (
+  filters: ScheduledFilters = {},
+): Promise<ScheduledResponse> => {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== "") {
+      params.set(key, String(value));
+    }
+  });
+
+  const res = await fetch(`${API_URL}/scheduled?${params}`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load scheduled deliveries");
+  }
+  return res.json();
+};
+
+export const rescheduleDelivery = async (
+  deliveryId: string,
+  scheduledAt: string,
+): Promise<{ id: string; scheduled_at: string; status: string }> => {
+  const res = await fetch(`${API_URL}/scheduled/${deliveryId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify({ scheduled_at: scheduledAt }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to reschedule delivery");
+  }
+  return res.json();
+};
+
+export const cancelDelivery = async (
+  deliveryId: string,
+): Promise<{ id: string; status: string }> => {
+  const res = await fetch(`${API_URL}/scheduled/${deliveryId}`, {
+    method: "DELETE",
+    headers: authHeaders as Record<string, string>,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to cancel delivery");
+  }
+  return res.json();
+};
+
+export const getScheduledStats = async (): Promise<ScheduledStats> => {
+  const res = await fetch(`${API_URL}/scheduled/stats`, {
+    headers: authHeaders as Record<string, string>,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load scheduled stats");
   }
   return res.json();
 };

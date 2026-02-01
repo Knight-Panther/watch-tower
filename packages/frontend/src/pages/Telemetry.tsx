@@ -93,9 +93,7 @@ export default function Telemetry({
           <p className="mt-2 text-2xl font-semibold text-emerald-300">
             {formatCost(totalCostToday)}
           </p>
-          <p className="mt-1 text-xs text-slate-400">
-            {summary?.today.requests ?? 0} requests
-          </p>
+          <p className="mt-1 text-xs text-slate-400">{summary?.today.requests ?? 0} requests</p>
         </div>
         <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
           <p className="text-xs uppercase tracking-wide text-slate-500">Last 7 Days</p>
@@ -108,9 +106,7 @@ export default function Telemetry({
         </div>
         <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
           <p className="text-xs uppercase tracking-wide text-slate-500">Last 30 Days</p>
-          <p className="mt-2 text-2xl font-semibold text-slate-100">
-            {formatCost(totalCost30d)}
-          </p>
+          <p className="mt-2 text-2xl font-semibold text-slate-100">{formatCost(totalCost30d)}</p>
           <p className="mt-1 text-xs text-slate-400">
             {formatTokens(summary?.last_30_days.tokens ?? 0)} tokens
           </p>
@@ -164,9 +160,7 @@ export default function Telemetry({
               className="grid gap-2 rounded-xl border border-slate-800 bg-slate-950/70 p-4 md:grid-cols-[1.5fr,2fr]"
             >
               <div>
-                <p className="text-sm font-semibold text-slate-100">
-                  {provider.provider}
-                </p>
+                <p className="text-sm font-semibold text-slate-100">{provider.provider}</p>
                 <p className="text-xs text-slate-400">{provider.model}</p>
                 {provider.fallback_count > 0 ? (
                   <p className="mt-1 text-xs text-amber-300">
@@ -182,26 +176,18 @@ export default function Telemetry({
                   <p className="mt-1 text-slate-200">{provider.requests}</p>
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase tracking-wide text-slate-500">
-                    Tokens
-                  </span>
-                  <p className="mt-1 text-slate-200">
-                    {formatTokens(provider.total_tokens)}
-                  </p>
+                  <span className="text-[10px] uppercase tracking-wide text-slate-500">Tokens</span>
+                  <p className="mt-1 text-slate-200">{formatTokens(provider.total_tokens)}</p>
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase tracking-wide text-slate-500">
-                    Cost
-                  </span>
+                  <span className="text-[10px] uppercase tracking-wide text-slate-500">Cost</span>
                   <p className="mt-1 text-emerald-300">{formatCost(provider.cost_usd)}</p>
                 </div>
                 <div>
                   <span className="text-[10px] uppercase tracking-wide text-slate-500">
                     Avg Latency
                   </span>
-                  <p className="mt-1 text-slate-200">
-                    {formatLatency(provider.avg_latency_ms)}
-                  </p>
+                  <p className="mt-1 text-slate-200">{formatLatency(provider.avg_latency_ms)}</p>
                 </div>
               </div>
             </div>
@@ -230,15 +216,11 @@ export default function Telemetry({
                   <p className="mt-1 text-slate-200">{op.requests}</p>
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase tracking-wide text-slate-500">
-                    Tokens
-                  </span>
+                  <span className="text-[10px] uppercase tracking-wide text-slate-500">Tokens</span>
                   <p className="mt-1 text-slate-200">{formatTokens(op.total_tokens)}</p>
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase tracking-wide text-slate-500">
-                    Cost
-                  </span>
+                  <span className="text-[10px] uppercase tracking-wide text-slate-500">Cost</span>
                   <p className="mt-1 text-emerald-300">{formatCost(op.cost_usd)}</p>
                 </div>
                 <div>

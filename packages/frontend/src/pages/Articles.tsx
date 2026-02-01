@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import Spinner from "../components/Spinner";
+import ScheduleModal from "../components/ScheduleModal";
 import {
   getArticles,
   getArticleFilterOptions,
-  approveArticle,
   rejectArticle,
+  scheduleArticle,
   type Article,
   type ArticleFilters,
   type ArticleFilterOptions,
@@ -39,9 +40,8 @@ export default function Articles() {
     sort_dir: "desc",
   });
 
-  // Edit modal state
-  const [editingArticle, setEditingArticle] = useState<Article | null>(null);
-  const [editSummary, setEditSummary] = useState("");
+  // Schedule modal state
+  const [schedulingArticle, setSchedulingArticle] = useState<Article | null>(null);
 
   const loadArticles = useCallback(async () => {
     setIsLoading(true);
@@ -97,20 +97,27 @@ export default function Articles() {
     setFilters((prev) => ({ ...prev, page: newPage }));
   };
 
-  const openApproveModal = (article: Article) => {
-    setEditingArticle(article);
-    setEditSummary(article.llm_summary || "");
+  const openScheduleModal = (article: Article) => {
+    setSchedulingArticle(article);
   };
 
-  const handleApprove = async () => {
-    if (!editingArticle) return;
+  const handleSchedule = async (data: {
+    platform: string;
+    scheduledAt: Date;
+    summary?: string;
+  }) => {
+    if (!schedulingArticle) return;
     try {
-      await approveArticle(editingArticle.id, editSummary || undefined);
-      toast.success("Article approved");
-      setEditingArticle(null);
+      await scheduleArticle(schedulingArticle.id, {
+        platform: data.platform,
+        scheduled_at: data.scheduledAt.toISOString(),
+        llm_summary: data.summary,
+      });
+      toast.success("Article scheduled for posting");
+      setSchedulingArticle(null);
       loadArticles();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to approve";
+      const message = err instanceof Error ? err.message : "Failed to schedule";
       toast.error(message);
     }
   };
@@ -167,9 +174,7 @@ export default function Articles() {
       <section className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Articles</h1>
-          <p className="mt-2 text-sm text-slate-400">
-            {pagination.total} total articles
-          </p>
+          <p className="mt-2 text-sm text-slate-400">{pagination.total} total articles</p>
         </div>
         <button
           onClick={loadArticles}
@@ -191,7 +196,9 @@ export default function Articles() {
           >
             <option value="">All Sectors</option>
             {filterOptions?.sectors.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
             ))}
           </select>
 
@@ -203,7 +210,9 @@ export default function Articles() {
           >
             <option value="">All Sources</option>
             {filterOptions?.sources.map((s) => (
-              <option key={s.id} value={s.id}>{s.name || "Unnamed"}</option>
+              <option key={s.id} value={s.id}>
+                {s.name || "Unnamed"}
+              </option>
             ))}
           </select>
 
@@ -215,7 +224,9 @@ export default function Articles() {
           >
             <option value="">All Statuses</option>
             {PIPELINE_STAGES.map((s) => (
-              <option key={s.value} value={s.value}>{s.label}</option>
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
             ))}
           </select>
 
@@ -230,24 +241,32 @@ export default function Articles() {
           {/* Min Score */}
           <select
             value={filters.min_score || ""}
-            onChange={(e) => handleFilterChange("min_score", e.target.value ? Number(e.target.value) : undefined)}
+            onChange={(e) =>
+              handleFilterChange("min_score", e.target.value ? Number(e.target.value) : undefined)
+            }
             className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
           >
             <option value="">Min Score</option>
             {SCORE_OPTIONS.map((s) => (
-              <option key={s} value={s}>{s}</option>
+              <option key={s} value={s}>
+                {s}
+              </option>
             ))}
           </select>
 
           {/* Max Score */}
           <select
             value={filters.max_score || ""}
-            onChange={(e) => handleFilterChange("max_score", e.target.value ? Number(e.target.value) : undefined)}
+            onChange={(e) =>
+              handleFilterChange("max_score", e.target.value ? Number(e.target.value) : undefined)
+            }
             className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
           >
             <option value="">Max Score</option>
             {SCORE_OPTIONS.map((s) => (
-              <option key={s} value={s}>{s}</option>
+              <option key={s} value={s}>
+                {s}
+              </option>
             ))}
           </select>
         </div>
@@ -270,17 +289,22 @@ export default function Articles() {
                   onClick={() => handleSort("published_at")}
                   className="px-4 py-3 text-left font-medium text-slate-300 cursor-pointer hover:text-white"
                 >
-                  Date {filters.sort_by === "published_at" && (filters.sort_dir === "desc" ? "↓" : "↑")}
+                  Date{" "}
+                  {filters.sort_by === "published_at" && (filters.sort_dir === "desc" ? "↓" : "↑")}
                 </th>
                 <th className="px-4 py-3 text-left font-medium text-slate-300">Source</th>
                 <th className="px-4 py-3 text-left font-medium text-slate-300">Sector</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-300 max-w-md">Title / Summary</th>
+                <th className="px-4 py-3 text-left font-medium text-slate-300 max-w-md">
+                  Title / Summary
+                </th>
                 <th className="px-4 py-3 text-left font-medium text-slate-300">Status</th>
                 <th
                   onClick={() => handleSort("importance_score")}
                   className="px-4 py-3 text-left font-medium text-slate-300 cursor-pointer hover:text-white"
                 >
-                  Score {filters.sort_by === "importance_score" && (filters.sort_dir === "desc" ? "↓" : "↑")}
+                  Score{" "}
+                  {filters.sort_by === "importance_score" &&
+                    (filters.sort_dir === "desc" ? "↓" : "↑")}
                 </th>
                 <th className="px-4 py-3 text-left font-medium text-slate-300">Actions</th>
               </tr>
@@ -294,7 +318,10 @@ export default function Articles() {
                   <td className="px-4 py-3">
                     <div className="max-w-[150px]">
                       <p className="text-slate-200 truncate">{article.source_name || "Unknown"}</p>
-                      <p className="text-xs text-slate-500 truncate" title={article.source_url || ""}>
+                      <p
+                        className="text-xs text-slate-500 truncate"
+                        title={article.source_url || ""}
+                      >
                         {article.source_url}
                       </p>
                     </div>
@@ -314,36 +341,44 @@ export default function Articles() {
                       {article.title}
                     </a>
                     {article.llm_summary && (
-                      <p className="text-xs text-slate-400 mt-1 line-clamp-2">{article.llm_summary}</p>
+                      <p className="text-xs text-slate-400 mt-1 line-clamp-2">
+                        {article.llm_summary}
+                      </p>
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`px-2 py-1 rounded text-xs ${getStageBadgeClass(article.pipeline_stage)}`}>
+                    <span
+                      className={`px-2 py-1 rounded text-xs ${getStageBadgeClass(article.pipeline_stage)}`}
+                    >
                       {article.pipeline_stage}
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`px-2 py-1 rounded text-xs font-bold ${getScoreBadgeClass(article.importance_score)}`}>
+                    <span
+                      className={`px-2 py-1 rounded text-xs font-bold ${getScoreBadgeClass(article.importance_score)}`}
+                    >
                       {article.importance_score ?? "-"}
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    {article.pipeline_stage === "scored" && article.importance_score !== null && article.importance_score >= 3 && (
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => openApproveModal(article)}
-                          className="px-2 py-1 bg-emerald-500/20 text-emerald-200 rounded text-xs hover:bg-emerald-500/30"
-                        >
-                          Approve
-                        </button>
-                        <button
-                          onClick={() => handleReject(article)}
-                          className="px-2 py-1 bg-red-500/20 text-red-200 rounded text-xs hover:bg-red-500/30"
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    )}
+                    {article.pipeline_stage === "scored" &&
+                      article.importance_score !== null &&
+                      article.importance_score >= 3 && (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => openScheduleModal(article)}
+                            className="px-2 py-1 bg-emerald-500/20 text-emerald-200 rounded text-xs hover:bg-emerald-500/30"
+                          >
+                            Schedule
+                          </button>
+                          <button
+                            onClick={() => handleReject(article)}
+                            className="px-2 py-1 bg-red-500/20 text-red-200 rounded text-xs hover:bg-red-500/30"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      )}
                   </td>
                 </tr>
               ))}
@@ -361,7 +396,8 @@ export default function Articles() {
         {/* Pagination */}
         <div className="flex items-center justify-between px-4 py-3 border-t border-slate-800 bg-slate-800/30">
           <p className="text-sm text-slate-400">
-            Showing {((pagination.page - 1) * pagination.limit) + 1} - {Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total}
+            Showing {(pagination.page - 1) * pagination.limit + 1} -{" "}
+            {Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total}
           </p>
           <div className="flex gap-2">
             <button
@@ -385,44 +421,13 @@ export default function Articles() {
         </div>
       </section>
 
-      {/* Edit/Approve Modal */}
-      {editingArticle && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-          <div className="w-full max-w-2xl rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-100 shadow-xl">
-            <h3 className="text-lg font-semibold">Edit Summary & Approve</h3>
-
-            <div className="mt-4">
-              <label className="block text-sm font-medium text-slate-400 mb-1">Title</label>
-              <p className="text-slate-200">{editingArticle.title}</p>
-            </div>
-
-            <div className="mt-4">
-              <label className="block text-sm font-medium text-slate-400 mb-1">Summary</label>
-              <textarea
-                value={editSummary}
-                onChange={(e) => setEditSummary(e.target.value)}
-                rows={4}
-                className="w-full rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
-                placeholder="Enter or edit summary..."
-              />
-            </div>
-
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                onClick={() => setEditingArticle(null)}
-                className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:border-slate-500"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleApprove}
-                className="rounded-full bg-emerald-500/20 px-4 py-2 text-sm font-semibold text-emerald-200 hover:bg-emerald-500/30"
-              >
-                Save & Approve
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* Schedule Modal */}
+      {schedulingArticle && (
+        <ScheduleModal
+          article={schedulingArticle}
+          onClose={() => setSchedulingArticle(null)}
+          onSchedule={handleSchedule}
+        />
       )}
     </>
   );

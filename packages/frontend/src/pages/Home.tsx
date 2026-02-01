@@ -47,9 +47,7 @@ type HomeProps = {
 
 export default function Home(props: HomeProps) {
   const filteredSources = useMemo(() => {
-    const maxAgeFilter = props.filters.maxAgeDays.trim()
-      ? Number(props.filters.maxAgeDays)
-      : null;
+    const maxAgeFilter = props.filters.maxAgeDays.trim() ? Number(props.filters.maxAgeDays) : null;
     const maxAgeValid =
       maxAgeFilter === null ||
       (!Number.isNaN(maxAgeFilter) && maxAgeFilter >= 1 && maxAgeFilter <= 15);
@@ -63,8 +61,7 @@ export default function Home(props: HomeProps) {
         return true;
       }
       if (maxAgeFilter !== null) {
-        const effectiveMaxAge =
-          source.max_age_days ?? source.sectors?.default_max_age_days ?? 5;
+        const effectiveMaxAge = source.max_age_days ?? source.sectors?.default_max_age_days ?? 5;
         if (effectiveMaxAge !== maxAgeFilter) {
           return false;
         }
@@ -83,9 +80,7 @@ export default function Home(props: HomeProps) {
     <>
       <section className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">
-            Media Watch Tower
-          </h1>
+          <h1 className="text-3xl font-semibold tracking-tight">Media Watch Tower</h1>
           <p className="mt-2 text-sm text-slate-400">
             {props.activeCount} active sources - {props.sources.length} total
           </p>
@@ -109,10 +104,7 @@ export default function Home(props: HomeProps) {
 
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
         <h2 className="text-lg font-semibold">Add source</h2>
-        <form
-          onSubmit={props.onSubmit}
-          className="mt-4 grid gap-4 md:grid-cols-[2fr,1fr]"
-        >
+        <form onSubmit={props.onSubmit} className="mt-4 grid gap-4 md:grid-cols-[2fr,1fr]">
           <input
             value={props.sourceForm.url}
             onChange={(event) =>
@@ -158,9 +150,7 @@ export default function Home(props: HomeProps) {
             ))}
           </select>
           {props.sectors.length === 0 ? (
-            <p className="text-xs text-amber-300">
-              Create a sector before adding sources.
-            </p>
+            <p className="text-xs text-amber-300">Create a sector before adding sources.</p>
           ) : null}
           {props.sourceErrors.sectorId ? (
             <p className="text-xs text-red-400">{props.sourceErrors.sectorId}</p>
@@ -191,9 +181,7 @@ export default function Home(props: HomeProps) {
             className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
           />
           {props.sourceErrors.ingestIntervalMinutes ? (
-            <p className="text-xs text-red-400">
-              {props.sourceErrors.ingestIntervalMinutes}
-            </p>
+            <p className="text-xs text-red-400">{props.sourceErrors.ingestIntervalMinutes}</p>
           ) : null}
           <div className="md:col-span-2">
             <button
@@ -254,9 +242,7 @@ export default function Home(props: HomeProps) {
           Number.isNaN(Number(props.filters.maxAgeDays)) ||
           Number(props.filters.maxAgeDays) < 1 ||
           Number(props.filters.maxAgeDays) > 15 ? (
-            <p className="mt-2 text-xs text-red-400">
-              Filter max age must be between 1 and 15
-            </p>
+            <p className="mt-2 text-xs text-red-400">Filter max age must be between 1 and 15</p>
           ) : null
         ) : null}
       </section>
@@ -271,9 +257,7 @@ export default function Home(props: HomeProps) {
           </h2>
           <div className="flex items-center gap-3">
             {props.selectedCount > 0 ? (
-              <span className="text-xs text-slate-400">
-                {props.selectedCount} selected
-              </span>
+              <span className="text-xs text-slate-400">{props.selectedCount} selected</span>
             ) : null}
             <button
               onClick={props.onBatchDeactivate}
@@ -293,9 +277,7 @@ export default function Home(props: HomeProps) {
           </div>
         </div>
 
-        {props.error ? (
-          <p className="mt-3 text-sm text-red-400">{props.error}</p>
-        ) : null}
+        {props.error ? <p className="mt-3 text-sm text-red-400">{props.error}</p> : null}
         {!props.isLoading && props.sources.length > 0 && props.activeCount === 0 ? (
           <p className="mt-3 text-sm text-amber-300">
             All sources are inactive. Ingest will not pull any items.
@@ -324,117 +306,107 @@ export default function Home(props: HomeProps) {
               healthStatus === "ok"
                 ? "Healthy"
                 : healthStatus === "error"
-                  ? stats?.last_run?.error_message ?? "Last fetch failed"
+                  ? (stats?.last_run?.error_message ?? "Last fetch failed")
                   : healthStatus === "stale"
                     ? "Stale - no recent updates"
                     : "No fetch data yet";
             return (
-            <div
-              key={source.id}
-              className="flex items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-950/70 px-4 py-3"
-            >
-              <div className="flex items-center gap-3 min-w-0 flex-shrink">
-                <input
-                  type="checkbox"
-                  checked={Boolean(props.selectedIds[source.id])}
-                  onChange={(event) =>
-                    props.onSelectToggle(source.id, event.target.checked)
-                  }
-                  className="h-4 w-4 flex-shrink-0 accent-emerald-400"
-                />
-                <span
-                  className={`h-2 w-2 flex-shrink-0 rounded-full ${healthDot}`}
-                  title={healthTitle}
-                />
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold truncate">
-                    {source.name ?? "Untitled source"}
-                  </p>
-                  <p className="text-xs text-slate-400 truncate" title={source.url}>
-                    {source.url}
-                  </p>
+              <div
+                key={source.id}
+                className="flex items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-950/70 px-4 py-3"
+              >
+                <div className="flex items-center gap-3 min-w-0 flex-shrink">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(props.selectedIds[source.id])}
+                    onChange={(event) => props.onSelectToggle(source.id, event.target.checked)}
+                    className="h-4 w-4 flex-shrink-0 accent-emerald-400"
+                  />
+                  <span
+                    className={`h-2 w-2 flex-shrink-0 rounded-full ${healthDot}`}
+                    title={healthTitle}
+                  />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold truncate">
+                      {source.name ?? "Untitled source"}
+                    </p>
+                    <p className="text-xs text-slate-400 truncate" title={source.url}>
+                      {source.url}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-end gap-3 ml-auto flex-shrink-0">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] uppercase tracking-wide text-slate-500">
+                      Sector
+                    </span>
+                    <select
+                      value={props.sectorDrafts[source.id] ?? source.sector_id ?? ""}
+                      onChange={(event) => props.onSectorDraftChange(source.id, event.target.value)}
+                      className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
+                    >
+                      <option value="">Unassigned</option>
+                      {props.sectors.map((sector) => (
+                        <option key={sector.id} value={sector.id}>
+                          {sector.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] uppercase tracking-wide text-slate-500">
+                      Max age (days)
+                    </span>
+                    <input
+                      value={
+                        props.maxAgeDrafts[source.id] ??
+                        String(source.max_age_days ?? source.sectors?.default_max_age_days ?? 5)
+                      }
+                      onChange={(event) => props.onMaxAgeDraftChange(source.id, event.target.value)}
+                      className="w-20 rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[10px] uppercase tracking-wide text-slate-500">
+                      Interval (min)
+                    </span>
+                    <input
+                      value={
+                        props.sourceIntervalDrafts[source.id] ??
+                        String(source.ingest_interval_minutes)
+                      }
+                      onChange={(event) =>
+                        props.onSourceIntervalDraftChange(source.id, event.target.value)
+                      }
+                      className="w-24 rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
+                    />
+                  </div>
+                  <button
+                    onClick={() => props.onSaveChanges(source)}
+                    className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 transition hover:border-slate-400 hover:text-white"
+                  >
+                    Save
+                  </button>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => props.onToggle(source)}
+                      className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                        source.active
+                          ? "bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30"
+                          : "bg-slate-700/40 text-slate-300 hover:bg-slate-700/60"
+                      }`}
+                    >
+                      {source.active ? "Active" : "Inactive"}
+                    </button>
+                    <button
+                      onClick={() => props.onDeletePermanent(source)}
+                      className="text-xs text-red-400 hover:text-red-200 hover:underline"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
               </div>
-              <div className="flex items-end gap-3 ml-auto flex-shrink-0">
-                <div className="flex flex-col gap-1">
-                  <span className="text-[10px] uppercase tracking-wide text-slate-500">
-                    Sector
-                  </span>
-                  <select
-                    value={props.sectorDrafts[source.id] ?? source.sector_id ?? ""}
-                    onChange={(event) =>
-                      props.onSectorDraftChange(source.id, event.target.value)
-                    }
-                    className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
-                  >
-                    <option value="">Unassigned</option>
-                    {props.sectors.map((sector) => (
-                      <option key={sector.id} value={sector.id}>
-                        {sector.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-[10px] uppercase tracking-wide text-slate-500">
-                    Max age (days)
-                  </span>
-                  <input
-                    value={
-                      props.maxAgeDrafts[source.id] ??
-                      String(
-                        source.max_age_days ??
-                          source.sectors?.default_max_age_days ??
-                          5,
-                      )
-                    }
-                    onChange={(event) =>
-                      props.onMaxAgeDraftChange(source.id, event.target.value)
-                    }
-                    className="w-20 rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-[10px] uppercase tracking-wide text-slate-500">
-                    Interval (min)
-                  </span>
-                  <input
-                    value={
-                      props.sourceIntervalDrafts[source.id] ??
-                      String(source.ingest_interval_minutes)
-                    }
-                    onChange={(event) =>
-                      props.onSourceIntervalDraftChange(source.id, event.target.value)
-                    }
-                    className="w-24 rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
-                  />
-                </div>
-                <button
-                  onClick={() => props.onSaveChanges(source)}
-                  className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 transition hover:border-slate-400 hover:text-white"
-                >
-                  Save
-                </button>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => props.onToggle(source)}
-                    className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                      source.active
-                        ? "bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30"
-                        : "bg-slate-700/40 text-slate-300 hover:bg-slate-700/60"
-                    }`}
-                  >
-                    {source.active ? "Active" : "Inactive"}
-                  </button>
-                  <button
-                    onClick={() => props.onDeletePermanent(source)}
-                    className="text-xs text-red-400 hover:text-red-200 hover:underline"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            </div>
             );
           })}
           {!props.isLoading && props.sources.length === 0 ? (

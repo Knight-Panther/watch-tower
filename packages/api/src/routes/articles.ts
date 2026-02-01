@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { eq, and, gte, lte, inArray, desc, asc, sql, count } from "drizzle-orm";
-import { articles, rssSources, sectors } from "@watch-tower/db";
+import { articles, rssSources, sectors, postDeliveries } from "@watch-tower/db";
 import type { ApiDeps } from "../server.js";
 
 export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
@@ -356,5 +356,125 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       .returning({ id: articles.id });
 
     return { updated: updated.length, ids: updated.map((u) => u.id) };
+  });
+
+  // POST /articles/:id/schedule - Approve article and schedule delivery
+  app.post<{
+    Params: { id: string };
+    Body: {
+      platform: string;
+      scheduled_at?: string; // ISO string, null = immediate
+      llm_summary?: string;
+    };
+  }>("/articles/:id/schedule", { preHandler: deps.requireApiKey }, async (request, reply) => {
+    const { id } = request.params;
+    const { platform, scheduled_at, llm_summary } = request.body ?? {};
+
+    if (!platform) {
+      return reply.code(400).send({ error: "platform is required" });
+    }
+
+    const validPlatforms = ["telegram", "facebook", "linkedin"];
+    if (!validPlatforms.includes(platform)) {
+      return reply
+        .code(400)
+        .send({ error: `Invalid platform. Must be one of: ${validPlatforms.join(", ")}` });
+    }
+
+    // Check article exists and is in valid state for scheduling
+    const [article] = await deps.db
+      .select({ id: articles.id, pipelineStage: articles.pipelineStage })
+      .from(articles)
+      .where(eq(articles.id, id));
+
+    if (!article) {
+      return reply.code(404).send({ error: "Article not found" });
+    }
+
+    const allowedStages = ["scored", "approved"];
+    if (!allowedStages.includes(article.pipelineStage)) {
+      return reply.code(400).send({
+        error: `Article must be in 'scored' or 'approved' stage to schedule (current: ${article.pipelineStage})`,
+      });
+    }
+
+    // Check for existing scheduled delivery for same article/platform
+    const existingDelivery = await deps.db
+      .select({ id: postDeliveries.id })
+      .from(postDeliveries)
+      .where(
+        and(
+          eq(postDeliveries.articleId, id),
+          eq(postDeliveries.platform, platform),
+          inArray(postDeliveries.status, ["scheduled", "posting"]),
+        ),
+      );
+
+    if (existingDelivery.length > 0) {
+      return reply.code(409).send({
+        error: `Article already has a pending ${platform} delivery`,
+        deliveryId: existingDelivery[0].id,
+      });
+    }
+
+    // Parse scheduled_at or default to now for immediate
+    const scheduledAt = scheduled_at ? new Date(scheduled_at) : new Date();
+
+    // Update article to approved (if not already)
+    const articleUpdates: Record<string, unknown> = {
+      pipelineStage: "approved",
+      approvedAt: new Date(),
+    };
+    if (llm_summary !== undefined) {
+      articleUpdates.llmSummary = llm_summary;
+    }
+
+    await deps.db.update(articles).set(articleUpdates).where(eq(articles.id, id));
+
+    // Create delivery record
+    const [delivery] = await deps.db
+      .insert(postDeliveries)
+      .values({
+        articleId: id,
+        platform,
+        scheduledAt,
+        status: "scheduled",
+      })
+      .returning();
+
+    return {
+      delivery_id: delivery.id,
+      article_id: id,
+      platform,
+      scheduled_at: scheduledAt.toISOString(),
+      status: "scheduled",
+    };
+  });
+
+  // DELETE /articles/:id/schedule - Cancel scheduled delivery
+  app.delete<{
+    Params: { id: string };
+    Querystring: { platform?: string };
+  }>("/articles/:id/schedule", { preHandler: deps.requireApiKey }, async (request, reply) => {
+    const { id } = request.params;
+    const { platform } = request.query;
+
+    // Build condition
+    const conditions = [eq(postDeliveries.articleId, id), eq(postDeliveries.status, "scheduled")];
+    if (platform) {
+      conditions.push(eq(postDeliveries.platform, platform));
+    }
+
+    const updated = await deps.db
+      .update(postDeliveries)
+      .set({ status: "cancelled" })
+      .where(and(...conditions))
+      .returning({ id: postDeliveries.id, platform: postDeliveries.platform });
+
+    if (updated.length === 0) {
+      return reply.code(404).send({ error: "No scheduled deliveries found" });
+    }
+
+    return { cancelled: updated.length, deliveries: updated };
   });
 };
