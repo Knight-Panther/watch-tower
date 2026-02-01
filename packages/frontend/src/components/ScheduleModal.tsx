@@ -27,7 +27,14 @@ export default function ScheduleModal({ article, onClose, onSchedule }: Schedule
   };
 
   const defaultDate = getDefaultDateTime();
-  const [date, setDate] = useState(defaultDate.toISOString().split("T")[0]);
+  // Use local date format (YYYY-MM-DD) to avoid UTC date shift
+  const formatLocalDate = (d: Date) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+  const [date, setDate] = useState(formatLocalDate(defaultDate));
   const [time, setTime] = useState(
     defaultDate.toTimeString().slice(0, 5), // HH:MM
   );
@@ -102,6 +109,25 @@ export default function ScheduleModal({ article, onClose, onSchedule }: Schedule
               className="w-full rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
             />
           </div>
+        </div>
+
+        {/* UTC Time Preview */}
+        <div className="mt-3 flex items-center gap-2 text-sm text-slate-400">
+          <span>⏰</span>
+          <span>
+            Will post at:{" "}
+            <span className="text-slate-200 font-medium">
+              {new Date(`${date}T${time}`).toLocaleString("en-US", {
+                timeZone: "UTC",
+                month: "short",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+                hour12: true,
+              })}{" "}
+              UTC
+            </span>
+          </span>
         </div>
 
         {/* Platform selection */}
