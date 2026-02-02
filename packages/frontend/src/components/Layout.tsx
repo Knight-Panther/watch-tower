@@ -4,12 +4,11 @@ import type { ConnectionStatus } from "../hooks/useServerEvents";
 
 const navItems = [
   { to: "/", label: "Home" },
+  { to: "/monitoring", label: "Monitoring" },
   { to: "/articles", label: "Articles" },
   { to: "/scheduled", label: "Scheduled" },
-  { to: "/monitoring", label: "Monitoring" },
-  { to: "/telemetry", label: "Telemetry" },
-  { to: "/sectors", label: "Sector Management" },
-  { to: "/database", label: "Database" },
+  { to: "/sectors", label: "Sectors" },
+  { to: "/settings", label: "DB/Telemetry" },
 ];
 
 type LayoutProps = {

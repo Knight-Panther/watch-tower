@@ -40,9 +40,8 @@ import {
   type TelemetryDaily,
 } from "./api";
 import Layout from "./components/Layout";
-import Database from "./pages/Database";
 import Monitoring from "./pages/Monitoring";
-import Telemetry from "./pages/Telemetry";
+import Settings from "./pages/Settings";
 import Home from "./pages/Home";
 import SectorManagement from "./pages/SectorManagement";
 import Articles from "./pages/Articles";
@@ -854,9 +853,34 @@ export default function App() {
           }
         />
         <Route
-          path="/database"
+          path="/monitoring"
           element={
-            <Database
+            <Monitoring
+              overview={statsOverview}
+              sources={statsSources}
+              isLoading={statsLoading}
+              error={statsError}
+              lastUpdated={statsUpdatedAt}
+              onRefresh={refreshStats}
+              autoRefreshEnabled={statsAutoRefresh}
+              onToggleAutoRefresh={() => setStatsAutoRefresh((prev) => !prev)}
+            />
+          }
+        />
+        <Route path="/articles" element={<Articles />} />
+        <Route path="/scheduled" element={<Scheduled />} />
+        <Route
+          path="/settings"
+          element={
+            <Settings
+              telemetrySummary={telemetrySummary}
+              telemetryByProvider={telemetryByProvider}
+              telemetryByOperation={telemetryByOperation}
+              telemetryDaily={telemetryDaily}
+              telemetryLoading={telemetryLoading}
+              telemetryError={telemetryError}
+              telemetryLastUpdated={telemetryUpdatedAt}
+              onRefreshTelemetry={refreshTelemetry}
               isLoading={isLoading}
               ttlDays={ttlDays}
               ttlError={ttlError}
@@ -883,38 +907,6 @@ export default function App() {
             />
           }
         />
-        <Route
-          path="/monitoring"
-          element={
-            <Monitoring
-              overview={statsOverview}
-              sources={statsSources}
-              isLoading={statsLoading}
-              error={statsError}
-              lastUpdated={statsUpdatedAt}
-              onRefresh={refreshStats}
-              autoRefreshEnabled={statsAutoRefresh}
-              onToggleAutoRefresh={() => setStatsAutoRefresh((prev) => !prev)}
-            />
-          }
-        />
-        <Route
-          path="/telemetry"
-          element={
-            <Telemetry
-              summary={telemetrySummary}
-              byProvider={telemetryByProvider}
-              byOperation={telemetryByOperation}
-              daily={telemetryDaily}
-              isLoading={telemetryLoading}
-              error={telemetryError}
-              lastUpdated={telemetryUpdatedAt}
-              onRefresh={refreshTelemetry}
-            />
-          }
-        />
-        <Route path="/articles" element={<Articles />} />
-        <Route path="/scheduled" element={<Scheduled />} />
       </Routes>
 
       {confirmDeleteSource ? (

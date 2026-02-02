@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import Spinner from "../components/Spinner";
 import ScheduleModal from "../components/ScheduleModal";
+import { usePersistedFilters } from "../hooks/usePersistedFilters";
 import {
   getArticles,
   getArticleFilterOptions,
@@ -32,8 +33,8 @@ export default function Articles() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filter state
-  const [filters, setFilters] = useState<ArticleFilters>({
+  // Filter state with persistence (localStorage + URL sync)
+  const [filters, setFilter, setFilters] = usePersistedFilters<ArticleFilters>("articles-filters", {
     page: 1,
     limit: 50,
     sort_by: "published_at",
@@ -77,24 +78,16 @@ export default function Articles() {
   }, [loadFilterOptions]);
 
   const handleSort = (column: "published_at" | "importance_score" | "created_at") => {
-    setFilters((prev) => ({
-      ...prev,
-      sort_by: column,
-      sort_dir: prev.sort_by === column && prev.sort_dir === "desc" ? "asc" : "desc",
-      page: 1,
-    }));
+    const newDir = filters.sort_by === column && filters.sort_dir === "desc" ? "asc" : "desc";
+    setFilters({ sort_by: column, sort_dir: newDir, page: 1 });
   };
 
   const handleFilterChange = (key: keyof ArticleFilters, value: string | number | undefined) => {
-    setFilters((prev) => ({
-      ...prev,
-      [key]: value === "" ? undefined : value,
-      page: 1,
-    }));
+    setFilter(key, value);
   };
 
   const handlePageChange = (newPage: number) => {
-    setFilters((prev) => ({ ...prev, page: newPage }));
+    setFilter("page", newPage);
   };
 
   const openScheduleModal = (article: Article) => {
