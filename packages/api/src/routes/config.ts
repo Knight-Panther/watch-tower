@@ -8,6 +8,9 @@ const CONSTRAINTS = {
   fetchRunsTtl: { min: 1, max: 2160, unit: "hours" },
   interval: { min: 1, max: 4320, unit: "minutes" },
   maxAge: { min: 1, max: 15, unit: "days" },
+  llmTelemetryTtl: { min: 1, max: 60, unit: "days" },
+  articleImagesTtl: { min: 1, max: 60, unit: "days" },
+  postDeliveriesTtl: { min: 1, max: 60, unit: "days" },
 } as const;
 
 const getConfigValue = async (deps: ApiDeps, key: string, fallback: number) => {
@@ -50,9 +53,13 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     { preHandler: deps.requireApiKey },
     async (request, reply) => {
       const { days } = request.body ?? {};
-      if (!days || days < CONSTRAINTS.feedItemsTtl.min || days > CONSTRAINTS.feedItemsTtl.max) {
+      if (
+        !Number.isFinite(days) ||
+        days < CONSTRAINTS.feedItemsTtl.min ||
+        days > CONSTRAINTS.feedItemsTtl.max
+      ) {
         return reply.code(400).send({
-          error: `days must be between ${CONSTRAINTS.feedItemsTtl.min} and ${CONSTRAINTS.feedItemsTtl.max}`,
+          error: `days must be a number between ${CONSTRAINTS.feedItemsTtl.min} and ${CONSTRAINTS.feedItemsTtl.max}`,
         });
       }
       await upsertConfig(deps, "feed_items_ttl_days", days);
@@ -65,13 +72,92 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     { preHandler: deps.requireApiKey },
     async (request, reply) => {
       const { hours } = request.body ?? {};
-      if (!hours || hours <= 0 || hours > CONSTRAINTS.fetchRunsTtl.max) {
+      if (
+        !Number.isFinite(hours) ||
+        hours < CONSTRAINTS.fetchRunsTtl.min ||
+        hours > CONSTRAINTS.fetchRunsTtl.max
+      ) {
         return reply.code(400).send({
-          error: `hours must be greater than 0 and at most ${CONSTRAINTS.fetchRunsTtl.max}`,
+          error: `hours must be a number between ${CONSTRAINTS.fetchRunsTtl.min} and ${CONSTRAINTS.fetchRunsTtl.max}`,
         });
       }
       await upsertConfig(deps, "feed_fetch_runs_ttl_hours", hours);
       return { hours };
+    },
+  );
+
+  // LLM Telemetry TTL
+  app.get("/config/llm-telemetry-ttl", { preHandler: deps.requireApiKey }, async () => {
+    const days = await getConfigValue(deps, "llm_telemetry_ttl_days", 30);
+    return { days };
+  });
+
+  app.patch<{ Body: { days: number } }>(
+    "/config/llm-telemetry-ttl",
+    { preHandler: deps.requireApiKey },
+    async (request, reply) => {
+      const { days } = request.body ?? {};
+      if (
+        !Number.isFinite(days) ||
+        days < CONSTRAINTS.llmTelemetryTtl.min ||
+        days > CONSTRAINTS.llmTelemetryTtl.max
+      ) {
+        return reply.code(400).send({
+          error: `days must be a number between ${CONSTRAINTS.llmTelemetryTtl.min} and ${CONSTRAINTS.llmTelemetryTtl.max}`,
+        });
+      }
+      await upsertConfig(deps, "llm_telemetry_ttl_days", days);
+      return { days };
+    },
+  );
+
+  // Article Images TTL
+  app.get("/config/article-images-ttl", { preHandler: deps.requireApiKey }, async () => {
+    const days = await getConfigValue(deps, "article_images_ttl_days", 30);
+    return { days };
+  });
+
+  app.patch<{ Body: { days: number } }>(
+    "/config/article-images-ttl",
+    { preHandler: deps.requireApiKey },
+    async (request, reply) => {
+      const { days } = request.body ?? {};
+      if (
+        !Number.isFinite(days) ||
+        days < CONSTRAINTS.articleImagesTtl.min ||
+        days > CONSTRAINTS.articleImagesTtl.max
+      ) {
+        return reply.code(400).send({
+          error: `days must be a number between ${CONSTRAINTS.articleImagesTtl.min} and ${CONSTRAINTS.articleImagesTtl.max}`,
+        });
+      }
+      await upsertConfig(deps, "article_images_ttl_days", days);
+      return { days };
+    },
+  );
+
+  // Post Deliveries TTL
+  app.get("/config/post-deliveries-ttl", { preHandler: deps.requireApiKey }, async () => {
+    const days = await getConfigValue(deps, "post_deliveries_ttl_days", 30);
+    return { days };
+  });
+
+  app.patch<{ Body: { days: number } }>(
+    "/config/post-deliveries-ttl",
+    { preHandler: deps.requireApiKey },
+    async (request, reply) => {
+      const { days } = request.body ?? {};
+      if (
+        !Number.isFinite(days) ||
+        days < CONSTRAINTS.postDeliveriesTtl.min ||
+        days > CONSTRAINTS.postDeliveriesTtl.max
+      ) {
+        return reply.code(400).send({
+          error: `days must be a number between ${CONSTRAINTS.postDeliveriesTtl.min} and ${CONSTRAINTS.postDeliveriesTtl.max}`,
+        });
+      }
+      await upsertConfig(deps, "post_deliveries_ttl_days", days);
+      return { days };
     },
   );
 };

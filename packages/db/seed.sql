@@ -18,7 +18,10 @@ ON CONFLICT (url) DO NOTHING;
 
 INSERT INTO app_config (key, value, updated_at) VALUES
   ('feed_items_ttl_days', '60', NOW()),
-  ('feed_fetch_runs_ttl_hours', '336', NOW())
+  ('feed_fetch_runs_ttl_hours', '336', NOW()),
+  ('llm_telemetry_ttl_days', '30', NOW()),
+  ('article_images_ttl_days', '30', NOW()),
+  ('post_deliveries_ttl_days', '30', NOW())
 ON CONFLICT (key) DO NOTHING;
 
 -- Seed default scoring rules for each sector

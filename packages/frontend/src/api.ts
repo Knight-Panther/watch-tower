@@ -182,6 +182,87 @@ export const setFeedFetchRunsTtl = async (hours: number): Promise<number> => {
   return Number(data.hours ?? hours);
 };
 
+// LLM Telemetry TTL
+export const getLlmTelemetryTtl = async (): Promise<number> => {
+  const res = await fetch(`${API_URL}/config/llm-telemetry-ttl`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load LLM telemetry TTL");
+  }
+  const data = await res.json();
+  return Number(data.days ?? 30);
+};
+
+export const setLlmTelemetryTtl = async (days: number): Promise<number> => {
+  const res = await fetch(`${API_URL}/config/llm-telemetry-ttl`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify({ days }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to update LLM telemetry TTL");
+  }
+  const data = await res.json();
+  return Number(data.days ?? days);
+};
+
+// Article Images TTL
+export const getArticleImagesTtl = async (): Promise<number> => {
+  const res = await fetch(`${API_URL}/config/article-images-ttl`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load article images TTL");
+  }
+  const data = await res.json();
+  return Number(data.days ?? 30);
+};
+
+export const setArticleImagesTtl = async (days: number): Promise<number> => {
+  const res = await fetch(`${API_URL}/config/article-images-ttl`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify({ days }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to update article images TTL");
+  }
+  const data = await res.json();
+  return Number(data.days ?? days);
+};
+
+// Post Deliveries TTL
+export const getPostDeliveriesTtl = async (): Promise<number> => {
+  const res = await fetch(`${API_URL}/config/post-deliveries-ttl`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load post deliveries TTL");
+  }
+  const data = await res.json();
+  return Number(data.days ?? 30);
+};
+
+export const setPostDeliveriesTtl = async (days: number): Promise<number> => {
+  const res = await fetch(`${API_URL}/config/post-deliveries-ttl`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify({ days }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to update post deliveries TTL");
+  }
+  const data = await res.json();
+  return Number(data.days ?? days);
+};
+
 export const updateSector = async (
   id: string,
   payload: { default_max_age_days?: number },
@@ -260,6 +341,9 @@ export type Constraints = {
   fetchRunsTtl: { min: number; max: number; unit: string };
   interval: { min: number; max: number; unit: string };
   maxAge: { min: number; max: number; unit: string };
+  llmTelemetryTtl: { min: number; max: number; unit: string };
+  articleImagesTtl: { min: number; max: number; unit: string };
+  postDeliveriesTtl: { min: number; max: number; unit: string };
 };
 
 export const getConstraints = async (): Promise<Constraints> => {

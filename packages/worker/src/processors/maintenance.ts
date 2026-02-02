@@ -16,6 +16,8 @@ import {
   rssSources,
   sectors,
   postDeliveries,
+  llmTelemetry,
+  articleImages,
 } from "@watch-tower/db";
 import { createTelegramProvider, type TelegramConfig } from "@watch-tower/social";
 import type { Queue } from "bullmq";
@@ -329,18 +331,80 @@ export const createMaintenanceWorker = ({ connection, db, ingestQueue, telegramC
     QUEUE_MAINTENANCE,
     async (job) => {
       if (job.name === JOB_MAINTENANCE_CLEANUP) {
-        const ttlDays = await getConfigNumber(db, "feed_items_ttl_days", 60);
-        const cutoff = new Date(Date.now() - ttlDays * 24 * 60 * 60 * 1000);
-        await db.delete(articles).where(lt(articles.createdAt, cutoff));
+        const errors: string[] = [];
 
-        const runsTtlHours = await getConfigNumber(db, "feed_fetch_runs_ttl_hours", 336);
-        const runsCutoff = new Date(Date.now() - runsTtlHours * 60 * 60 * 1000);
-        await db.delete(feedFetchRuns).where(lt(feedFetchRuns.createdAt, runsCutoff));
+        // Articles cleanup
+        try {
+          const ttlDays = await getConfigNumber(db, "feed_items_ttl_days", 60);
+          const cutoff = new Date(Date.now() - ttlDays * 24 * 60 * 60 * 1000);
+          await db.delete(articles).where(lt(articles.createdAt, cutoff));
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logger.error(`[maintenance] articles cleanup failed: ${msg}`);
+          errors.push("articles");
+        }
+
+        // Feed fetch runs cleanup
+        try {
+          const runsTtlHours = await getConfigNumber(db, "feed_fetch_runs_ttl_hours", 336);
+          const runsCutoff = new Date(Date.now() - runsTtlHours * 60 * 60 * 1000);
+          await db.delete(feedFetchRuns).where(lt(feedFetchRuns.createdAt, runsCutoff));
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logger.error(`[maintenance] feed_fetch_runs cleanup failed: ${msg}`);
+          errors.push("feed_fetch_runs");
+        }
+
+        // LLM telemetry cleanup
+        try {
+          const llmTelemetryTtlDays = await getConfigNumber(db, "llm_telemetry_ttl_days", 30);
+          const llmCutoff = new Date(Date.now() - llmTelemetryTtlDays * 24 * 60 * 60 * 1000);
+          await db.delete(llmTelemetry).where(lt(llmTelemetry.createdAt, llmCutoff));
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logger.error(`[maintenance] llm_telemetry cleanup failed: ${msg}`);
+          errors.push("llm_telemetry");
+        }
+
+        // Article images cleanup
+        try {
+          const articleImagesTtlDays = await getConfigNumber(db, "article_images_ttl_days", 30);
+          const imagesCutoff = new Date(Date.now() - articleImagesTtlDays * 24 * 60 * 60 * 1000);
+          await db.delete(articleImages).where(lt(articleImages.createdAt, imagesCutoff));
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logger.error(`[maintenance] article_images cleanup failed: ${msg}`);
+          errors.push("article_images");
+        }
+
+        // Post deliveries cleanup (only completed/failed/cancelled, NOT scheduled/posting)
+        try {
+          const postDeliveriesTtlDays = await getConfigNumber(db, "post_deliveries_ttl_days", 30);
+          const deliveriesCutoff = new Date(
+            Date.now() - postDeliveriesTtlDays * 24 * 60 * 60 * 1000,
+          );
+          await db
+            .delete(postDeliveries)
+            .where(
+              and(
+                lt(postDeliveries.createdAt, deliveriesCutoff),
+                inArray(postDeliveries.status, ["posted", "failed", "cancelled"]),
+              ),
+            );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logger.error(`[maintenance] post_deliveries cleanup failed: ${msg}`);
+          errors.push("post_deliveries");
+        }
 
         // Also run zombie cleanup during daily maintenance
         await resetZombieArticles(db);
 
-        logger.info("[maintenance] cleanup complete");
+        if (errors.length > 0) {
+          logger.warn(`[maintenance] cleanup completed with errors in: ${errors.join(", ")}`);
+        } else {
+          logger.info("[maintenance] cleanup complete");
+        }
         return;
       }
 

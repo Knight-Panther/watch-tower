@@ -12,6 +12,12 @@ import {
   getFeedFetchRunsTtl,
   setFeedItemsTtl,
   setFeedFetchRunsTtl,
+  getLlmTelemetryTtl,
+  setLlmTelemetryTtl,
+  getArticleImagesTtl,
+  setArticleImagesTtl,
+  getPostDeliveriesTtl,
+  setPostDeliveriesTtl,
   listSectors,
   listSources,
   runIngest,
@@ -85,6 +91,12 @@ export default function App() {
   const [fetchRunsTtlValue, setFetchRunsTtlValue] = useState("");
   const [fetchRunsTtlUnit, setFetchRunsTtlUnit] = useState<"hours" | "days">("days");
   const [fetchRunsTtlError, setFetchRunsTtlError] = useState<string | null>(null);
+  const [llmTelemetryTtlDays, setLlmTelemetryTtlDays] = useState("");
+  const [llmTelemetryTtlError, setLlmTelemetryTtlError] = useState<string | null>(null);
+  const [articleImagesTtlDays, setArticleImagesTtlDays] = useState("");
+  const [articleImagesTtlError, setArticleImagesTtlError] = useState<string | null>(null);
+  const [postDeliveriesTtlDays, setPostDeliveriesTtlDays] = useState("");
+  const [postDeliveriesTtlError, setPostDeliveriesTtlError] = useState<string | null>(null);
   const [sourceIntervalDrafts, setSourceIntervalDrafts] = useState<Record<string, string>>({});
   const [sectorMaxAgeDrafts, setSectorMaxAgeDrafts] = useState<Record<string, string>>({});
   const [confirmSectorDelete, setConfirmSectorDelete] = useState<Sector | null>(null);
@@ -118,14 +130,25 @@ export default function App() {
     setIsLoading(true);
     setError(null);
     try {
-      const [sourcesData, sectorsData, ttlValue, fetchRunsTtlHours, constraintsData] =
-        await Promise.all([
-          listSources(),
-          listSectors(),
-          getFeedItemsTtl(),
-          getFeedFetchRunsTtl(),
-          getConstraints(),
-        ]);
+      const [
+        sourcesData,
+        sectorsData,
+        ttlValue,
+        fetchRunsTtlHours,
+        constraintsData,
+        llmTelemetryTtl,
+        articleImagesTtl,
+        postDeliveriesTtl,
+      ] = await Promise.all([
+        listSources(),
+        listSectors(),
+        getFeedItemsTtl(),
+        getFeedFetchRunsTtl(),
+        getConstraints(),
+        getLlmTelemetryTtl(),
+        getArticleImagesTtl(),
+        getPostDeliveriesTtl(),
+      ]);
       setSources(sourcesData);
       setSectors(sectorsData);
       setConstraints(constraintsData);
@@ -140,6 +163,9 @@ export default function App() {
         setFetchRunsTtlUnit("hours");
         setFetchRunsTtlValue(String(fetchRunsTtlHours));
       }
+      setLlmTelemetryTtlDays(String(llmTelemetryTtl));
+      setArticleImagesTtlDays(String(articleImagesTtl));
+      setPostDeliveriesTtlDays(String(postDeliveriesTtl));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load sources";
       setError(message);
@@ -527,6 +553,69 @@ export default function App() {
     }
   };
 
+  const onSaveLlmTelemetryTtl = async () => {
+    const min = constraints?.llmTelemetryTtl?.min ?? 1;
+    const max = constraints?.llmTelemetryTtl?.max ?? 60;
+    const value = Number(llmTelemetryTtlDays);
+    if (Number.isNaN(value) || value < min || value > max) {
+      setLlmTelemetryTtlError(`TTL must be between ${min} and ${max} days`);
+      toast.error(`TTL must be between ${min} and ${max} days`);
+      return;
+    }
+    try {
+      const updated = await setLlmTelemetryTtl(value);
+      setLlmTelemetryTtlDays(String(updated));
+      setLlmTelemetryTtlError(null);
+      toast.success("LLM telemetry TTL updated");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update LLM telemetry TTL";
+      setLlmTelemetryTtlError(message);
+      toast.error(message);
+    }
+  };
+
+  const onSaveArticleImagesTtl = async () => {
+    const min = constraints?.articleImagesTtl?.min ?? 1;
+    const max = constraints?.articleImagesTtl?.max ?? 60;
+    const value = Number(articleImagesTtlDays);
+    if (Number.isNaN(value) || value < min || value > max) {
+      setArticleImagesTtlError(`TTL must be between ${min} and ${max} days`);
+      toast.error(`TTL must be between ${min} and ${max} days`);
+      return;
+    }
+    try {
+      const updated = await setArticleImagesTtl(value);
+      setArticleImagesTtlDays(String(updated));
+      setArticleImagesTtlError(null);
+      toast.success("Article images TTL updated");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update article images TTL";
+      setArticleImagesTtlError(message);
+      toast.error(message);
+    }
+  };
+
+  const onSavePostDeliveriesTtl = async () => {
+    const min = constraints?.postDeliveriesTtl?.min ?? 1;
+    const max = constraints?.postDeliveriesTtl?.max ?? 60;
+    const value = Number(postDeliveriesTtlDays);
+    if (Number.isNaN(value) || value < min || value > max) {
+      setPostDeliveriesTtlError(`TTL must be between ${min} and ${max} days`);
+      toast.error(`TTL must be between ${min} and ${max} days`);
+      return;
+    }
+    try {
+      const updated = await setPostDeliveriesTtl(value);
+      setPostDeliveriesTtlDays(String(updated));
+      setPostDeliveriesTtlError(null);
+      toast.success("Post deliveries TTL updated");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update post deliveries TTL";
+      setPostDeliveriesTtlError(message);
+      toast.error(message);
+    }
+  };
+
   const selectedCount = useMemo(
     () => Object.values(selectedIds).filter(Boolean).length,
     [selectedIds],
@@ -779,6 +868,18 @@ export default function App() {
               onFetchRunsTtlChange={setFetchRunsTtlValue}
               onFetchRunsTtlUnitChange={onFetchRunsTtlUnitChange}
               onSaveFetchRunsTtl={onSaveFetchRunsTtl}
+              llmTelemetryTtlDays={llmTelemetryTtlDays}
+              llmTelemetryTtlError={llmTelemetryTtlError}
+              onLlmTelemetryTtlChange={setLlmTelemetryTtlDays}
+              onSaveLlmTelemetryTtl={onSaveLlmTelemetryTtl}
+              articleImagesTtlDays={articleImagesTtlDays}
+              articleImagesTtlError={articleImagesTtlError}
+              onArticleImagesTtlChange={setArticleImagesTtlDays}
+              onSaveArticleImagesTtl={onSaveArticleImagesTtl}
+              postDeliveriesTtlDays={postDeliveriesTtlDays}
+              postDeliveriesTtlError={postDeliveriesTtlError}
+              onPostDeliveriesTtlChange={setPostDeliveriesTtlDays}
+              onSavePostDeliveriesTtl={onSavePostDeliveriesTtl}
             />
           }
         />
