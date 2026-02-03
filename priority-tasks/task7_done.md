@@ -789,3 +789,91 @@ import ScoringRules from "./pages/ScoringRules";
 - **Backward compatible** - Existing `prompt_template` values continue to work
 - **Gradual adoption** - Sectors migrate when user saves via new UI
 - **Rollback safe** - If issues, worker falls back to `prompt_template`
+
+---
+
+## Implementation Status
+
+### Completed (2026-02-03)
+
+All core phases implemented and working:
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| Phase 1: Shared Schema | ✅ Done | `scoring-config.ts`, `prompt-builder.ts` |
+| Phase 2: Worker Integration | ✅ Done | Compile-on-read with fallback |
+| Phase 3: API Endpoints | ✅ Done | CRUD + preview endpoints |
+| Phase 4: Frontend UI | ✅ Done | Full ScoringRules page |
+
+### Additional Features Implemented
+
+#### Per-Platform Auto-Post Toggles
+
+Added granular control for auto-posting to each social platform:
+
+| Platform | Status | Config Key | UI Toggle |
+|----------|--------|------------|-----------|
+| Telegram | ✅ Active | `auto_post_telegram` | Enabled |
+| Facebook | 🔜 Placeholder | `auto_post_facebook` | Disabled (Coming Soon) |
+| LinkedIn | 🔜 Placeholder | `auto_post_linkedin` | Disabled (Coming Soon) |
+
+**Files modified:**
+- `packages/api/src/routes/config.ts` - Added per-platform endpoints
+- `packages/frontend/src/api.ts` - Added API client functions
+- `packages/frontend/src/pages/ScoringRules.tsx` - Added toggle UI in Auto-Actions
+- `packages/worker/src/processors/llm-brain.ts` - Updated to use `auto_post_telegram` key
+- `packages/worker/src/processors/distribution.ts` - Added integration comments
+
+#### Model Preference Tracking
+
+When saving a scoring rule, the current `LLM_PROVIDER` env var is saved to `model_preference` column.
+
+**File:** `packages/api/src/routes/scoring-rules.ts`
+
+---
+
+## Future Work: Facebook/LinkedIn Integration
+
+### To Enable Facebook Auto-Posting
+
+1. **Create provider:** `packages/social/src/facebook.ts`
+   ```typescript
+   // Implement SocialProvider interface using Facebook Graph API
+   export function createFacebookProvider(config: FacebookConfig) { ... }
+   ```
+
+2. **Add environment variables:**
+   ```env
+   FB_PAGE_ID=your-page-id
+   FB_ACCESS_TOKEN=your-access-token
+   ```
+
+3. **Update distribution worker:** `packages/worker/src/processors/distribution.ts`
+   - Import FacebookProvider
+   - Add `facebookConfig` to deps
+   - Check `isFacebookAutoPostEnabled()` before posting
+
+4. **Enable UI toggle:** `packages/frontend/src/pages/ScoringRules.tsx`
+   - Remove `disabled` and `opacity-50` from Facebook toggle
+   - Uncomment `getAutoPostFacebook`/`setAutoPostFacebookApi` imports
+   - Add state and handler for Facebook toggle
+
+### To Enable LinkedIn Auto-Posting
+
+Same steps as Facebook, but with:
+- Provider: `packages/social/src/linkedin.ts`
+- Env vars: `LINKEDIN_ORG_ID`, `LINKEDIN_ACCESS_TOKEN`
+- Config key: `auto_post_linkedin`
+
+---
+
+## Testing Checklist
+
+- [x] Create/edit structured scoring rules via UI
+- [x] Live prompt preview updates as you type
+- [x] Legacy prompt migration on save
+- [x] Reset to defaults deletes custom rule
+- [x] Per-platform auto-post toggle (Telegram)
+- [x] Backward compatibility with `auto_post_score5` key
+- [ ] Facebook integration (pending)
+- [ ] LinkedIn integration (pending)

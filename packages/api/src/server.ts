@@ -25,6 +25,7 @@ import { registerTelemetryRoutes } from "./routes/telemetry.js";
 import { registerArticlesRoutes } from "./routes/articles.js";
 import { registerScheduledRoutes } from "./routes/scheduled.js";
 import { registerScoringRulesRoutes } from "./routes/scoring-rules.js";
+import { registerResetRoutes } from "./routes/reset.js";
 import { createRequireApiKey } from "./utils/auth.js";
 
 dotenv.config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) });
@@ -130,6 +131,7 @@ export const buildApp = async () => {
   registerArticlesRoutes(app, deps);
   registerScheduledRoutes(app, deps);
   registerScoringRulesRoutes(app, deps);
+  registerResetRoutes(app, deps);
 
   const closeRedis = () => redis.quit();
   return { app, port: env.PORT, closeDb, closeRedis, ingestQueue, maintenanceQueue };

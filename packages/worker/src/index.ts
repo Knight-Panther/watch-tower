@@ -26,6 +26,7 @@ import { createSemanticDedupWorker } from "./processors/semantic-dedup.js";
 import { createLLMBrainWorker } from "./processors/llm-brain.js";
 import { createDistributionWorker } from "./processors/distribution.js";
 import { createEventPublisher } from "./events.js";
+import { ensureRepeatableJobs } from "./job-registry.js";
 
 dotenv.config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) });
 
@@ -134,30 +135,7 @@ const main = async () => {
       })
     : null;
 
-  const ingestWorker = createIngestWorker({ connection, db, eventPublisher });
-  const maintenanceWorker = createMaintenanceWorker({
-    connection,
-    db,
-    ingestQueue,
-    telegramConfig:
-      env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID
-        ? { botToken: env.TELEGRAM_BOT_TOKEN, defaultChatId: env.TELEGRAM_CHAT_ID }
-        : undefined,
-  });
-
-  // Semantic dedup worker (only if embeddings enabled)
-  const semanticDedupWorker = embeddingProvider
-    ? createSemanticDedupWorker({
-        connection,
-        db,
-        embeddingProvider,
-        llmQueue,
-        similarityThreshold: env.SIMILARITY_THRESHOLD,
-        eventPublisher,
-      })
-    : null;
-
-  // LLM provider configuration
+  // LLM provider configuration (moved up for maintenance worker self-healing)
   // Resolve API key based on provider
   const getApiKeyForProvider = (provider: string): string | undefined => {
     switch (provider) {
@@ -187,6 +165,37 @@ const main = async () => {
   };
 
   const primaryApiKey = getApiKeyForProvider(env.LLM_PROVIDER);
+
+  const ingestWorker = createIngestWorker({ connection, db, eventPublisher });
+  const maintenanceWorker = createMaintenanceWorker({
+    connection,
+    db,
+    ingestQueue,
+    distributionQueue:
+      env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID ? distributionQueue : undefined,
+    telegramConfig:
+      env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID
+        ? { botToken: env.TELEGRAM_BOT_TOKEN, defaultChatId: env.TELEGRAM_CHAT_ID }
+        : undefined,
+    // Queues for self-healing job registration (only pass if feature is enabled)
+    maintenanceQueue,
+    semanticDedupQueue: env.OPENAI_API_KEY ? semanticDedupQueue : undefined,
+    llmQueue: primaryApiKey ? llmQueue : undefined,
+  });
+
+  // Semantic dedup worker (only if embeddings enabled)
+  const semanticDedupWorker = embeddingProvider
+    ? createSemanticDedupWorker({
+        connection,
+        db,
+        embeddingProvider,
+        llmQueue,
+        similarityThreshold: env.SIMILARITY_THRESHOLD,
+        eventPublisher,
+      })
+    : null;
+
+  // Continue LLM provider setup
   const fallbackApiKey = env.LLM_FALLBACK_PROVIDER
     ? getApiKeyForProvider(env.LLM_FALLBACK_PROVIDER)
     : undefined;
@@ -359,11 +368,28 @@ const main = async () => {
     logger.info("[worker] distribution disabled (no TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID)");
   }
 
+  // Self-healing interval: re-register repeatable jobs if they were deleted (e.g., Redis wipe)
+  // This runs independently of BullMQ jobs to solve chicken-and-egg problem
+  const selfHealInterval = setInterval(async () => {
+    try {
+      await ensureRepeatableJobs({
+        maintenanceQueue,
+        semanticDedupQueue: env.OPENAI_API_KEY ? semanticDedupQueue : undefined,
+        llmQueue: primaryApiKey ? llmQueue : undefined,
+      });
+    } catch (err) {
+      logger.error("[worker] self-heal check failed", err);
+    }
+  }, 30_000); // Check every 30 seconds
+
   logger.info("[worker] started successfully");
 
   // Graceful shutdown: finish in-flight jobs, then close connections
   const shutdown = async () => {
     logger.info("[worker] shutting down...");
+
+    // Stop self-healing interval
+    clearInterval(selfHealInterval);
 
     // Force exit after 30s if graceful shutdown hangs
     const timeoutHandle = setTimeout(() => {

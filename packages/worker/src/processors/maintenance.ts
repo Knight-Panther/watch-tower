@@ -3,6 +3,7 @@ import { eq, and, lt, gte, desc, inArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import {
   JOB_INGEST_FETCH,
+  JOB_DISTRIBUTION_IMMEDIATE,
   JOB_MAINTENANCE_CLEANUP,
   JOB_MAINTENANCE_SCHEDULE,
   QUEUE_MAINTENANCE,
@@ -21,12 +22,18 @@ import {
 } from "@watch-tower/db";
 import { createTelegramProvider, type TelegramConfig } from "@watch-tower/social";
 import type { Queue } from "bullmq";
+import { ensureRepeatableJobs } from "../job-registry.js";
 
 type MaintenanceDeps = {
   connection: { host: string; port: number };
   db: Database;
   ingestQueue: Queue;
+  distributionQueue?: Queue;
   telegramConfig?: TelegramConfig;
+  // Queues for self-healing job registration
+  maintenanceQueue: Queue;
+  semanticDedupQueue?: Queue;
+  llmQueue?: Queue;
 };
 
 const getConfigNumber = async (db: Database, key: string, fallback: number) => {
@@ -188,6 +195,53 @@ const resetZombieDeliveries = async (db: Database) => {
   return resetResult.rows.length;
 };
 
+/**
+ * Rescue orphaned articles stuck in 'approved' state.
+ *
+ * This handles the case where llm-brain marks article as 'approved' in DB
+ * but Redis queue.add() fails, leaving the article orphaned (never posted).
+ *
+ * Re-queues approved articles older than 5 minutes to the distribution queue.
+ * The distribution worker uses atomic claims, so duplicates are safe.
+ */
+const rescueOrphanedApprovedArticles = async (db: Database, distributionQueue?: Queue) => {
+  if (!distributionQueue) return 0;
+
+  // Find approved articles that haven't progressed in 5 minutes
+  // These are likely orphaned due to Redis queue failure
+  const staleThreshold = new Date(Date.now() - 5 * 60 * 1000);
+  const orphanedResult = await db.execute(sql`
+    SELECT id FROM articles
+    WHERE pipeline_stage = 'approved'
+      AND approved_at IS NOT NULL
+      AND approved_at < ${staleThreshold}
+    LIMIT 20
+  `);
+
+  const orphaned = orphanedResult.rows as { id: string }[];
+  if (orphaned.length === 0) return 0;
+
+  // Re-queue each orphaned article
+  let requeued = 0;
+  for (const article of orphaned) {
+    try {
+      await distributionQueue.add(
+        JOB_DISTRIBUTION_IMMEDIATE,
+        { articleId: article.id },
+        { jobId: `rescue-${article.id}-${Date.now()}` }, // Unique jobId to avoid dedup
+      );
+      requeued++;
+    } catch (err) {
+      logger.error(`[maintenance] failed to re-queue orphaned article ${article.id}`, err);
+    }
+  }
+
+  if (requeued > 0) {
+    logger.warn(`[maintenance] rescued ${requeued} orphaned approved articles`);
+  }
+  return requeued;
+};
+
 type ArticleForPost = {
   id: string;
   title: string;
@@ -326,7 +380,16 @@ const processScheduledPosts = async (db: Database, telegramConfig?: TelegramConf
   }
 };
 
-export const createMaintenanceWorker = ({ connection, db, ingestQueue, telegramConfig }: MaintenanceDeps) =>
+export const createMaintenanceWorker = ({
+  connection,
+  db,
+  ingestQueue,
+  distributionQueue,
+  telegramConfig,
+  maintenanceQueue,
+  semanticDedupQueue,
+  llmQueue,
+}: MaintenanceDeps) =>
   new Worker(
     QUEUE_MAINTENANCE,
     async (job) => {
@@ -409,9 +472,18 @@ export const createMaintenanceWorker = ({ connection, db, ingestQueue, telegramC
       }
 
       if (job.name === JOB_MAINTENANCE_SCHEDULE) {
+        // Self-heal: ensure repeatable jobs exist (survives Redis wipe/restart)
+        await ensureRepeatableJobs({
+          maintenanceQueue,
+          semanticDedupQueue,
+          llmQueue,
+        });
+
         // Run zombie cleanup on every scheduler tick (every 30s) for fast recovery
         await resetZombieArticles(db);
         await resetZombieDeliveries(db);
+        // Rescue orphaned approved articles (Redis queue failure recovery)
+        await rescueOrphanedApprovedArticles(db, distributionQueue);
         await runScheduledIngests(db, ingestQueue);
         // Process any scheduled posts that are due
         await processScheduledPosts(db, telegramConfig);

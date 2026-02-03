@@ -157,6 +157,9 @@ export const registerScoringRulesRoutes = (app: FastifyInstance, deps: ApiDeps) 
       return reply.code(404).send({ error: "Sector not found" });
     }
 
+    // Get current LLM provider from env
+    const llmProvider = process.env.LLM_PROVIDER ?? "claude";
+
     // Upsert rule (only saves structured config, prompt_template left empty)
     await deps.db
       .insert(scoringRules)
@@ -164,6 +167,7 @@ export const registerScoringRulesRoutes = (app: FastifyInstance, deps: ApiDeps) 
         sectorId,
         scoreCriteria: parsed.data,
         promptTemplate: "", // Empty - worker will build from config at runtime
+        modelPreference: llmProvider,
         autoApproveThreshold: auto_approve_threshold,
         autoRejectThreshold: auto_reject_threshold,
         updatedAt: new Date(),
@@ -172,6 +176,7 @@ export const registerScoringRulesRoutes = (app: FastifyInstance, deps: ApiDeps) 
         target: scoringRules.sectorId,
         set: {
           scoreCriteria: parsed.data,
+          modelPreference: llmProvider,
           autoApproveThreshold: auto_approve_threshold,
           autoRejectThreshold: auto_reject_threshold,
           updatedAt: new Date(),

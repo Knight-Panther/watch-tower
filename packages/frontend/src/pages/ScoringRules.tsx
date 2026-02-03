@@ -7,6 +7,14 @@ import {
   saveScoringRule,
   deleteScoringRule,
   previewScoringPrompt,
+  getAutoPostTelegram,
+  setAutoPostTelegram as setAutoPostTelegramApi,
+  // TODO: Uncomment when Facebook integration is ready
+  // getAutoPostFacebook,
+  // setAutoPostFacebook as setAutoPostFacebookApi,
+  // TODO: Uncomment when LinkedIn integration is ready
+  // getAutoPostLinkedin,
+  // setAutoPostLinkedin as setAutoPostLinkedinApi,
   type Sector,
   type ScoringConfig,
   type ScoringRule,
@@ -50,6 +58,13 @@ export default function ScoringRules() {
   const [priorityInput, setPriorityInput] = useState("");
   const [ignoreInput, setIgnoreInput] = useState("");
 
+  // Per-platform auto-post settings (global, not per-sector)
+  const [autoPostTelegram, setAutoPostTelegram] = useState(true);
+  const [isAutoPostTelegramLoading, setIsAutoPostTelegramLoading] = useState(false);
+  // Facebook and LinkedIn toggles are disabled until integration is complete
+  // const [autoPostFacebook, setAutoPostFacebook] = useState(false);
+  // const [autoPostLinkedin, setAutoPostLinkedin] = useState(false);
+
   // Load sectors on mount
   useEffect(() => {
     const loadSectors = async () => {
@@ -67,6 +82,24 @@ export default function ScoringRules() {
       }
     };
     loadSectors();
+  }, []);
+
+  // Load per-platform auto-post settings on mount
+  useEffect(() => {
+    const loadAutoPostSettings = async () => {
+      try {
+        const telegramEnabled = await getAutoPostTelegram();
+        setAutoPostTelegram(telegramEnabled);
+        // TODO: When FB/LinkedIn are integrated, load their settings too:
+        // const facebookEnabled = await getAutoPostFacebook();
+        // setAutoPostFacebook(facebookEnabled);
+        // const linkedinEnabled = await getAutoPostLinkedin();
+        // setAutoPostLinkedin(linkedinEnabled);
+      } catch {
+        // Silent fail, defaults are set in useState
+      }
+    };
+    loadAutoPostSettings();
   }, []);
 
   // Load rule when sector changes
@@ -187,6 +220,25 @@ export default function ScoringRules() {
       setIsSaving(false);
     }
   };
+
+  // Toggle Telegram auto-post setting
+  const handleTelegramToggle = async () => {
+    setIsAutoPostTelegramLoading(true);
+    try {
+      const newValue = await setAutoPostTelegramApi(!autoPostTelegram);
+      setAutoPostTelegram(newValue);
+      toast.success(newValue ? "Telegram auto-posting enabled" : "Telegram auto-posting disabled");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update setting";
+      toast.error(message);
+    } finally {
+      setIsAutoPostTelegramLoading(false);
+    }
+  };
+
+  // TODO: Add toggle handlers when FB/LinkedIn are integrated:
+  // const handleFacebookToggle = async () => { ... }
+  // const handleLinkedinToggle = async () => { ... }
 
   const selectedSector = sectors.find((s) => s.id === selectedSectorId);
 
@@ -348,7 +400,7 @@ export default function ScoringRules() {
               <div className="mt-4 space-y-3">
                 {([1, 2, 3, 4, 5] as const).map((level) => (
                   <div key={level} className="flex items-start gap-3">
-                    <span className="mt-2 w-8 text-sm font-semibold text-slate-300">
+                    <span className="mt-2 w-14 shrink-0 text-sm font-semibold text-slate-300">
                       {"★".repeat(level)}
                     </span>
                     <textarea
@@ -427,40 +479,112 @@ export default function ScoringRules() {
               <p className="mt-1 text-sm text-slate-400">
                 Automatically approve or reject articles based on score.
               </p>
-              <div className="mt-4 flex flex-wrap gap-6">
-                <div className="flex items-center gap-3">
-                  <label className="text-sm text-slate-300">Auto-approve at score:</label>
-                  <select
-                    value={autoApprove}
-                    onChange={(e) => {
-                      setAutoApprove(parseInt(e.target.value));
-                      setHasChanges(true);
-                    }}
-                    className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200"
+              <div className="mt-4 space-y-4">
+                {/* Per-platform auto-post toggles */}
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                  Auto-post to platforms
+                </p>
+
+                {/* Telegram toggle (Active) */}
+                <div className="flex items-center justify-between rounded-xl border border-slate-700 bg-slate-950 px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <span className="text-lg">📨</span>
+                    <div>
+                      <p className="text-sm font-medium text-slate-200">Telegram</p>
+                      <p className="text-xs text-slate-500">Post to connected Telegram channel</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleTelegramToggle}
+                    disabled={isAutoPostTelegramLoading}
+                    className={`relative h-6 w-11 rounded-full transition-colors ${
+                      autoPostTelegram ? "bg-emerald-500" : "bg-slate-600"
+                    } ${isAutoPostTelegramLoading ? "opacity-50" : ""}`}
                   >
-                    {[3, 4, 5].map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ))}
-                  </select>
+                    <span
+                      className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+                        autoPostTelegram ? "translate-x-5" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
                 </div>
-                <div className="flex items-center gap-3">
-                  <label className="text-sm text-slate-300">Auto-reject at score:</label>
-                  <select
-                    value={autoReject}
-                    onChange={(e) => {
-                      setAutoReject(parseInt(e.target.value));
-                      setHasChanges(true);
-                    }}
-                    className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200"
+
+                {/* Facebook toggle (Coming Soon) */}
+                {/* TODO: Enable when FacebookProvider is implemented in packages/social/src/facebook.ts */}
+                <div className="flex items-center justify-between rounded-xl border border-slate-700/50 bg-slate-950/50 px-4 py-3 opacity-50">
+                  <div className="flex items-center gap-3">
+                    <span className="text-lg">📘</span>
+                    <div>
+                      <p className="text-sm font-medium text-slate-200">
+                        Facebook <span className="ml-2 text-xs text-slate-500">(Coming Soon)</span>
+                      </p>
+                      <p className="text-xs text-slate-500">Post to connected Facebook page</p>
+                    </div>
+                  </div>
+                  <button
+                    disabled
+                    className="relative h-6 w-11 cursor-not-allowed rounded-full bg-slate-700"
                   >
-                    {[1, 2, 3].map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ))}
-                  </select>
+                    <span className="absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-slate-500" />
+                  </button>
+                </div>
+
+                {/* LinkedIn toggle (Coming Soon) */}
+                {/* TODO: Enable when LinkedInProvider is implemented in packages/social/src/linkedin.ts */}
+                <div className="flex items-center justify-between rounded-xl border border-slate-700/50 bg-slate-950/50 px-4 py-3 opacity-50">
+                  <div className="flex items-center gap-3">
+                    <span className="text-lg">💼</span>
+                    <div>
+                      <p className="text-sm font-medium text-slate-200">
+                        LinkedIn <span className="ml-2 text-xs text-slate-500">(Coming Soon)</span>
+                      </p>
+                      <p className="text-xs text-slate-500">Post to connected LinkedIn page</p>
+                    </div>
+                  </div>
+                  <button
+                    disabled
+                    className="relative h-6 w-11 cursor-not-allowed rounded-full bg-slate-700"
+                  >
+                    <span className="absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-slate-500" />
+                  </button>
+                </div>
+
+                {/* Score thresholds */}
+                <div className="flex flex-wrap gap-6">
+                  <div className="flex items-center gap-3">
+                    <label className="text-sm text-slate-300">Auto-approve at score:</label>
+                    <select
+                      value={autoApprove}
+                      onChange={(e) => {
+                        setAutoApprove(parseInt(e.target.value));
+                        setHasChanges(true);
+                      }}
+                      className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200"
+                    >
+                      {[3, 4, 5].map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <label className="text-sm text-slate-300">Auto-reject at score:</label>
+                    <select
+                      value={autoReject}
+                      onChange={(e) => {
+                        setAutoReject(parseInt(e.target.value));
+                        setHasChanges(true);
+                      }}
+                      className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200"
+                    >
+                      {[1, 2, 3].map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               </div>
               <p className="mt-3 text-xs text-slate-500">

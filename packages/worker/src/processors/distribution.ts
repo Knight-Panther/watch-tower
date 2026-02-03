@@ -1,14 +1,48 @@
+/**
+ * Distribution Worker
+ *
+ * Handles immediate posting to social platforms for auto-approved articles.
+ * Currently supports Telegram. Facebook and LinkedIn are planned.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * TODO: To add Facebook support:
+ * 1. Create packages/social/src/facebook.ts implementing SocialProvider interface
+ * 2. Add FB_PAGE_ID, FB_ACCESS_TOKEN to .env and env schema
+ * 3. Add facebookConfig to DistributionDeps below
+ * 4. Create FacebookProvider instance in createDistributionWorker
+ * 5. Check isFacebookAutoPostEnabled() in llm-brain.ts
+ * 6. Add Facebook posting logic after Telegram in JOB_DISTRIBUTION_IMMEDIATE
+ * 7. Enable the Facebook toggle in ScoringRules.tsx (remove disabled/opacity)
+ * ─────────────────────────────────────────────────────────────────────────────
+ * TODO: To add LinkedIn support:
+ * 1. Create packages/social/src/linkedin.ts implementing SocialProvider interface
+ * 2. Add LINKEDIN_ORG_ID, LINKEDIN_ACCESS_TOKEN to .env and env schema
+ * 3. Add linkedinConfig to DistributionDeps below
+ * 4. Create LinkedInProvider instance in createDistributionWorker
+ * 5. Check isLinkedinAutoPostEnabled() in llm-brain.ts
+ * 6. Add LinkedIn posting logic after Telegram in JOB_DISTRIBUTION_IMMEDIATE
+ * 7. Enable the LinkedIn toggle in ScoringRules.tsx (remove disabled/opacity)
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+
 import { Worker } from "bullmq";
 import { sql } from "drizzle-orm";
 import { QUEUE_DISTRIBUTION, JOB_DISTRIBUTION_IMMEDIATE, logger } from "@watch-tower/shared";
 import type { Database } from "@watch-tower/db";
 import { createTelegramProvider, type TelegramConfig } from "@watch-tower/social";
+// TODO: Uncomment when Facebook/LinkedIn providers are implemented:
+// import { createFacebookProvider, type FacebookConfig } from "@watch-tower/social";
+// import { createLinkedinProvider, type LinkedinConfig } from "@watch-tower/social";
 import type { EventPublisher } from "../events.js";
 
 type DistributionDeps = {
   connection: { host: string; port: number };
   db: Database;
   telegramConfig: TelegramConfig;
+  // TODO: Add when Facebook is integrated:
+  // facebookConfig?: FacebookConfig;
+  // TODO: Add when LinkedIn is integrated:
+  // linkedinConfig?: LinkedinConfig;
   eventPublisher: EventPublisher;
 };
 
@@ -133,6 +167,32 @@ export const createDistributionWorker = ({
           { articleId, messageId: postResult.postId },
           "[distribution] posted to telegram",
         );
+
+        // ─────────────────────────────────────────────────────────────────────
+        // TODO: Add Facebook posting here when integrated:
+        // if (facebookConfig && await isFacebookAutoPostEnabled(db)) {
+        //   const fbText = facebook.formatSinglePost({ ... });
+        //   const fbResult = await facebook.post({ text: fbText });
+        //   if (fbResult.success) {
+        //     await eventPublisher.publish({
+        //       type: "article:posted",
+        //       data: { id: articleId, platform: "facebook", postId: fbResult.postId },
+        //     });
+        //   }
+        // }
+        // ─────────────────────────────────────────────────────────────────────
+        // TODO: Add LinkedIn posting here when integrated:
+        // if (linkedinConfig && await isLinkedinAutoPostEnabled(db)) {
+        //   const liText = linkedin.formatSinglePost({ ... });
+        //   const liResult = await linkedin.post({ text: liText });
+        //   if (liResult.success) {
+        //     await eventPublisher.publish({
+        //       type: "article:posted",
+        //       data: { id: articleId, platform: "linkedin", postId: liResult.postId },
+        //     });
+        //   }
+        // }
+        // ─────────────────────────────────────────────────────────────────────
 
         return {
           success: true,

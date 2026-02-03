@@ -21,6 +21,15 @@ const getConfigValue = async (deps: ApiDeps, key: string, fallback: number) => {
   return row ? Number(row.value) : fallback;
 };
 
+const getBooleanConfig = async (deps: ApiDeps, key: string, fallback: boolean) => {
+  const [row] = await deps.db
+    .select({ value: appConfig.value })
+    .from(appConfig)
+    .where(eq(appConfig.key, key));
+  if (!row) return fallback;
+  return row.value === true || row.value === "true";
+};
+
 const upsertConfig = async (deps: ApiDeps, key: string, value: number) => {
   const [row] = await deps.db
     .insert(appConfig)
@@ -28,6 +37,18 @@ const upsertConfig = async (deps: ApiDeps, key: string, value: number) => {
     .onConflictDoUpdate({
       target: appConfig.key,
       set: { value: String(value), updatedAt: new Date() },
+    })
+    .returning();
+  return row;
+};
+
+const upsertBooleanConfig = async (deps: ApiDeps, key: string, value: boolean) => {
+  const [row] = await deps.db
+    .insert(appConfig)
+    .values({ key, value, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: appConfig.key,
+      set: { value, updatedAt: new Date() },
     })
     .returning();
   return row;
@@ -158,6 +179,81 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       }
       await upsertConfig(deps, "post_deliveries_ttl_days", days);
       return { days };
+    },
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Auto-Post Settings (Per-Platform)
+  // When enabled, auto-approved articles are immediately posted to that platform.
+  // Each platform has its own toggle for granular control.
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  // ── Telegram (Active) ──
+  // Fully integrated via packages/social/src/telegram.ts
+  app.get("/config/auto-post-telegram", { preHandler: deps.requireApiKey }, async () => {
+    // Note: Also checks legacy key "auto_post_score5" for backward compatibility
+    const enabled = await getBooleanConfig(deps, "auto_post_telegram", true);
+    return { enabled };
+  });
+
+  app.patch<{ Body: { enabled: boolean } }>(
+    "/config/auto-post-telegram",
+    { preHandler: deps.requireApiKey },
+    async (request, reply) => {
+      const { enabled } = request.body ?? {};
+      if (typeof enabled !== "boolean") {
+        return reply.code(400).send({ error: "enabled must be a boolean" });
+      }
+      await upsertBooleanConfig(deps, "auto_post_telegram", enabled);
+      return { enabled };
+    },
+  );
+
+  // ── Facebook (Placeholder - Coming Soon) ──
+  // TODO: To enable Facebook auto-posting:
+  // 1. Implement FacebookProvider in packages/social/src/facebook.ts
+  // 2. Add Facebook Graph API credentials to env (FB_PAGE_ID, FB_ACCESS_TOKEN)
+  // 3. Update distribution.ts worker to check this config and post to Facebook
+  // 4. Enable the UI toggle in ScoringRules.tsx
+  app.get("/config/auto-post-facebook", { preHandler: deps.requireApiKey }, async () => {
+    const enabled = await getBooleanConfig(deps, "auto_post_facebook", false);
+    return { enabled };
+  });
+
+  app.patch<{ Body: { enabled: boolean } }>(
+    "/config/auto-post-facebook",
+    { preHandler: deps.requireApiKey },
+    async (request, reply) => {
+      const { enabled } = request.body ?? {};
+      if (typeof enabled !== "boolean") {
+        return reply.code(400).send({ error: "enabled must be a boolean" });
+      }
+      await upsertBooleanConfig(deps, "auto_post_facebook", enabled);
+      return { enabled };
+    },
+  );
+
+  // ── LinkedIn (Placeholder - Coming Soon) ──
+  // TODO: To enable LinkedIn auto-posting:
+  // 1. Implement LinkedInProvider in packages/social/src/linkedin.ts
+  // 2. Add LinkedIn API credentials to env (LINKEDIN_ORG_ID, LINKEDIN_ACCESS_TOKEN)
+  // 3. Update distribution.ts worker to check this config and post to LinkedIn
+  // 4. Enable the UI toggle in ScoringRules.tsx
+  app.get("/config/auto-post-linkedin", { preHandler: deps.requireApiKey }, async () => {
+    const enabled = await getBooleanConfig(deps, "auto_post_linkedin", false);
+    return { enabled };
+  });
+
+  app.patch<{ Body: { enabled: boolean } }>(
+    "/config/auto-post-linkedin",
+    { preHandler: deps.requireApiKey },
+    async (request, reply) => {
+      const { enabled } = request.body ?? {};
+      if (typeof enabled !== "boolean") {
+        return reply.code(400).send({ error: "enabled must be a boolean" });
+      }
+      await upsertBooleanConfig(deps, "auto_post_linkedin", enabled);
+      return { enabled };
     },
   );
 };

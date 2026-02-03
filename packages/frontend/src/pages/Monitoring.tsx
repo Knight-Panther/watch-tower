@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import type { StatsOverview, StatsSource } from "../api";
+import type { StatsOverview, StatsSource, ResetResult } from "../api";
+import { resetAllData } from "../api";
 import Spinner from "../components/Spinner";
 
 type MonitoringProps = {
@@ -66,6 +67,26 @@ export default function Monitoring({
   const [activeOnly, setActiveOnly] = useState(true);
   const [sectorFilter, setSectorFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetResult, setResetResult] = useState<ResetResult | null>(null);
+  const [resetError, setResetError] = useState<string | null>(null);
+
+  const handleReset = async () => {
+    setIsResetting(true);
+    setResetError(null);
+    try {
+      const result = await resetAllData();
+      setResetResult(result);
+      setShowResetModal(false);
+      // Refresh data after reset
+      onRefresh();
+    } catch (err) {
+      setResetError(err instanceof Error ? err.message : "Reset failed");
+    } finally {
+      setIsResetting(false);
+    }
+  };
 
   const sectors = useMemo(() => {
     const entries = new Map<string, string>();
@@ -132,6 +153,12 @@ export default function Monitoring({
               className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:border-slate-500"
             >
               Refresh
+            </button>
+            <button
+              onClick={() => setShowResetModal(true)}
+              className="rounded-full border border-red-800/60 bg-red-950/30 px-4 py-2 text-sm text-red-300 transition hover:border-red-600 hover:bg-red-950/50"
+            >
+              Reset Data
             </button>
           </div>
         </div>
@@ -322,6 +349,82 @@ export default function Monitoring({
           ) : null}
         </div>
       </section>
+
+      {/* Reset Success Message */}
+      {resetResult && (
+        <div className="fixed bottom-4 right-4 z-50 max-w-sm rounded-xl border border-emerald-700/50 bg-emerald-950/90 p-4 shadow-lg">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="font-medium text-emerald-200">Data Reset Complete</p>
+              <ul className="mt-2 space-y-1 text-xs text-emerald-300/80">
+                <li>Articles: {resetResult.cleared.articles}</li>
+                <li>Feed runs: {resetResult.cleared.feed_fetch_runs}</li>
+                <li>LLM telemetry: {resetResult.cleared.llm_telemetry}</li>
+                <li>Deliveries: {resetResult.cleared.post_deliveries}</li>
+                <li>Images: {resetResult.cleared.article_images}</li>
+                <li>Redis keys: {resetResult.cleared.redis_keys}</li>
+              </ul>
+            </div>
+            <button
+              onClick={() => setResetResult(null)}
+              className="text-emerald-400 hover:text-emerald-200"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Confirmation Modal */}
+      {showResetModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-red-300">Reset All Data?</h3>
+            <p className="mt-3 text-sm text-slate-300">
+              This will permanently delete:
+            </p>
+            <ul className="mt-2 space-y-1 text-sm text-slate-400">
+              <li>• All articles and their embeddings</li>
+              <li>• Feed fetch history</li>
+              <li>• LLM telemetry logs</li>
+              <li>• Scheduled and completed deliveries</li>
+              <li>• Generated images</li>
+              <li>• All queued jobs in Redis</li>
+            </ul>
+            <p className="mt-3 text-sm text-slate-300">
+              Configuration (sectors, sources, scoring rules) will be preserved.
+            </p>
+            {resetError && (
+              <p className="mt-3 text-sm text-red-400">{resetError}</p>
+            )}
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setShowResetModal(false);
+                  setResetError(null);
+                }}
+                disabled={isResetting}
+                className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 transition hover:border-slate-500 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleReset}
+                disabled={isResetting}
+                className="flex items-center gap-2 rounded-lg border border-red-700 bg-red-900/50 px-4 py-2 text-sm text-red-200 transition hover:bg-red-900 disabled:opacity-50"
+              >
+                {isResetting ? (
+                  <>
+                    <Spinner /> Resetting...
+                  </>
+                ) : (
+                  "Yes, Reset Everything"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

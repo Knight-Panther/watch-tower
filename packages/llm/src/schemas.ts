@@ -7,7 +7,11 @@ import { z } from "zod";
 export const ScoringResponseSchema = z.object({
   score: z.coerce.number().min(1).max(5).transform((v) => Math.round(v)),
   summary: z.string().max(500).optional().nullable(),
-  reasoning: z.string().max(500).optional(),
+  // Reasoning is for debugging only - allow longer text, truncate if needed
+  reasoning: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.length > 1000 ? v.slice(0, 1000) + "..." : v)),
 });
 
 export type ScoringResponse = z.infer<typeof ScoringResponseSchema>;

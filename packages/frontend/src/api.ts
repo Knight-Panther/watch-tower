@@ -884,3 +884,129 @@ export const previewScoringPrompt = async (
   }
   return res.json();
 };
+
+// ─── Auto-Post Config (Per-Platform) ─────────────────────────────────────────
+// Each platform has its own auto-post toggle. When enabled, auto-approved
+// articles (score >= auto_approve_threshold) are immediately posted to that platform.
+
+// ── Telegram (Active) ──
+export const getAutoPostTelegram = async (): Promise<boolean> => {
+  const res = await fetch(`${API_URL}/config/auto-post-telegram`, {
+    headers: authHeaders as Record<string, string>,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load Telegram auto-post setting");
+  }
+  const data = await res.json();
+  return data.enabled ?? true;
+};
+
+export const setAutoPostTelegram = async (enabled: boolean): Promise<boolean> => {
+  const res = await fetch(`${API_URL}/config/auto-post-telegram`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...(authHeaders as Record<string, string>) },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to update Telegram auto-post setting");
+  }
+  const data = await res.json();
+  return data.enabled ?? enabled;
+};
+
+// ── Facebook (Placeholder - Coming Soon) ──
+// TODO: Enable when Facebook Graph API integration is complete
+// To wire up:
+// 1. Implement FacebookProvider in packages/social/src/facebook.ts
+// 2. Add facebook case to distribution.ts worker
+// 3. Uncomment these functions and the UI toggle
+export const getAutoPostFacebook = async (): Promise<boolean> => {
+  const res = await fetch(`${API_URL}/config/auto-post-facebook`, {
+    headers: authHeaders as Record<string, string>,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load Facebook auto-post setting");
+  }
+  const data = await res.json();
+  return data.enabled ?? false; // Default OFF for new platforms
+};
+
+export const setAutoPostFacebook = async (enabled: boolean): Promise<boolean> => {
+  const res = await fetch(`${API_URL}/config/auto-post-facebook`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...(authHeaders as Record<string, string>) },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to update Facebook auto-post setting");
+  }
+  const data = await res.json();
+  return data.enabled ?? enabled;
+};
+
+// ── LinkedIn (Placeholder - Coming Soon) ──
+// TODO: Enable when LinkedIn API integration is complete
+// To wire up:
+// 1. Implement LinkedInProvider in packages/social/src/linkedin.ts
+// 2. Add linkedin case to distribution.ts worker
+// 3. Uncomment these functions and the UI toggle
+export const getAutoPostLinkedin = async (): Promise<boolean> => {
+  const res = await fetch(`${API_URL}/config/auto-post-linkedin`, {
+    headers: authHeaders as Record<string, string>,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load LinkedIn auto-post setting");
+  }
+  const data = await res.json();
+  return data.enabled ?? false; // Default OFF for new platforms
+};
+
+export const setAutoPostLinkedin = async (enabled: boolean): Promise<boolean> => {
+  const res = await fetch(`${API_URL}/config/auto-post-linkedin`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...(authHeaders as Record<string, string>) },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to update LinkedIn auto-post setting");
+  }
+  const data = await res.json();
+  return data.enabled ?? enabled;
+};
+
+// ─── Reset Data ──────────────────────────────────────────────────────────────
+
+export type ResetResult = {
+  success: boolean;
+  cleared: {
+    articles: number;
+    feed_fetch_runs: number;
+    llm_telemetry: number;
+    post_deliveries: number;
+    article_images: number;
+    redis_keys: number;
+  };
+};
+
+/**
+ * Reset all transient data (articles, telemetry, queues).
+ * Preserves configuration (sectors, sources, scoring rules, app config).
+ */
+export const resetAllData = async (): Promise<ResetResult> => {
+  const res = await fetch(`${API_URL}/reset`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(authHeaders as Record<string, string>) },
+    body: JSON.stringify({ confirm: true }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to reset data");
+  }
+  return res.json();
+};

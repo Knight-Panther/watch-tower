@@ -7,6 +7,7 @@ import {
   logger,
   buildScoringPrompt,
   defaultScoringConfig,
+  scoringConfigSchema,
   type ScoringConfig,
 } from "@watch-tower/shared";
 import type { Database } from "@watch-tower/db";
@@ -16,17 +17,37 @@ import { calculateLLMCost } from "@watch-tower/llm";
 import type { EventPublisher } from "../events.js";
 
 /**
- * Check if auto-posting for score 5 is enabled in app_config.
+ * Check if Telegram auto-posting is enabled in app_config.
  * Defaults to true if not set.
+ *
+ * Note: Checks both new key (auto_post_telegram) and legacy key (auto_post_score5)
+ * for backward compatibility during migration.
  */
-const isAutoPostEnabled = async (db: Database): Promise<boolean> => {
-  const [row] = await db
+const isTelegramAutoPostEnabled = async (db: Database): Promise<boolean> => {
+  // Try new key first
+  const [newRow] = await db
+    .select({ value: appConfig.value })
+    .from(appConfig)
+    .where(eq(appConfig.key, "auto_post_telegram"));
+  if (newRow) {
+    return newRow.value === true || newRow.value === "true";
+  }
+
+  // Fall back to legacy key for backward compatibility
+  const [legacyRow] = await db
     .select({ value: appConfig.value })
     .from(appConfig)
     .where(eq(appConfig.key, "auto_post_score5"));
-  if (!row) return true; // Default to enabled
-  return row.value === true || row.value === "true";
+  if (legacyRow) {
+    return legacyRow.value === true || legacyRow.value === "true";
+  }
+
+  return true; // Default to enabled
 };
+
+// TODO: Add similar functions when Facebook/LinkedIn are integrated:
+// const isFacebookAutoPostEnabled = async (db: Database): Promise<boolean> => { ... }
+// const isLinkedinAutoPostEnabled = async (db: Database): Promise<boolean> => { ... }
 
 type LLMBrainDeps = {
   connection: { host: string; port: number };
@@ -148,7 +169,7 @@ export const createLLMBrainWorker = ({
 
       /**
        * Resolves the scoring prompt for an article.
-       * Priority: structured config > legacy prompt_template > default config
+       * Priority: structured config (validated) > legacy prompt_template > default config
        */
       const resolvePrompt = (sectorId: string | null, sectorName: string | null): string | undefined => {
         if (!sectorId) return undefined;
@@ -156,9 +177,14 @@ export const createLLMBrainWorker = ({
         const rules = sectorRules.get(sectorId);
         if (!rules) return undefined;
 
-        // Priority 1: Structured config (new system)
-        if (rules.config && Object.keys(rules.config).length > 0) {
-          return buildScoringPrompt(rules.config, sectorName ?? "General");
+        // Priority 1: Structured config (new system) - validate to prevent worker crash
+        if (rules.config && typeof rules.config === "object" && Object.keys(rules.config).length > 0) {
+          const parsed = scoringConfigSchema.safeParse(rules.config);
+          if (parsed.success) {
+            return buildScoringPrompt(parsed.data, sectorName ?? "General");
+          }
+          // Invalid config in DB - log warning and fall through to legacy/default
+          logger.warn({ sectorId }, "[llm-brain] invalid score_criteria in DB, using fallback");
         }
 
         // Priority 2: Legacy prompt_template (backward compat)
@@ -221,13 +247,20 @@ export const createLLMBrainWorker = ({
         };
       };
 
-      // 5. Bulk update successes
+      // 5. Bulk update successes (optimized: single UPDATE + single INSERT instead of N+1)
       const scoringModel = llmProvider.model;
       const now = new Date();
 
       if (successes.length > 0) {
-        // Update articles one by one to avoid SQL escaping issues with raw VALUES
-        for (const r of successes) {
+        // Pre-compute stages for all articles
+        type ArticleUpdate = {
+          id: string;
+          score: number;
+          summary: string | null;
+          stage: string;
+          approvedAt: Date | null;
+        };
+        const updates: ArticleUpdate[] = successes.map((r) => {
           const thresholds = getThresholds(r.articleId);
           let stage: string;
           let approvedAt: Date | null = null;
@@ -238,58 +271,80 @@ export const createLLMBrainWorker = ({
           } else if (r.score <= thresholds.reject) {
             stage = "rejected";
           } else {
-            stage = "scored"; // Manual review needed
+            stage = "scored";
           }
+          return { id: r.articleId, score: r.score, summary: r.summary ?? null, stage, approvedAt };
+        });
 
-          await db.execute(sql`
-            UPDATE articles
-            SET
-              importance_score = ${r.score},
-              llm_summary = ${r.summary ?? null},
-              scoring_model = ${scoringModel},
-              scored_at = ${now},
-              approved_at = ${approvedAt},
-              pipeline_stage = ${stage}
-            WHERE id = ${r.articleId}::uuid
-          `);
+        // Bulk UPDATE using UNNEST (PostgreSQL array functions) - single query for all articles
+        // Convert to PostgreSQL array literal format: {val1,val2,val3}
+        const idsLiteral = `{${updates.map((u) => u.id).join(",")}}`;
+        const scoresLiteral = `{${updates.map((u) => u.score).join(",")}}`;
+        // Escape summaries for PostgreSQL array: double quotes, escape internal quotes
+        const escapeSummary = (s: string | null) => {
+          if (s === null) return "NULL";
+          // Escape backslashes and double quotes, wrap in double quotes
+          return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+        };
+        const summariesLiteral = `{${updates.map((u) => escapeSummary(u.summary)).join(",")}}`;
+        const stagesLiteral = `{${updates.map((u) => u.stage).join(",")}}`;
+        const approvedAtsLiteral = `{${updates.map((u) => u.approvedAt?.toISOString() ?? "NULL").join(",")}}`;
 
-          // Log telemetry for cost tracking
-          if (r.usage) {
-            // Determine actual provider/model used (fallback or primary)
-            // Extract primary provider name from combined "deepseek→openai" format
-            const primaryProvider = llmProvider.name.split("→")[0];
+        await db.execute(sql`
+          UPDATE articles AS a
+          SET
+            importance_score = bulk.score,
+            llm_summary = bulk.summary,
+            scoring_model = ${scoringModel},
+            scored_at = ${now},
+            approved_at = bulk.approved_at,
+            pipeline_stage = bulk.stage
+          FROM (
+            SELECT
+              UNNEST(${idsLiteral}::uuid[]) AS id,
+              UNNEST(${scoresLiteral}::int[]) AS score,
+              UNNEST(${summariesLiteral}::text[]) AS summary,
+              UNNEST(${stagesLiteral}::text[]) AS stage,
+              UNNEST(${approvedAtsLiteral}::timestamptz[]) AS approved_at
+          ) AS bulk
+          WHERE a.id = bulk.id
+        `);
+
+        // Bulk INSERT telemetry (single query)
+        const primaryProvider = llmProvider.name.split("→")[0];
+        const telemetryRows = successes
+          .filter((r) => r.usage)
+          .map((r) => {
             const actualProvider = r.isFallback
               ? (llmProvider.fallbackName ?? primaryProvider)
               : primaryProvider;
             const actualModel = r.isFallback
               ? (llmProvider.fallbackModel ?? llmProvider.model)
               : llmProvider.model;
+            return {
+              articleId: r.articleId,
+              operation: "score_and_summarize" as const,
+              provider: actualProvider,
+              model: actualModel,
+              isFallback: r.isFallback ?? false,
+              inputTokens: r.usage!.inputTokens,
+              outputTokens: r.usage!.outputTokens,
+              totalTokens: r.usage!.totalTokens,
+              costMicrodollars: calculateLLMCost(
+                actualProvider,
+                actualModel,
+                r.usage!.inputTokens,
+                r.usage!.outputTokens,
+              ),
+              latencyMs: r.latencyMs,
+            };
+          });
 
-            // Wrap telemetry insert in try/catch - telemetry failure should not abort pipeline
-            try {
-              await db.insert(llmTelemetry).values({
-                articleId: r.articleId,
-                operation: "score_and_summarize",
-                provider: actualProvider,
-                model: actualModel,
-                isFallback: r.isFallback ?? false,
-                inputTokens: r.usage.inputTokens,
-                outputTokens: r.usage.outputTokens,
-                totalTokens: r.usage.totalTokens,
-                costMicrodollars: calculateLLMCost(
-                  actualProvider,
-                  actualModel,
-                  r.usage.inputTokens,
-                  r.usage.outputTokens,
-                ),
-                latencyMs: r.latencyMs,
-              });
-            } catch (telemetryErr) {
-              logger.error(
-                `[llm-brain] failed to log telemetry for ${r.articleId}, continuing`,
-                telemetryErr,
-              );
-            }
+        if (telemetryRows.length > 0) {
+          try {
+            await db.insert(llmTelemetry).values(telemetryRows);
+          } catch (telemetryErr) {
+            logger.error("[llm-brain] failed to log telemetry batch, continuing", telemetryErr);
           }
         }
 
@@ -321,11 +376,13 @@ export const createLLMBrainWorker = ({
               data: { id: result.articleId },
             });
 
-            // Queue for immediate distribution (score 5 auto-approved)
-            // Only if auto_post_score5 is enabled in app_config
+            // Queue for immediate distribution to Telegram (auto-approved articles)
+            // Only if auto_post_telegram is enabled in app_config
+            // TODO: When FB/LinkedIn are integrated, check their settings too and
+            // pass platform info to distribution worker: { articleId, platforms: ['telegram', 'facebook'] }
             if (distributionQueue) {
-              const autoPostEnabled = await isAutoPostEnabled(db);
-              if (autoPostEnabled) {
+              const telegramEnabled = await isTelegramAutoPostEnabled(db);
+              if (telegramEnabled) {
                 await distributionQueue.add(
                   JOB_DISTRIBUTION_IMMEDIATE,
                   { articleId: result.articleId },
@@ -333,12 +390,12 @@ export const createLLMBrainWorker = ({
                 );
                 logger.info(
                   { articleId: result.articleId, score: result.score },
-                  "[llm-brain] queued for immediate distribution",
+                  "[llm-brain] queued for immediate Telegram distribution",
                 );
               } else {
                 logger.debug(
                   { articleId: result.articleId, score: result.score },
-                  "[llm-brain] auto-post disabled, skipping distribution",
+                  "[llm-brain] Telegram auto-post disabled, skipping",
                 );
               }
             }
