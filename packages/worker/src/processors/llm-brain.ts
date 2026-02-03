@@ -5,6 +5,9 @@ import {
   JOB_LLM_SCORE_BATCH,
   JOB_DISTRIBUTION_IMMEDIATE,
   logger,
+  buildScoringPrompt,
+  defaultScoringConfig,
+  type ScoringConfig,
 } from "@watch-tower/shared";
 import type { Database } from "@watch-tower/db";
 import { llmTelemetry, appConfig } from "@watch-tower/db";
@@ -47,7 +50,8 @@ type ClaimedArticle = {
 };
 
 type SectorRule = {
-  promptTemplate: string;
+  promptTemplate: string | null;
+  config: ScoringConfig | null;
   autoApprove: number;
   autoReject: number;
 };
@@ -119,6 +123,7 @@ export const createLLMBrainWorker = ({
           SELECT
             sector_id as "sectorId",
             prompt_template as "promptTemplate",
+            score_criteria as "config",
             auto_approve_threshold as "autoApprove",
             auto_reject_threshold as "autoReject"
           FROM scoring_rules
@@ -127,17 +132,43 @@ export const createLLMBrainWorker = ({
 
         for (const row of rulesResult.rows as {
           sectorId: string;
-          promptTemplate: string;
+          promptTemplate: string | null;
+          config: ScoringConfig | null;
           autoApprove: number;
           autoReject: number;
         }[]) {
           sectorRules.set(row.sectorId, {
             promptTemplate: row.promptTemplate,
+            config: row.config,
             autoApprove: row.autoApprove,
             autoReject: row.autoReject,
           });
         }
       }
+
+      /**
+       * Resolves the scoring prompt for an article.
+       * Priority: structured config > legacy prompt_template > default config
+       */
+      const resolvePrompt = (sectorId: string | null, sectorName: string | null): string | undefined => {
+        if (!sectorId) return undefined;
+
+        const rules = sectorRules.get(sectorId);
+        if (!rules) return undefined;
+
+        // Priority 1: Structured config (new system)
+        if (rules.config && Object.keys(rules.config).length > 0) {
+          return buildScoringPrompt(rules.config, sectorName ?? "General");
+        }
+
+        // Priority 2: Legacy prompt_template (backward compat)
+        if (rules.promptTemplate) {
+          return rules.promptTemplate;
+        }
+
+        // Priority 3: Default config
+        return buildScoringPrompt(defaultScoringConfig, sectorName ?? "General");
+      };
 
       // Enrich articles with sector names
       const articles: ClaimedArticle[] = claimedArticles.map((a) => ({
@@ -148,14 +179,14 @@ export const createLLMBrainWorker = ({
       logger.info(`[llm-brain] claimed ${articles.length} articles for scoring`);
 
       // 2. Build scoring requests with sector-specific prompts
+      // Uses compile-on-read: structured config > legacy prompt > default
       const requests: ScoringRequest[] = articles.map((a) => {
-        const rules = a.sectorId ? sectorRules.get(a.sectorId) : undefined;
         return {
           articleId: a.id,
           title: a.title,
           contentSnippet: a.contentSnippet,
           sectorName: a.sectorName ?? undefined,
-          promptTemplate: rules?.promptTemplate, // Use custom prompt if available
+          promptTemplate: resolvePrompt(a.sectorId, a.sectorName),
         };
       });
 

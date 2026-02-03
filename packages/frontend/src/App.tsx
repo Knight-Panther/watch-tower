@@ -46,6 +46,7 @@ import Home from "./pages/Home";
 import SectorManagement from "./pages/SectorManagement";
 import Articles from "./pages/Articles";
 import Scheduled from "./pages/Scheduled";
+import ScoringRules from "./pages/ScoringRules";
 
 const emptySourceForm = {
   url: "",
@@ -869,6 +870,7 @@ export default function App() {
         />
         <Route path="/articles" element={<Articles />} />
         <Route path="/scheduled" element={<Scheduled />} />
+        <Route path="/scoring-rules" element={<ScoringRules />} />
         <Route
           path="/settings"
           element={

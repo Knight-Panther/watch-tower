@@ -8,6 +8,7 @@ const navItems = [
   { to: "/articles", label: "Articles" },
   { to: "/scheduled", label: "Scheduled" },
   { to: "/sectors", label: "Sectors" },
+  { to: "/scoring-rules", label: "Scoring" },
   { to: "/settings", label: "DB/Telemetry" },
 ];
 

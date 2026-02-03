@@ -780,3 +780,107 @@ export const getScheduledStats = async (): Promise<ScheduledStats> => {
   }
   return res.json();
 };
+
+// ─── Scoring Rules Types ────────────────────────────────────────────────────
+
+export type ScoringConfig = {
+  priorities: string[];
+  ignore: string[];
+  score1: string;
+  score2: string;
+  score3: string;
+  score4: string;
+  score5: string;
+  summaryMaxChars: number;
+  summaryTone: "professional" | "casual" | "urgent";
+  summaryLanguage: string;
+  summaryStyle: string;
+};
+
+export type ScoringRule = {
+  id?: string;
+  sector_id: string;
+  sector_name: string;
+  sector_slug?: string;
+  config: ScoringConfig;
+  is_legacy: boolean;
+  auto_approve_threshold: number;
+  auto_reject_threshold: number;
+  prompt_preview?: string;
+  legacy_prompt?: string | null;
+  updated_at: string | null;
+};
+
+// ─── Scoring Rules API ──────────────────────────────────────────────────────
+
+export const listScoringRules = async (): Promise<ScoringRule[]> => {
+  const res = await fetch(`${API_URL}/scoring-rules`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load scoring rules");
+  }
+  return res.json();
+};
+
+export const getScoringRule = async (sectorId: string): Promise<ScoringRule> => {
+  const res = await fetch(`${API_URL}/scoring-rules/${sectorId}`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load scoring rule");
+  }
+  return res.json();
+};
+
+export const saveScoringRule = async (
+  sectorId: string,
+  config: ScoringConfig,
+  autoApprove: number,
+  autoReject: number,
+): Promise<{ success: boolean; prompt_preview: string }> => {
+  const res = await fetch(`${API_URL}/scoring-rules/${sectorId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify({
+      config,
+      auto_approve_threshold: autoApprove,
+      auto_reject_threshold: autoReject,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to save scoring rule");
+  }
+  return res.json();
+};
+
+export const deleteScoringRule = async (sectorId: string): Promise<{ success: boolean }> => {
+  const res = await fetch(`${API_URL}/scoring-rules/${sectorId}`, {
+    method: "DELETE",
+    headers: authHeaders as Record<string, string>,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to delete scoring rule");
+  }
+  return res.json();
+};
+
+export const previewScoringPrompt = async (
+  config: ScoringConfig,
+  sectorName: string,
+): Promise<{ prompt: string }> => {
+  const res = await fetch(`${API_URL}/scoring-rules/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(authHeaders as Record<string, string>) },
+    body: JSON.stringify({ config, sector_name: sectorName }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to preview prompt");
+  }
+  return res.json();
+};
