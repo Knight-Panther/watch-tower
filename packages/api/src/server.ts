@@ -92,7 +92,7 @@ export const buildApp = async () => {
   const app = Fastify({ logger: true });
   await app.register(cors, {
     origin: true,
-    methods: ["GET", "POST", "PATCH", "DELETE"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
   });
 
   // Rate limiting: disabled in dev, 200/min in production
