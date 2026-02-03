@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import Spinner from "../components/Spinner";
+import ConfirmModal from "../components/ConfirmModal";
 import {
   listSectors,
   getScoringRule,
@@ -57,6 +58,9 @@ export default function ScoringRules() {
   // Tag input state
   const [priorityInput, setPriorityInput] = useState("");
   const [ignoreInput, setIgnoreInput] = useState("");
+
+  // Modal state
+  const [showResetModal, setShowResetModal] = useState(false);
 
   // Per-platform auto-post settings (global, not per-sector)
   const [autoPostTelegram, setAutoPostTelegram] = useState(true);
@@ -201,13 +205,13 @@ export default function ScoringRules() {
   };
 
   // Reset to defaults
-  const handleReset = async () => {
+  const handleReset = () => {
     if (!selectedSectorId) return;
+    setShowResetModal(true);
+  };
 
-    if (!confirm("Reset to default settings? This will delete any custom rules for this sector.")) {
-      return;
-    }
-
+  const confirmReset = async () => {
+    setShowResetModal(false);
     setIsSaving(true);
     try {
       await deleteScoringRule(selectedSectorId);
@@ -627,6 +631,19 @@ export default function ScoringRules() {
             </div>
           </section>
         </div>
+      )}
+
+      {/* Reset Confirmation Modal */}
+      {showResetModal && (
+        <ConfirmModal
+          title="Reset to Defaults"
+          message="This will delete any custom rules for this sector. Are you sure?"
+          confirmLabel="Reset"
+          cancelLabel="Cancel"
+          variant="danger"
+          onConfirm={confirmReset}
+          onCancel={() => setShowResetModal(false)}
+        />
       )}
     </div>
   );
