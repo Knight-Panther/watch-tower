@@ -8,6 +8,8 @@ import {
   JOB_MAINTENANCE_SCHEDULE,
   QUEUE_MAINTENANCE,
   logger,
+  getDefaultTemplate,
+  type PostTemplateConfig,
 } from "@watch-tower/shared";
 import {
   type Database,
@@ -291,6 +293,17 @@ const processScheduledPosts = async (db: Database, telegramConfig?: TelegramConf
   // Create telegram provider
   const telegram = createTelegramProvider(telegramConfig);
 
+  // Fetch template for Telegram account (if customized)
+  const telegramTemplateResult = await db.execute(sql`
+    SELECT post_template as "postTemplate"
+    FROM social_accounts
+    WHERE platform = 'telegram' AND is_active = true
+    LIMIT 1
+  `);
+  const telegramTemplate: PostTemplateConfig =
+    (telegramTemplateResult.rows[0] as { postTemplate: PostTemplateConfig | null } | undefined)
+      ?.postTemplate ?? getDefaultTemplate("telegram");
+
   // 2. Process each claimed delivery
   for (const delivery of claimed) {
     try {
@@ -328,13 +341,16 @@ const processScheduledPosts = async (db: Database, telegramConfig?: TelegramConf
         continue;
       }
 
-      // Format and post
-      const text = telegram.formatSinglePost({
-        title: article.title,
-        summary: article.llmSummary || article.title,
-        url: article.url,
-        sector: article.sectorName || "News",
-      });
+      // Format and post using template
+      const text = telegram.formatPost(
+        {
+          title: article.title,
+          summary: article.llmSummary || article.title,
+          url: article.url,
+          sector: article.sectorName || "News",
+        },
+        telegramTemplate,
+      );
 
       const postResult = await telegram.post({ text });
 

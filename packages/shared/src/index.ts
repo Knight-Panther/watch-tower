@@ -1,5 +1,6 @@
 export * from "./schemas/env.js";
 export * from "./schemas/scoring-config.js";
+export * from "./schemas/post-template.js";
 export * from "./queues.js";
 export * from "./logger.js";
 export * from "./events.js";

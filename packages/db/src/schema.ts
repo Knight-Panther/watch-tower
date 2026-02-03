@@ -115,6 +115,7 @@ export const socialAccounts = pgTable("social_accounts", {
   platform: text("platform").notNull(),
   accountName: text("account_name").notNull(),
   credentials: jsonb("credentials").notNull().default({}),
+  postTemplate: jsonb("post_template"), // PostTemplateConfig from @watch-tower/shared
   isActive: boolean("is_active").notNull().default(true),
   sectorIds: uuid("sector_ids")
     .array()

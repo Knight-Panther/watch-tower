@@ -1,4 +1,4 @@
-import { logger } from "@watch-tower/shared";
+import { logger, getDefaultTemplate, type PostTemplateConfig } from "@watch-tower/shared";
 import type { SocialProvider, PostRequest, PostResult, ArticleForPost } from "../types.js";
 
 export type TelegramConfig = {
@@ -156,14 +156,44 @@ export const createTelegramProvider = (config: TelegramConfig): SocialProvider =
       }
     },
 
+    formatPost(article: ArticleForPost, template: PostTemplateConfig): string {
+      const parts: string[] = [];
+
+      // 1. Breaking label + Sector tag (first line)
+      if (template.showBreakingLabel || template.showSectorTag) {
+        let header = "";
+        if (template.showBreakingLabel) {
+          header += `${template.breakingEmoji} ${template.breakingText}`;
+          if (template.showSectorTag) {
+            header += `: ${escapeHtml(article.sector.toUpperCase())}`;
+          }
+        } else if (template.showSectorTag) {
+          header += `📰 ${escapeHtml(article.sector.toUpperCase())}`;
+        }
+        parts.push(`<b>${header}</b>`);
+      }
+
+      // 2. Title
+      if (template.showTitle) {
+        parts.push(`<b>${escapeHtml(article.title)}</b>`);
+      }
+
+      // 3. Summary
+      if (template.showSummary && article.summary) {
+        parts.push(escapeHtml(article.summary));
+      }
+
+      // 4. URL
+      if (template.showUrl) {
+        parts.push(`<a href="${escapeUrl(article.url)}">${escapeHtml(template.urlLinkText)}</a>`);
+      }
+
+      return parts.join("\n\n");
+    },
+
+    // Legacy method delegates to formatPost with default template
     formatSinglePost(article: ArticleForPost): string {
-      return `<b>🔴 BREAKING: ${escapeHtml(article.sector.toUpperCase())}</b>
-
-<b>${escapeHtml(article.title)}</b>
-
-${escapeHtml(article.summary)}
-
-<a href="${escapeUrl(article.url)}">Read more →</a>`;
+      return this.formatPost(article, getDefaultTemplate("telegram"));
     },
 
     formatDigestPost(articles: ArticleForPost[], sector: string): string {

@@ -9,6 +9,7 @@ const navItems = [
   { to: "/scheduled", label: "Scheduled" },
   { to: "/sectors", label: "Sectors" },
   { to: "/scoring-rules", label: "Scoring" },
+  { to: "/post-templates", label: "Templates" },
   { to: "/settings", label: "DB/Telemetry" },
 ];
 

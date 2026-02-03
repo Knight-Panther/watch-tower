@@ -27,7 +27,13 @@
 
 import { Worker } from "bullmq";
 import { sql } from "drizzle-orm";
-import { QUEUE_DISTRIBUTION, JOB_DISTRIBUTION_IMMEDIATE, logger } from "@watch-tower/shared";
+import {
+  QUEUE_DISTRIBUTION,
+  JOB_DISTRIBUTION_IMMEDIATE,
+  logger,
+  getDefaultTemplate,
+  type PostTemplateConfig,
+} from "@watch-tower/shared";
 import type { Database } from "@watch-tower/db";
 import { createTelegramProvider, type TelegramConfig } from "@watch-tower/social";
 // TODO: Uncomment when Facebook/LinkedIn providers are implemented:
@@ -118,13 +124,27 @@ export const createDistributionWorker = ({
 
         const article = claimedArticles[0];
 
-        // Format and post to Telegram
-        const text = telegram.formatSinglePost({
-          title: article.title,
-          summary: article.llmSummary || article.title,
-          url: article.url,
-          sector: article.sectorName || "News",
-        });
+        // Fetch template for Telegram account (if customized)
+        const telegramTemplateResult = await db.execute(sql`
+          SELECT post_template as "postTemplate"
+          FROM social_accounts
+          WHERE platform = 'telegram' AND is_active = true
+          LIMIT 1
+        `);
+        const telegramTemplate: PostTemplateConfig =
+          (telegramTemplateResult.rows[0] as { postTemplate: PostTemplateConfig | null } | undefined)
+            ?.postTemplate ?? getDefaultTemplate("telegram");
+
+        // Format and post to Telegram using template
+        const text = telegram.formatPost(
+          {
+            title: article.title,
+            summary: article.llmSummary || article.title,
+            url: article.url,
+            sector: article.sectorName || "News",
+          },
+          telegramTemplate,
+        );
 
         const postResult = await telegram.post({ text });
 

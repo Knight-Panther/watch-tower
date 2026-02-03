@@ -112,3 +112,10 @@ Respond with ONLY valid JSON: {"score": 3, "summary": "Summary here.", "reasonin
   2  -- auto_reject_threshold
 FROM sectors s
 ON CONFLICT (sector_id) DO NOTHING;
+
+-- Seed a Telegram social account so the Templates page has data
+-- Credentials are empty since actual tokens come from environment variables
+-- The template can be customized via the frontend Templates page
+INSERT INTO social_accounts (platform, account_name, credentials, is_active, rate_limit_per_hour) VALUES
+  ('telegram', 'Primary Telegram Channel', '{}', true, 4)
+ON CONFLICT DO NOTHING;

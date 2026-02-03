@@ -1010,3 +1010,99 @@ export const resetAllData = async (): Promise<ResetResult> => {
   }
   return res.json();
 };
+
+// ─── Post Templates ──────────────────────────────────────────────────────────
+
+export interface PostTemplateConfig {
+  showBreakingLabel: boolean;
+  showSectorTag: boolean;
+  showTitle: boolean;
+  showSummary: boolean;
+  showUrl: boolean;
+  showImage: boolean;
+  breakingEmoji: string;
+  breakingText: string;
+  urlLinkText: string;
+}
+
+export interface SocialAccount {
+  id: string;
+  platform: string;
+  account_name: string;
+  is_active: boolean;
+  post_template: PostTemplateConfig;
+  is_template_custom: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export const listSocialAccounts = async (): Promise<SocialAccount[]> => {
+  const res = await fetch(`${API_URL}/social-accounts`, {
+    headers: authHeaders as Record<string, string>,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to fetch social accounts");
+  }
+  return res.json();
+};
+
+export const getPostTemplate = async (
+  accountId: string,
+): Promise<{ platform: string; template: PostTemplateConfig; is_default: boolean }> => {
+  const res = await fetch(`${API_URL}/social-accounts/${accountId}/template`, {
+    headers: authHeaders as Record<string, string>,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to fetch template");
+  }
+  return res.json();
+};
+
+export const savePostTemplate = async (
+  accountId: string,
+  template: PostTemplateConfig,
+): Promise<{ success: boolean; platform: string; template: PostTemplateConfig }> => {
+  const res = await fetch(`${API_URL}/social-accounts/${accountId}/template`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...(authHeaders as Record<string, string>) },
+    body: JSON.stringify({ template }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to save template");
+  }
+  return res.json();
+};
+
+export const resetPostTemplate = async (
+  accountId: string,
+): Promise<{ success: boolean; message: string; template: PostTemplateConfig }> => {
+  const res = await fetch(`${API_URL}/social-accounts/${accountId}/template`, {
+    method: "DELETE",
+    headers: authHeaders as Record<string, string>,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to reset template");
+  }
+  return res.json();
+};
+
+export const previewPost = async (
+  platform: string,
+  template: PostTemplateConfig,
+  article: { title: string; summary: string; url: string; sector: string },
+): Promise<{ platform: string; formatted_text: string; char_count: number }> => {
+  const res = await fetch(`${API_URL}/social-accounts/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(authHeaders as Record<string, string>) },
+    body: JSON.stringify({ platform, template, article }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to preview post");
+  }
+  return res.json();
+};
