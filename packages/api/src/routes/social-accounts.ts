@@ -8,6 +8,14 @@ import {
 } from "@watch-tower/shared";
 import type { ApiDeps } from "../server.js";
 
+type PlatformUsage = {
+  platform: string;
+  current: number;
+  limit: number;
+  percentage: number;
+  status: "ok" | "warning" | "blocked";
+};
+
 export const registerSocialAccountRoutes = (app: FastifyInstance, deps: ApiDeps) => {
   // ─────────────────────────────────────────────────────────────────────────────
   // GET /social-accounts - List all configured accounts with templates
@@ -20,6 +28,7 @@ export const registerSocialAccountRoutes = (app: FastifyInstance, deps: ApiDeps)
       platform: a.platform,
       account_name: a.accountName,
       is_active: a.isActive,
+      rate_limit_per_hour: a.rateLimitPerHour ?? 4,
       post_template: (a.postTemplate as PostTemplateConfig | null) ?? getDefaultTemplate(a.platform),
       is_template_custom: a.postTemplate !== null,
       created_at: a.createdAt,
@@ -211,6 +220,98 @@ export const registerSocialAccountRoutes = (app: FastifyInstance, deps: ApiDeps)
         platform,
         formatted_text: formattedText,
         char_count: formattedText.length,
+      };
+    },
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // GET /social-accounts/usage - Get rate limit usage for all platforms
+  // ─────────────────────────────────────────────────────────────────────────────
+  app.get("/social-accounts/usage", { preHandler: deps.requireApiKey }, async () => {
+    // Get all active platforms with their limits
+    const accounts = await deps.db
+      .select({
+        platform: socialAccounts.platform,
+        limit: socialAccounts.rateLimitPerHour,
+      })
+      .from(socialAccounts)
+      .where(eq(socialAccounts.isActive, true));
+
+    // Get current usage from Redis for each platform
+    const usage: PlatformUsage[] = await Promise.all(
+      accounts.map(async (acc) => {
+        const key = `rate_limit:${acc.platform}`;
+        const now = Date.now();
+        const windowStart = now - 60 * 60 * 1000;
+
+        // Clean old entries and count
+        await deps.redis.zremrangebyscore(key, 0, windowStart);
+        const current = await deps.redis.zcard(key);
+        const limit = acc.limit ?? 4;
+        const percentage = limit > 0 ? Math.round((current / limit) * 100) : 0;
+
+        let status: PlatformUsage["status"] = "ok";
+        if (current >= limit) {
+          status = "blocked";
+        } else if (current >= limit * 0.8) {
+          status = "warning";
+        }
+
+        return {
+          platform: acc.platform,
+          current,
+          limit,
+          percentage,
+          status,
+        };
+      }),
+    );
+
+    return { usage };
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PATCH /social-accounts/:id/rate-limit - Update rate limit for an account
+  // ─────────────────────────────────────────────────────────────────────────────
+  app.patch<{
+    Params: { id: string };
+    Body: { rate_limit_per_hour: number };
+  }>(
+    "/social-accounts/:id/rate-limit",
+    { preHandler: deps.requireApiKey },
+    async (req, reply) => {
+      const { id } = req.params;
+      const { rate_limit_per_hour } = req.body ?? {};
+
+      if (rate_limit_per_hour === undefined || typeof rate_limit_per_hour !== "number") {
+        return reply.status(400).send({ error: "rate_limit_per_hour is required and must be a number" });
+      }
+
+      if (rate_limit_per_hour < 1 || rate_limit_per_hour > 100) {
+        return reply.status(400).send({ error: "rate_limit_per_hour must be between 1 and 100" });
+      }
+
+      const [account] = await deps.db
+        .select()
+        .from(socialAccounts)
+        .where(eq(socialAccounts.id, id));
+
+      if (!account) {
+        return reply.status(404).send({ error: "Social account not found" });
+      }
+
+      await deps.db
+        .update(socialAccounts)
+        .set({
+          rateLimitPerHour: rate_limit_per_hour,
+          updatedAt: new Date(),
+        })
+        .where(eq(socialAccounts.id, id));
+
+      return {
+        success: true,
+        platform: account.platform,
+        rate_limit_per_hour,
       };
     },
   );

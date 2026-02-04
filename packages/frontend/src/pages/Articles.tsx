@@ -95,18 +95,19 @@ export default function Articles() {
   };
 
   const handleSchedule = async (data: {
-    platform: string;
+    platforms: string[];
     scheduledAt: Date;
     summary?: string;
   }) => {
     if (!schedulingArticle) return;
     try {
       await scheduleArticle(schedulingArticle.id, {
-        platform: data.platform,
+        platforms: data.platforms,
         scheduled_at: data.scheduledAt.toISOString(),
         llm_summary: data.summary,
       });
-      toast.success("Article scheduled for posting");
+      const platformList = data.platforms.join(", ");
+      toast.success(`Article scheduled for ${platformList}`);
       setSchedulingArticle(null);
       loadArticles();
     } catch (err) {

@@ -8,8 +8,9 @@ const navItems = [
   { to: "/articles", label: "Articles" },
   { to: "/scheduled", label: "Scheduled" },
   { to: "/sectors", label: "Sectors" },
-  { to: "/scoring-rules", label: "Scoring" },
-  { to: "/post-templates", label: "Templates" },
+  { to: "/scoring-rules", label: "Scoring Rules" },
+  { to: "/post-templates", label: "Post Formats" },
+  { to: "/platform-settings", label: "Platforms" },
   { to: "/settings", label: "DB/Telemetry" },
 ];
 

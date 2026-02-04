@@ -358,27 +358,28 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     return { updated: updated.length, ids: updated.map((u) => u.id) };
   });
 
-  // POST /articles/:id/schedule - Approve article and schedule delivery
+  // POST /articles/:id/schedule - Approve article and schedule delivery to one or more platforms
   app.post<{
     Params: { id: string };
     Body: {
-      platform: string;
+      platforms: string[]; // Array of platforms
       scheduled_at?: string; // ISO string, null = immediate
       llm_summary?: string;
     };
   }>("/articles/:id/schedule", { preHandler: deps.requireApiKey }, async (request, reply) => {
     const { id } = request.params;
-    const { platform, scheduled_at, llm_summary } = request.body ?? {};
+    const { platforms, scheduled_at, llm_summary } = request.body ?? {};
 
-    if (!platform) {
-      return reply.code(400).send({ error: "platform is required" });
+    if (!platforms || !Array.isArray(platforms) || platforms.length === 0) {
+      return reply.code(400).send({ error: "platforms array is required and must not be empty" });
     }
 
     const validPlatforms = ["telegram", "facebook", "linkedin"];
-    if (!validPlatforms.includes(platform)) {
-      return reply
-        .code(400)
-        .send({ error: `Invalid platform. Must be one of: ${validPlatforms.join(", ")}` });
+    const invalidPlatforms = platforms.filter((p) => !validPlatforms.includes(p));
+    if (invalidPlatforms.length > 0) {
+      return reply.code(400).send({
+        error: `Invalid platform(s): ${invalidPlatforms.join(", ")}. Must be one of: ${validPlatforms.join(", ")}`,
+      });
     }
 
     // Check article exists and is in valid state for scheduling
@@ -398,22 +399,26 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       });
     }
 
-    // Check for existing scheduled delivery for same article/platform
-    const existingDelivery = await deps.db
-      .select({ id: postDeliveries.id })
+    // Check for existing scheduled deliveries for same article on requested platforms
+    const existingDeliveries = await deps.db
+      .select({ id: postDeliveries.id, platform: postDeliveries.platform })
       .from(postDeliveries)
       .where(
         and(
           eq(postDeliveries.articleId, id),
-          eq(postDeliveries.platform, platform),
+          inArray(postDeliveries.platform, platforms),
           inArray(postDeliveries.status, ["scheduled", "posting"]),
         ),
       );
 
-    if (existingDelivery.length > 0) {
+    if (existingDeliveries.length > 0) {
+      const existingPlatforms = existingDeliveries.map((d) => d.platform).join(", ");
       return reply.code(409).send({
-        error: `Article already has a pending ${platform} delivery`,
-        deliveryId: existingDelivery[0].id,
+        error: `Article already has pending delivery for: ${existingPlatforms}`,
+        existingDeliveries: existingDeliveries.map((d) => ({
+          id: d.id,
+          platform: d.platform,
+        })),
       });
     }
 
@@ -431,23 +436,25 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
 
     await deps.db.update(articles).set(articleUpdates).where(eq(articles.id, id));
 
-    // Create delivery record
-    const [delivery] = await deps.db
-      .insert(postDeliveries)
-      .values({
-        articleId: id,
-        platform,
-        scheduledAt,
-        status: "scheduled",
-      })
-      .returning();
+    // Create delivery records for all requested platforms
+    const deliveryValues = platforms.map((platform) => ({
+      articleId: id,
+      platform,
+      scheduledAt,
+      status: "scheduled" as const,
+    }));
+
+    const deliveries = await deps.db.insert(postDeliveries).values(deliveryValues).returning();
 
     return {
-      delivery_id: delivery.id,
+      deliveries: deliveries.map((d) => ({
+        delivery_id: d.id,
+        platform: d.platform,
+        scheduled_at: d.scheduledAt?.toISOString(),
+        status: d.status,
+      })),
       article_id: id,
-      platform,
-      scheduled_at: scheduledAt.toISOString(),
-      status: "scheduled",
+      platforms,
     };
   });
 

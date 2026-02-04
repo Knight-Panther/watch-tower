@@ -4,18 +4,18 @@ import type { Article } from "../api";
 type ScheduleModalProps = {
   article: Article;
   onClose: () => void;
-  onSchedule: (data: { platform: string; scheduledAt: Date; summary?: string }) => Promise<void>;
+  onSchedule: (data: { platforms: string[]; scheduledAt: Date; summary?: string }) => Promise<void>;
 };
 
 const PLATFORMS = [
-  { id: "telegram", label: "Telegram", enabled: true },
-  { id: "facebook", label: "Facebook", enabled: false, comingSoon: true },
-  { id: "linkedin", label: "LinkedIn", enabled: false, comingSoon: true },
+  { id: "telegram", label: "Telegram", icon: "📨" },
+  { id: "facebook", label: "Facebook", icon: "📘" },
+  { id: "linkedin", label: "LinkedIn", icon: "💼" },
 ];
 
 export default function ScheduleModal({ article, onClose, onSchedule }: ScheduleModalProps) {
   const [summary, setSummary] = useState(article.llm_summary || "");
-  const [selectedPlatform, setSelectedPlatform] = useState("telegram");
+  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(["telegram"]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Default to now + 1 hour, rounded to next 15 min
@@ -39,12 +39,23 @@ export default function ScheduleModal({ article, onClose, onSchedule }: Schedule
     defaultDate.toTimeString().slice(0, 5), // HH:MM
   );
 
+  const togglePlatform = (platformId: string) => {
+    setSelectedPlatforms((prev) =>
+      prev.includes(platformId)
+        ? prev.filter((p) => p !== platformId)
+        : [...prev, platformId]
+    );
+  };
+
   const handleSubmit = async () => {
+    if (selectedPlatforms.length === 0) {
+      return;
+    }
     setIsSubmitting(true);
     try {
       const scheduledAt = new Date(`${date}T${time}`);
       await onSchedule({
-        platform: selectedPlatform,
+        platforms: selectedPlatforms,
         scheduledAt,
         summary: summary !== article.llm_summary ? summary : undefined,
       });
@@ -54,10 +65,13 @@ export default function ScheduleModal({ article, onClose, onSchedule }: Schedule
   };
 
   const handlePostNow = async () => {
+    if (selectedPlatforms.length === 0) {
+      return;
+    }
     setIsSubmitting(true);
     try {
       await onSchedule({
-        platform: selectedPlatform,
+        platforms: selectedPlatforms,
         scheduledAt: new Date(), // Immediate
         summary: summary !== article.llm_summary ? summary : undefined,
       });
@@ -130,42 +144,45 @@ export default function ScheduleModal({ article, onClose, onSchedule }: Schedule
           </span>
         </div>
 
-        {/* Platform selection */}
+        {/* Platform selection (multi-select) */}
         <div className="mt-4">
-          <label className="block text-sm font-medium text-slate-400 mb-2">Platform</label>
+          <label className="block text-sm font-medium text-slate-400 mb-2">
+            Platforms <span className="text-slate-500">(select one or more)</span>
+          </label>
           <div className="space-y-2">
-            {PLATFORMS.map((platform) => (
-              <label
-                key={platform.id}
-                className={`flex items-center gap-3 rounded-xl border px-4 py-3 cursor-pointer transition ${
-                  selectedPlatform === platform.id && platform.enabled
-                    ? "border-emerald-500/50 bg-emerald-500/10"
-                    : "border-slate-800 bg-slate-900/50"
-                } ${!platform.enabled ? "opacity-50 cursor-not-allowed" : "hover:border-slate-600"}`}
-              >
-                <input
-                  type="radio"
-                  name="platform"
-                  value={platform.id}
-                  checked={selectedPlatform === platform.id}
-                  onChange={(e) => platform.enabled && setSelectedPlatform(e.target.value)}
-                  disabled={!platform.enabled}
-                  className="h-4 w-4 text-emerald-500 focus:ring-emerald-500 bg-slate-800 border-slate-600"
-                />
-                <span className="text-sm text-slate-200">{platform.label}</span>
-                {platform.comingSoon && (
-                  <span className="ml-auto text-xs text-slate-500">(coming soon)</span>
-                )}
-              </label>
-            ))}
+            {PLATFORMS.map((platform) => {
+              const isSelected = selectedPlatforms.includes(platform.id);
+              return (
+                <label
+                  key={platform.id}
+                  className={`flex items-center gap-3 rounded-xl border px-4 py-3 cursor-pointer transition ${
+                    isSelected
+                      ? "border-emerald-500/50 bg-emerald-500/10"
+                      : "border-slate-800 bg-slate-900/50 hover:border-slate-600"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => togglePlatform(platform.id)}
+                    className="h-4 w-4 rounded text-emerald-500 focus:ring-emerald-500 bg-slate-800 border-slate-600"
+                  />
+                  <span className="text-lg">{platform.icon}</span>
+                  <span className="text-sm text-slate-200">{platform.label}</span>
+                </label>
+              );
+            })}
           </div>
+          {selectedPlatforms.length === 0 && (
+            <p className="mt-2 text-xs text-amber-400">Select at least one platform</p>
+          )}
         </div>
 
         {/* Actions */}
         <div className="mt-6 flex justify-between">
           <button
             onClick={handlePostNow}
-            disabled={isSubmitting}
+            disabled={isSubmitting || selectedPlatforms.length === 0}
             className="rounded-full border border-amber-500/50 px-4 py-2 text-sm text-amber-200 hover:bg-amber-500/10 disabled:opacity-50"
           >
             Post Now
@@ -180,7 +197,7 @@ export default function ScheduleModal({ article, onClose, onSchedule }: Schedule
             </button>
             <button
               onClick={handleSubmit}
-              disabled={isSubmitting}
+              disabled={isSubmitting || selectedPlatforms.length === 0}
               className="rounded-full bg-emerald-500/20 px-4 py-2 text-sm font-semibold text-emerald-200 hover:bg-emerald-500/30 disabled:opacity-50"
             >
               {isSubmitting ? "Scheduling..." : "Schedule"}

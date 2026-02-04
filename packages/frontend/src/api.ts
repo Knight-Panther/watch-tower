@@ -681,16 +681,19 @@ export type ScheduledStats = {
 export const scheduleArticle = async (
   articleId: string,
   payload: {
-    platform: string;
+    platforms: string[];
     scheduled_at?: string;
     llm_summary?: string;
   },
 ): Promise<{
-  delivery_id: string;
+  deliveries: Array<{
+    delivery_id: string;
+    platform: string;
+    scheduled_at: string;
+    status: string;
+  }>;
   article_id: string;
-  platform: string;
-  scheduled_at: string;
-  status: string;
+  platforms: string[];
 }> => {
   const res = await fetch(`${API_URL}/articles/${articleId}/schedule`, {
     method: "POST",
@@ -1030,6 +1033,7 @@ export interface SocialAccount {
   platform: string;
   account_name: string;
   is_active: boolean;
+  rate_limit_per_hour: number;
   post_template: PostTemplateConfig;
   is_template_custom: boolean;
   created_at: string;
@@ -1103,6 +1107,42 @@ export const previewPost = async (
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || "Failed to preview post");
+  }
+  return res.json();
+};
+
+// ─── Rate Limit Usage ────────────────────────────────────────────────────────
+
+export type PlatformUsage = {
+  platform: string;
+  current: number;
+  limit: number;
+  percentage: number;
+  status: "ok" | "warning" | "blocked";
+};
+
+export const getSocialAccountsUsage = async (): Promise<{ usage: PlatformUsage[] }> => {
+  const res = await fetch(`${API_URL}/social-accounts/usage`, {
+    headers: authHeaders as Record<string, string>,
+  });
+  if (!res.ok) {
+    throw new Error("Failed to load usage stats");
+  }
+  return res.json();
+};
+
+export const updateSocialAccountRateLimit = async (
+  accountId: string,
+  rateLimitPerHour: number,
+): Promise<{ success: boolean; platform: string; rate_limit_per_hour: number }> => {
+  const res = await fetch(`${API_URL}/social-accounts/${accountId}/rate-limit`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...(authHeaders as Record<string, string>) },
+    body: JSON.stringify({ rate_limit_per_hour: rateLimitPerHour }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to update rate limit");
   }
   return res.json();
 };
