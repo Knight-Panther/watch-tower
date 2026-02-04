@@ -19,9 +19,29 @@ export type ArticleForPost = {
   sector: string;
 };
 
+export interface HealthCheckResult {
+  platform: string;
+  healthy: boolean;
+  error?: string;
+
+  // Token expiry (Facebook only - from API; LinkedIn calculated from firstSeenAt)
+  tokenExpiresAt?: Date;
+
+  // Platform rate limits (captured from response headers)
+  rateLimit?: {
+    remaining?: number; // LinkedIn: X-RateLimit-Remaining
+    limit?: number; // LinkedIn: X-RateLimit-Limit
+    percent?: number; // Facebook: X-App-Usage call_count
+    resetsAt?: Date; // LinkedIn: X-RateLimit-Reset
+  };
+
+  checkedAt: Date;
+}
+
 export interface SocialProvider {
   readonly name: string;
   post(request: PostRequest): Promise<PostResult>;
+  healthCheck(): Promise<HealthCheckResult>;
 
   // Template-aware formatting (preferred)
   formatPost(article: ArticleForPost, template: PostTemplateConfig): string;

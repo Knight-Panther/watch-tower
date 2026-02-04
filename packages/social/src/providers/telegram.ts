@@ -1,5 +1,11 @@
 import { logger, getDefaultTemplate, type PostTemplateConfig } from "@watch-tower/shared";
-import type { SocialProvider, PostRequest, PostResult, ArticleForPost } from "../types.js";
+import type {
+  SocialProvider,
+  PostRequest,
+  PostResult,
+  ArticleForPost,
+  HealthCheckResult,
+} from "../types.js";
 
 export type TelegramConfig = {
   botToken: string;
@@ -152,6 +158,48 @@ export const createTelegramProvider = (config: TelegramConfig): SocialProvider =
           postId: "",
           success: false,
           error,
+        };
+      }
+    },
+
+    async healthCheck(): Promise<HealthCheckResult> {
+      try {
+        const response = await fetchWithTimeout(`${baseUrl}/getMe`, { method: "GET" }, timeoutMs);
+
+        const data = (await response.json()) as { ok: boolean; description?: string };
+
+        if (!data.ok) {
+          return {
+            platform: "telegram",
+            healthy: false,
+            error: sanitizeError(data.description || "Unknown error"),
+            checkedAt: new Date(),
+          };
+        }
+
+        return {
+          platform: "telegram",
+          healthy: true,
+          checkedAt: new Date(),
+          // Telegram: no rate limit headers, tokens don't expire
+        };
+      } catch (err) {
+        let error: string;
+        if (err instanceof Error) {
+          if (err.name === "AbortError") {
+            error = `Request timeout after ${timeoutMs}ms`;
+          } else {
+            error = sanitizeError(err.message);
+          }
+        } else {
+          error = "Unknown error";
+        }
+
+        return {
+          platform: "telegram",
+          healthy: false,
+          error,
+          checkedAt: new Date(),
         };
       }
     },

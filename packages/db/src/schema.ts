@@ -233,3 +233,28 @@ export const appConfig = pgTable("app_config", {
   value: jsonb("value").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ─── Platform Health ─────────────────────────────────────────────────────────
+
+export const platformHealth = pgTable("platform_health", {
+  platform: text("platform").primaryKey(), // 'telegram' | 'facebook' | 'linkedin'
+  healthy: boolean("healthy").notNull().default(false),
+  error: text("error"),
+
+  // Token tracking
+  tokenExpiresAt: timestamp("token_expires_at", { withTimezone: true }),
+  tokenFirstSeenAt: timestamp("token_first_seen_at", { withTimezone: true }),
+  tokenHash: text("token_hash"), // SHA256 of token - detect rotation
+
+  // Platform API rate limits (informational - captured from health check response)
+  rateLimitRemaining: integer("rate_limit_remaining"),
+  rateLimitMax: integer("rate_limit_max"),
+  rateLimitPercent: integer("rate_limit_percent"), // Facebook: 0-100
+  rateLimitResetsAt: timestamp("rate_limit_resets_at", { withTimezone: true }),
+
+  // Timestamps
+  lastCheckAt: timestamp("last_check_at", { withTimezone: true }).notNull(),
+  lastPostAt: timestamp("last_post_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

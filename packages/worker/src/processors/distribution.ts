@@ -25,6 +25,7 @@ import {
 } from "@watch-tower/social";
 import type { EventPublisher } from "../events.js";
 import type { RateLimiter } from "../utils/rate-limiter.js";
+import { isPlatformHealthy, updateLastPostAt } from "../utils/platform-health.js";
 
 type DistributionDeps = {
   connection: { host: string; port: number };
@@ -177,6 +178,18 @@ export const createDistributionWorker = ({
             continue;
           }
 
+          // Emergency brake: check platform health before posting
+          const isHealthy = await isPlatformHealthy(db, name);
+          if (!isHealthy) {
+            logger.warn({ articleId, platform: name }, "[distribution] platform unhealthy, skipping");
+            results.push({
+              platform: name,
+              success: false,
+              error: "Platform marked unhealthy - skipping",
+            });
+            continue;
+          }
+
           // Check rate limit before posting
           const limit = await getRateLimitForPlatform(db, name);
           const rateCheck = await rateLimiter.checkAndRecord(name, limit);
@@ -221,6 +234,8 @@ export const createDistributionWorker = ({
 
           if (postResult.success) {
             anySuccess = true;
+            // Update platform health lastPostAt (successful post proves platform works)
+            await updateLastPostAt(db, name);
             await eventPublisher.publish({
               type: "article:posted",
               data: { id: articleId, platform: name, postId: postResult.postId },

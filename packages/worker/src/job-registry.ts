@@ -4,6 +4,7 @@ import {
   JOB_MAINTENANCE_SCHEDULE,
   JOB_SEMANTIC_BATCH,
   JOB_LLM_SCORE_BATCH,
+  JOB_PLATFORM_HEALTH_CHECK,
   logger,
 } from "@watch-tower/shared";
 
@@ -46,6 +47,12 @@ export const ensureRepeatableJobs = async ({
       name: JOB_MAINTENANCE_SCHEDULE,
       jobId: JOB_MAINTENANCE_SCHEDULE,
       every: 30 * 1000, // 30 seconds
+    },
+    {
+      queue: maintenanceQueue,
+      name: JOB_PLATFORM_HEALTH_CHECK,
+      jobId: JOB_PLATFORM_HEALTH_CHECK,
+      every: 2 * 60 * 60 * 1000, // 2 hours
     },
   ];
 

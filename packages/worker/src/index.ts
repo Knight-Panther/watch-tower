@@ -7,6 +7,7 @@ import {
   baseEnvSchema,
   JOB_MAINTENANCE_CLEANUP,
   JOB_MAINTENANCE_SCHEDULE,
+  JOB_PLATFORM_HEALTH_CHECK,
   JOB_SEMANTIC_BATCH,
   JOB_LLM_SCORE_BATCH,
   QUEUE_INGEST,
@@ -358,6 +359,23 @@ const main = async () => {
   // Run scheduler immediately on startup
   await maintenanceQueue.add(JOB_MAINTENANCE_SCHEDULE, {}, { jobId: "schedule-startup" });
 
+  // Platform health check: recurring every 2 hours + immediate startup check
+  // 2h interval catches token issues before most scheduled posts fail
+  if (hasAnyPlatform) {
+    await maintenanceQueue.add(
+      JOB_PLATFORM_HEALTH_CHECK,
+      {},
+      { repeat: { every: 2 * 60 * 60 * 1000 }, jobId: JOB_PLATFORM_HEALTH_CHECK },
+    );
+    // Run health check immediately at startup to validate credentials
+    await maintenanceQueue.add(
+      JOB_PLATFORM_HEALTH_CHECK,
+      {},
+      { jobId: `health-startup-${Date.now()}` },
+    );
+    logger.info("[worker] platform health check scheduled (immediate + every 2h)");
+  }
+
   // Set up semantic dedup recurring job (every 60 seconds)
   if (semanticDedupWorker) {
     await semanticDedupQueue.add(
@@ -385,14 +403,15 @@ const main = async () => {
     // To drain: enable LLM, or manually delete jobs from queue.
   }
 
-  // Distribution worker status
+  // Distribution worker status with detailed credential info
   if (distributionWorker) {
-    const platforms = [
-      telegramConfig && "telegram",
-      facebookConfig && "facebook",
-      linkedinConfig && "linkedin",
+    const platformDetails = [
+      telegramConfig && `telegram (chat: ${telegramConfig.defaultChatId})`,
+      facebookConfig && `facebook (page: ${facebookConfig.pageId})`,
+      linkedinConfig &&
+        `linkedin (${linkedinConfig.authorType}: ${linkedinConfig.authorId})`,
     ].filter(Boolean);
-    logger.info(`[worker] distribution enabled (${platforms.join(", ")})`);
+    logger.info(`[worker] distribution enabled: ${platformDetails.join(", ")}`);
   } else {
     logger.info("[worker] distribution disabled (no social platform credentials configured)");
   }

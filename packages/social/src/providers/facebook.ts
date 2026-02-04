@@ -1,5 +1,11 @@
 import { getDefaultTemplate, type PostTemplateConfig } from "@watch-tower/shared";
-import type { SocialProvider, PostRequest, PostResult, ArticleForPost } from "../types.js";
+import type {
+  SocialProvider,
+  PostRequest,
+  PostResult,
+  ArticleForPost,
+  HealthCheckResult,
+} from "../types.js";
 
 export type FacebookConfig = {
   pageId: string;
@@ -107,6 +113,79 @@ export const createFacebookProvider = (config: FacebookConfig): SocialProvider =
           postId: "",
           success: false,
           error,
+        };
+      }
+    },
+
+    async healthCheck(): Promise<HealthCheckResult> {
+      try {
+        // Use debug_token to check token validity and get expiry
+        const debugUrl = `${GRAPH_API_BASE}/debug_token?input_token=${accessToken}&access_token=${accessToken}`;
+
+        const response = await fetchWithTimeout(debugUrl, { method: "GET" }, timeoutMs);
+        const result = (await response.json()) as {
+          data?: { is_valid: boolean; expires_at?: number };
+          error?: { message: string };
+        };
+
+        if (result.error || !result.data?.is_valid) {
+          return {
+            platform: "facebook",
+            healthy: false,
+            error: sanitizeError(result.error?.message || "Token invalid"),
+            checkedAt: new Date(),
+          };
+        }
+
+        // Parse rate limit headers (X-App-Usage)
+        const appUsage = response.headers.get("X-App-Usage");
+        let rateLimit: HealthCheckResult["rateLimit"];
+        if (appUsage) {
+          try {
+            const usage = JSON.parse(appUsage) as {
+              call_count?: number;
+              total_cputime?: number;
+              total_time?: number;
+            };
+            rateLimit = {
+              percent: Math.max(usage.call_count || 0, usage.total_cputime || 0, usage.total_time || 0),
+            };
+          } catch {
+            // Ignore parse errors
+          }
+        }
+
+        // Get token expiry from debug_token response
+        // Handle expires_at = 0 as "never expires" (long-lived page tokens)
+        const expiresAt =
+          result.data.expires_at && result.data.expires_at > 0
+            ? new Date(result.data.expires_at * 1000)
+            : undefined;
+
+        return {
+          platform: "facebook",
+          healthy: true,
+          tokenExpiresAt: expiresAt,
+          rateLimit,
+          checkedAt: new Date(),
+        };
+      } catch (err) {
+        let error: string;
+        if (err instanceof Error) {
+          if (err.name === "AbortError") {
+            error = `Request timeout after ${timeoutMs}ms`;
+          } else {
+            error = sanitizeError(err.message);
+          }
+        } else {
+          error = "Unknown error";
+        }
+
+        return {
+          platform: "facebook",
+          healthy: false,
+          error,
+          checkedAt: new Date(),
         };
       }
     },

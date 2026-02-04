@@ -6,6 +6,7 @@ import {
   JOB_DISTRIBUTION_IMMEDIATE,
   JOB_MAINTENANCE_CLEANUP,
   JOB_MAINTENANCE_SCHEDULE,
+  JOB_PLATFORM_HEALTH_CHECK,
   QUEUE_MAINTENANCE,
   logger,
   getDefaultTemplate,
@@ -34,6 +35,12 @@ import {
 import type { Queue } from "bullmq";
 import { ensureRepeatableJobs } from "../job-registry.js";
 import type { RateLimiter } from "../utils/rate-limiter.js";
+import {
+  hashToken,
+  upsertPlatformHealth,
+  isPlatformHealthy,
+  updateLastPostAt,
+} from "../utils/platform-health.js";
 
 type MaintenanceDeps = {
   connection: { host: string; port: number };
@@ -357,6 +364,26 @@ const processScheduledPosts = async (
         continue;
       }
 
+      // Emergency brake: check platform health before posting
+      const isHealthy = await isPlatformHealthy(db, delivery.platform);
+      if (!isHealthy) {
+        logger.warn(
+          { deliveryId: delivery.id, platform: delivery.platform },
+          "[post-scheduler] platform unhealthy, rescheduling",
+        );
+        // Reschedule for 1 hour later
+        const retryAt = new Date(Date.now() + 60 * 60 * 1000);
+        await db
+          .update(postDeliveries)
+          .set({
+            status: "scheduled",
+            scheduledAt: retryAt,
+            errorMessage: "Platform unhealthy, retrying in 1 hour",
+          })
+          .where(eq(postDeliveries.id, delivery.id));
+        continue;
+      }
+
       // Check rate limit before posting
       const limit = await getRateLimitForPlatform(db, delivery.platform);
       const rateCheck = await rateLimiter.checkAndRecord(delivery.platform, limit);
@@ -451,6 +478,9 @@ const processScheduledPosts = async (
         .set({ pipelineStage: "posted" })
         .where(eq(articles.id, delivery.articleId));
 
+      // Update platform health lastPostAt (successful post proves platform works)
+      await updateLastPostAt(db, delivery.platform);
+
       logger.info(
         {
           deliveryId: delivery.id,
@@ -490,6 +520,11 @@ export const createMaintenanceWorker = ({
     facebook: facebookConfig ? createFacebookProvider(facebookConfig) : undefined,
     linkedin: linkedinConfig ? createLinkedInProvider(linkedinConfig) : undefined,
   };
+
+  // Compute LinkedIn token hash once at startup for rotation detection
+  const linkedinTokenHash = linkedinConfig?.accessToken
+    ? hashToken(linkedinConfig.accessToken)
+    : undefined;
 
   return new Worker(
     QUEUE_MAINTENANCE,
@@ -588,6 +623,31 @@ export const createMaintenanceWorker = ({
         await runScheduledIngests(db, ingestQueue);
         // Process any scheduled posts that are due
         await processScheduledPosts(db, providers, rateLimiter);
+        return;
+      }
+
+      if (job.name === JOB_PLATFORM_HEALTH_CHECK) {
+        logger.debug("[maintenance] running platform health checks");
+
+        for (const [name, provider] of Object.entries(providers)) {
+          if (!provider) continue;
+
+          try {
+            const result = await provider.healthCheck();
+            // Pass token hash for LinkedIn rotation detection
+            const tokenHash = name === "linkedin" ? linkedinTokenHash : undefined;
+            await upsertPlatformHealth(db, result, tokenHash);
+
+            if (result.healthy) {
+              logger.info({ platform: name }, "[health-check] passed");
+            } else {
+              logger.warn({ platform: name, error: result.error }, "[health-check] failed");
+            }
+          } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : "Unknown error";
+            logger.error({ platform: name, error: errorMsg }, "[health-check] error");
+          }
+        }
         return;
       }
     },

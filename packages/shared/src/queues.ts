@@ -12,6 +12,7 @@ export const JOB_LLM_SCORE_BATCH = "llm-score-batch";
 export const JOB_DISTRIBUTION_IMMEDIATE = "distribution-immediate";
 export const JOB_MAINTENANCE_CLEANUP = "maintenance-cleanup";
 export const JOB_MAINTENANCE_SCHEDULE = "maintenance-schedule";
+export const JOB_PLATFORM_HEALTH_CHECK = "platform-health-check";
 
 // Redis pub/sub channels for real-time events
 export const REDIS_CHANNEL_EVENTS = "watch-tower:events";

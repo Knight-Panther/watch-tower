@@ -1,5 +1,11 @@
 import { getDefaultTemplate, type PostTemplateConfig } from "@watch-tower/shared";
-import type { SocialProvider, PostRequest, PostResult, ArticleForPost } from "../types.js";
+import type {
+  SocialProvider,
+  PostRequest,
+  PostResult,
+  ArticleForPost,
+  HealthCheckResult,
+} from "../types.js";
 
 export type LinkedInConfig = {
   accessToken: string;
@@ -128,6 +134,102 @@ export const createLinkedInProvider = (config: LinkedInConfig): SocialProvider =
           postId: "",
           success: false,
           error,
+        };
+      }
+    },
+
+    async healthCheck(): Promise<HealthCheckResult> {
+      try {
+        // LinkedIn API scope issue: /me requires 'profile' or 'openid' scope
+        // Many apps only have 'w_member_social' (posting) scope
+        // Strategy: Try /userinfo first (OpenID), then fall back to organization endpoint
+
+        // Attempt 1: Try /v2/userinfo (OpenID Connect - works with 'openid' scope)
+        let response = await fetchWithTimeout(
+          `${LINKEDIN_API_BASE}/userinfo`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          },
+          timeoutMs,
+        );
+
+        // If userinfo fails (no openid scope), try organization endpoint for org accounts
+        if (!response.ok && authorType === "organization") {
+          response = await fetchWithTimeout(
+            `${LINKEDIN_API_BASE}/organizations/${authorId}`,
+            {
+              method: "GET",
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                "X-Restli-Protocol-Version": "2.0.0",
+              },
+            },
+            timeoutMs,
+          );
+        }
+
+        // If still failing, try a minimal call to validate token is at least valid
+        // by checking if we get 401 (invalid token) vs 403 (valid but no permission)
+        if (!response.ok) {
+          const status = response.status;
+
+          // 401 = token invalid/expired, 403 = token valid but missing scope
+          // For 403, the token itself is valid - posting may still work
+          if (status === 403) {
+            return {
+              platform: "linkedin",
+              healthy: true, // Token valid, just missing profile scope
+              checkedAt: new Date(),
+              // Note: We can't get rate limit headers without profile access
+            };
+          }
+
+          const errorData = (await response.json().catch(() => ({}))) as { message?: string };
+          return {
+            platform: "linkedin",
+            healthy: false,
+            error: sanitizeError(errorData.message || `HTTP ${status}`),
+            checkedAt: new Date(),
+          };
+        }
+
+        // Parse rate limit headers (may not always be present)
+        const limitHeader = response.headers.get("X-RateLimit-Limit");
+        const remainingHeader = response.headers.get("X-RateLimit-Remaining");
+        const resetHeader = response.headers.get("X-RateLimit-Reset");
+
+        const rateLimit: HealthCheckResult["rateLimit"] = {};
+        if (limitHeader) rateLimit.limit = parseInt(limitHeader, 10);
+        if (remainingHeader) rateLimit.remaining = parseInt(remainingHeader, 10);
+        if (resetHeader) rateLimit.resetsAt = new Date(parseInt(resetHeader, 10) * 1000);
+
+        return {
+          platform: "linkedin",
+          healthy: true,
+          rateLimit: Object.keys(rateLimit).length > 0 ? rateLimit : undefined,
+          checkedAt: new Date(),
+          // Note: tokenExpiresAt calculated in worker from tokenFirstSeenAt + 60 days
+        };
+      } catch (err) {
+        let error: string;
+        if (err instanceof Error) {
+          if (err.name === "AbortError") {
+            error = `Request timeout after ${timeoutMs}ms`;
+          } else {
+            error = sanitizeError(err.message);
+          }
+        } else {
+          error = "Unknown error";
+        }
+
+        return {
+          platform: "linkedin",
+          healthy: false,
+          error,
+          checkedAt: new Date(),
         };
       }
     },

@@ -1146,3 +1146,39 @@ export const updateSocialAccountRateLimit = async (
   }
   return res.json();
 };
+
+// ─── Platform Health ──────────────────────────────────────────────────────────
+
+export type PlatformHealth = {
+  platform: string;
+  healthy: boolean;
+  status: "active" | "expiring" | "expired" | "error";
+  error: string | null;
+  expiresAt: string | null;
+  daysRemaining?: number;
+  lastCheck: string;
+  lastPost: string | null;
+  rateLimit: {
+    remaining: number | null;
+    limit: number | null;
+    percent: number | null;
+    resetsAt: string | null;
+  };
+};
+
+export const getPlatformHealth = async (): Promise<PlatformHealth[]> => {
+  const res = await fetch(`${API_URL}/health/platforms`, {
+    headers: authHeaders as Record<string, string>,
+  });
+  if (!res.ok) throw new Error("Failed to fetch platform health");
+  const data = await res.json();
+  return data.platforms;
+};
+
+export const refreshPlatformHealth = async (): Promise<void> => {
+  const res = await fetch(`${API_URL}/health/platforms/refresh`, {
+    method: "POST",
+    headers: authHeaders as Record<string, string>,
+  });
+  if (!res.ok) throw new Error("Failed to trigger health check");
+};
