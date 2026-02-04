@@ -22,9 +22,18 @@ import {
   llmTelemetry,
   articleImages,
 } from "@watch-tower/db";
-import { createTelegramProvider, type TelegramConfig } from "@watch-tower/social";
+import {
+  createTelegramProvider,
+  createFacebookProvider,
+  createLinkedInProvider,
+  type TelegramConfig,
+  type FacebookConfig,
+  type LinkedInConfig,
+  type SocialProvider,
+} from "@watch-tower/social";
 import type { Queue } from "bullmq";
 import { ensureRepeatableJobs } from "../job-registry.js";
+import type { RateLimiter } from "../utils/rate-limiter.js";
 
 type MaintenanceDeps = {
   connection: { host: string; port: number };
@@ -32,10 +41,13 @@ type MaintenanceDeps = {
   ingestQueue: Queue;
   distributionQueue?: Queue;
   telegramConfig?: TelegramConfig;
+  facebookConfig?: FacebookConfig;
+  linkedinConfig?: LinkedInConfig;
   // Queues for self-healing job registration
   maintenanceQueue: Queue;
   semanticDedupQueue?: Queue;
   llmQueue?: Queue;
+  rateLimiter: RateLimiter;
 };
 
 const getConfigNumber = async (db: Database, key: string, fallback: number) => {
@@ -259,13 +271,54 @@ type ClaimedDelivery = {
   platform: string;
 };
 
+// Helper: Get template for platform from social_accounts
+async function getTemplateForPlatform(
+  db: Database,
+  platform: string,
+): Promise<PostTemplateConfig> {
+  const result = await db.execute(sql`
+    SELECT post_template as "postTemplate"
+    FROM social_accounts
+    WHERE platform = ${platform} AND is_active = true
+    LIMIT 1
+  `);
+  return (
+    (result.rows[0] as { postTemplate: PostTemplateConfig | null } | undefined)?.postTemplate ??
+    getDefaultTemplate(platform)
+  );
+}
+
+// Helper: Get rate limit for platform from social_accounts
+async function getRateLimitForPlatform(db: Database, platform: string): Promise<number> {
+  const result = await db.execute(sql`
+    SELECT rate_limit_per_hour as "limit"
+    FROM social_accounts
+    WHERE platform = ${platform} AND is_active = true
+    LIMIT 1
+  `);
+  // Default rate limits per platform if not configured
+  const defaults: Record<string, number> = { telegram: 20, facebook: 1, linkedin: 4 };
+  return (result.rows[0] as { limit: number } | undefined)?.limit ?? defaults[platform] ?? 4;
+}
+
+type PlatformProviders = {
+  telegram?: SocialProvider;
+  facebook?: SocialProvider;
+  linkedin?: SocialProvider;
+};
+
 /**
  * Process scheduled posts that are due.
  * Claims posts atomically and posts to configured platforms.
  */
-const processScheduledPosts = async (db: Database, telegramConfig?: TelegramConfig) => {
-  if (!telegramConfig) {
-    return; // No telegram configured, skip
+const processScheduledPosts = async (
+  db: Database,
+  providers: PlatformProviders,
+  rateLimiter: RateLimiter,
+) => {
+  const hasAnyProvider = providers.telegram || providers.facebook || providers.linkedin;
+  if (!hasAnyProvider) {
+    return; // No platforms configured, skip
   }
 
   // 1. ATOMIC CLAIM: Get due posts and mark as 'posting'
@@ -290,29 +343,43 @@ const processScheduledPosts = async (db: Database, telegramConfig?: TelegramConf
 
   logger.info(`[post-scheduler] claimed ${claimed.length} due posts`);
 
-  // Create telegram provider
-  const telegram = createTelegramProvider(telegramConfig);
-
-  // Fetch template for Telegram account (if customized)
-  const telegramTemplateResult = await db.execute(sql`
-    SELECT post_template as "postTemplate"
-    FROM social_accounts
-    WHERE platform = 'telegram' AND is_active = true
-    LIMIT 1
-  `);
-  const telegramTemplate: PostTemplateConfig =
-    (telegramTemplateResult.rows[0] as { postTemplate: PostTemplateConfig | null } | undefined)
-      ?.postTemplate ?? getDefaultTemplate("telegram");
-
   // 2. Process each claimed delivery
   for (const delivery of claimed) {
     try {
-      // Only support telegram for now
-      if (delivery.platform !== "telegram") {
-        logger.warn(`[post-scheduler] unsupported platform: ${delivery.platform}`);
+      // Get provider for this platform
+      const provider = providers[delivery.platform as keyof PlatformProviders];
+      if (!provider) {
+        logger.warn(`[post-scheduler] platform not configured: ${delivery.platform}`);
         await db
           .update(postDeliveries)
-          .set({ status: "failed", errorMessage: `Unsupported platform: ${delivery.platform}` })
+          .set({ status: "failed", errorMessage: `Platform not configured: ${delivery.platform}` })
+          .where(eq(postDeliveries.id, delivery.id));
+        continue;
+      }
+
+      // Check rate limit before posting
+      const limit = await getRateLimitForPlatform(db, delivery.platform);
+      const rateCheck = await rateLimiter.checkAndRecord(delivery.platform, limit);
+      if (!rateCheck.allowed) {
+        // Re-schedule for later when rate limit window resets
+        const retryAt = new Date(Date.now() + (rateCheck.retryAfterMs ?? 60000));
+        logger.warn(
+          {
+            deliveryId: delivery.id,
+            platform: delivery.platform,
+            current: rateCheck.current,
+            limit: rateCheck.limit,
+            retryAt,
+          },
+          "[post-scheduler] rate limit reached, rescheduling",
+        );
+        await db
+          .update(postDeliveries)
+          .set({
+            status: "scheduled",
+            scheduledAt: retryAt,
+            errorMessage: `Rate limited (${rateCheck.current}/${rateCheck.limit}/hr), retrying in ${Math.ceil((rateCheck.retryAfterMs ?? 60000) / 60000)} minutes`,
+          })
           .where(eq(postDeliveries.id, delivery.id));
         continue;
       }
@@ -341,23 +408,26 @@ const processScheduledPosts = async (db: Database, telegramConfig?: TelegramConf
         continue;
       }
 
+      // Get template for this platform
+      const template = await getTemplateForPlatform(db, delivery.platform);
+
       // Format and post using template
-      const text = telegram.formatPost(
+      const text = provider.formatPost(
         {
           title: article.title,
           summary: article.llmSummary || article.title,
           url: article.url,
           sector: article.sectorName || "News",
         },
-        telegramTemplate,
+        template,
       );
 
-      const postResult = await telegram.post({ text });
+      const postResult = await provider.post({ text });
 
       if (!postResult.success) {
         logger.error(
-          { deliveryId: delivery.id, error: postResult.error },
-          "[post-scheduler] telegram post failed",
+          { deliveryId: delivery.id, platform: delivery.platform, error: postResult.error },
+          "[post-scheduler] post failed",
         );
         await db
           .update(postDeliveries)
@@ -382,8 +452,13 @@ const processScheduledPosts = async (db: Database, telegramConfig?: TelegramConf
         .where(eq(articles.id, delivery.articleId));
 
       logger.info(
-        { deliveryId: delivery.id, articleId: delivery.articleId, postId: postResult.postId },
-        "[post-scheduler] posted to telegram",
+        {
+          deliveryId: delivery.id,
+          articleId: delivery.articleId,
+          platform: delivery.platform,
+          postId: postResult.postId,
+        },
+        "[post-scheduler] posted successfully",
       );
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Unknown error";
@@ -402,11 +477,21 @@ export const createMaintenanceWorker = ({
   ingestQueue,
   distributionQueue,
   telegramConfig,
+  facebookConfig,
+  linkedinConfig,
   maintenanceQueue,
   semanticDedupQueue,
   llmQueue,
-}: MaintenanceDeps) =>
-  new Worker(
+  rateLimiter,
+}: MaintenanceDeps) => {
+  // Create providers at startup (only for configured platforms)
+  const providers: PlatformProviders = {
+    telegram: telegramConfig ? createTelegramProvider(telegramConfig) : undefined,
+    facebook: facebookConfig ? createFacebookProvider(facebookConfig) : undefined,
+    linkedin: linkedinConfig ? createLinkedInProvider(linkedinConfig) : undefined,
+  };
+
+  return new Worker(
     QUEUE_MAINTENANCE,
     async (job) => {
       if (job.name === JOB_MAINTENANCE_CLEANUP) {
@@ -502,9 +587,10 @@ export const createMaintenanceWorker = ({
         await rescueOrphanedApprovedArticles(db, distributionQueue);
         await runScheduledIngests(db, ingestQueue);
         // Process any scheduled posts that are due
-        await processScheduledPosts(db, telegramConfig);
+        await processScheduledPosts(db, providers, rateLimiter);
         return;
       }
     },
     { connection },
   );
+};

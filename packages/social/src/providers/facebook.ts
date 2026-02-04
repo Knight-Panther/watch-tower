@@ -4,23 +4,101 @@ import type { SocialProvider, PostRequest, PostResult, ArticleForPost } from "..
 export type FacebookConfig = {
   pageId: string;
   accessToken: string;
+  timeoutMs?: number;
+};
+
+const GRAPH_API_VERSION = "v18.0";
+const GRAPH_API_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+/**
+ * Fetch with timeout support using AbortController.
+ */
+const fetchWithTimeout = async (
+  url: string,
+  options: RequestInit,
+  timeoutMs: number,
+): Promise<Response> => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 };
 
 export const createFacebookProvider = (config: FacebookConfig): SocialProvider => {
-  // Suppress unused variable warning - will be used when API is implemented
-  void config;
+  const { pageId, accessToken } = config;
+  const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   return {
     name: "facebook",
 
-    async post(_request: PostRequest): Promise<PostResult> {
-      // TODO: Implement Facebook Graph API posting
-      return {
-        platform: "facebook",
-        postId: "",
-        success: false,
-        error: "Facebook posting not implemented yet",
-      };
+    async post(request: PostRequest): Promise<PostResult> {
+      try {
+        const url = `${GRAPH_API_BASE}/${pageId}/feed`;
+
+        const body: Record<string, string> = {
+          message: request.text,
+          access_token: accessToken,
+        };
+
+        // Extract URL from text for link preview
+        const urlMatch = request.text.match(/https?:\/\/[^\s]+/);
+        if (urlMatch) {
+          body.link = urlMatch[0];
+        }
+
+        const response = await fetchWithTimeout(
+          url,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams(body),
+          },
+          timeoutMs,
+        );
+
+        const result = (await response.json()) as { id?: string; error?: { message: string } };
+
+        if (!response.ok || result.error) {
+          return {
+            platform: "facebook",
+            postId: "",
+            success: false,
+            error: result.error?.message || `HTTP ${response.status}`,
+          };
+        }
+
+        return {
+          platform: "facebook",
+          postId: result.id || "",
+          success: true,
+        };
+      } catch (err) {
+        let error: string;
+        if (err instanceof Error) {
+          if (err.name === "AbortError") {
+            error = `Request timeout after ${timeoutMs}ms`;
+          } else {
+            error = err.message;
+          }
+        } else {
+          error = "Unknown error";
+        }
+        return {
+          platform: "facebook",
+          postId: "",
+          success: false,
+          error,
+        };
+      }
     },
 
     formatPost(article: ArticleForPost, template: PostTemplateConfig): string {

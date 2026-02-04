@@ -2,27 +2,7 @@
  * Distribution Worker
  *
  * Handles immediate posting to social platforms for auto-approved articles.
- * Currently supports Telegram. Facebook and LinkedIn are planned.
- *
- * ─────────────────────────────────────────────────────────────────────────────
- * TODO: To add Facebook support:
- * 1. Create packages/social/src/facebook.ts implementing SocialProvider interface
- * 2. Add FB_PAGE_ID, FB_ACCESS_TOKEN to .env and env schema
- * 3. Add facebookConfig to DistributionDeps below
- * 4. Create FacebookProvider instance in createDistributionWorker
- * 5. Check isFacebookAutoPostEnabled() in llm-brain.ts
- * 6. Add Facebook posting logic after Telegram in JOB_DISTRIBUTION_IMMEDIATE
- * 7. Enable the Facebook toggle in ScoringRules.tsx (remove disabled/opacity)
- * ─────────────────────────────────────────────────────────────────────────────
- * TODO: To add LinkedIn support:
- * 1. Create packages/social/src/linkedin.ts implementing SocialProvider interface
- * 2. Add LINKEDIN_ORG_ID, LINKEDIN_ACCESS_TOKEN to .env and env schema
- * 3. Add linkedinConfig to DistributionDeps below
- * 4. Create LinkedInProvider instance in createDistributionWorker
- * 5. Check isLinkedinAutoPostEnabled() in llm-brain.ts
- * 6. Add LinkedIn posting logic after Telegram in JOB_DISTRIBUTION_IMMEDIATE
- * 7. Enable the LinkedIn toggle in ScoringRules.tsx (remove disabled/opacity)
- * ─────────────────────────────────────────────────────────────────────────────
+ * Supports Telegram, Facebook, and LinkedIn.
  */
 
 import { Worker } from "bullmq";
@@ -35,21 +15,25 @@ import {
   type PostTemplateConfig,
 } from "@watch-tower/shared";
 import type { Database } from "@watch-tower/db";
-import { createTelegramProvider, type TelegramConfig } from "@watch-tower/social";
-// TODO: Uncomment when Facebook/LinkedIn providers are implemented:
-// import { createFacebookProvider, type FacebookConfig } from "@watch-tower/social";
-// import { createLinkedinProvider, type LinkedinConfig } from "@watch-tower/social";
+import {
+  createTelegramProvider,
+  createFacebookProvider,
+  createLinkedInProvider,
+  type TelegramConfig,
+  type FacebookConfig,
+  type LinkedInConfig,
+} from "@watch-tower/social";
 import type { EventPublisher } from "../events.js";
+import type { RateLimiter } from "../utils/rate-limiter.js";
 
 type DistributionDeps = {
   connection: { host: string; port: number };
   db: Database;
-  telegramConfig: TelegramConfig;
-  // TODO: Add when Facebook is integrated:
-  // facebookConfig?: FacebookConfig;
-  // TODO: Add when LinkedIn is integrated:
-  // linkedinConfig?: LinkedinConfig;
+  telegramConfig?: TelegramConfig;
+  facebookConfig?: FacebookConfig;
+  linkedinConfig?: LinkedInConfig;
   eventPublisher: EventPublisher;
+  rateLimiter: RateLimiter;
 };
 
 type ArticleForDistribution = {
@@ -61,13 +45,57 @@ type ArticleForDistribution = {
   sectorName: string | null;
 };
 
+// Helper: Check if platform is enabled in app_config
+async function isPlatformEnabled(db: Database, platform: string): Promise<boolean> {
+  const result = await db.execute(sql`
+    SELECT value FROM app_config WHERE key = ${`auto_post_${platform}`}
+  `);
+  return (result.rows[0] as { value: unknown } | undefined)?.value === true;
+}
+
+// Helper: Get template for platform from social_accounts
+async function getTemplateForPlatform(
+  db: Database,
+  platform: string,
+): Promise<PostTemplateConfig> {
+  const result = await db.execute(sql`
+    SELECT post_template as "postTemplate"
+    FROM social_accounts
+    WHERE platform = ${platform} AND is_active = true
+    LIMIT 1
+  `);
+  return (
+    (result.rows[0] as { postTemplate: PostTemplateConfig | null } | undefined)?.postTemplate ??
+    getDefaultTemplate(platform)
+  );
+}
+
+// Helper: Get rate limit for platform from social_accounts
+async function getRateLimitForPlatform(db: Database, platform: string): Promise<number> {
+  const result = await db.execute(sql`
+    SELECT rate_limit_per_hour as "limit"
+    FROM social_accounts
+    WHERE platform = ${platform} AND is_active = true
+    LIMIT 1
+  `);
+  // Default rate limits per platform if not configured
+  const defaults: Record<string, number> = { telegram: 20, facebook: 1, linkedin: 4 };
+  return (result.rows[0] as { limit: number } | undefined)?.limit ?? defaults[platform] ?? 4;
+}
+
 export const createDistributionWorker = ({
   connection,
   db,
   telegramConfig,
+  facebookConfig,
+  linkedinConfig,
   eventPublisher,
+  rateLimiter,
 }: DistributionDeps) => {
-  const telegram = createTelegramProvider(telegramConfig);
+  // Create providers at startup (only for configured platforms)
+  const telegram = telegramConfig ? createTelegramProvider(telegramConfig) : null;
+  const facebook = facebookConfig ? createFacebookProvider(facebookConfig) : null;
+  const linkedin = linkedinConfig ? createLinkedInProvider(linkedinConfig) : null;
 
   return new Worker(
     QUEUE_DISTRIBUTION,
@@ -124,101 +152,111 @@ export const createDistributionWorker = ({
 
         const article = claimedArticles[0];
 
-        // Fetch template for Telegram account (if customized)
-        const telegramTemplateResult = await db.execute(sql`
-          SELECT post_template as "postTemplate"
-          FROM social_accounts
-          WHERE platform = 'telegram' AND is_active = true
-          LIMIT 1
-        `);
-        const telegramTemplate: PostTemplateConfig =
-          (telegramTemplateResult.rows[0] as { postTemplate: PostTemplateConfig | null } | undefined)
-            ?.postTemplate ?? getDefaultTemplate("telegram");
+        // Build list of platforms to post to
+        const platforms = [
+          { name: "telegram", provider: telegram },
+          { name: "facebook", provider: facebook },
+          { name: "linkedin", provider: linkedin },
+        ].filter((p) => p.provider !== null);
 
-        // Format and post to Telegram using template
-        const text = telegram.formatPost(
-          {
-            title: article.title,
-            summary: article.llmSummary || article.title,
-            url: article.url,
-            sector: article.sectorName || "News",
-          },
-          telegramTemplate,
-        );
+        const results: {
+          platform: string;
+          success: boolean;
+          postId?: string;
+          error?: string;
+          rateLimited?: boolean;
+          retryAfterMs?: number;
+        }[] = [];
+        let anySuccess = false;
 
-        const postResult = await telegram.post({ text });
+        for (const { name, provider } of platforms) {
+          // Check if platform is enabled in app_config
+          const enabled = await isPlatformEnabled(db, name);
+          if (!enabled) {
+            logger.debug({ articleId, platform: name }, "[distribution] platform disabled, skipping");
+            continue;
+          }
 
-        if (!postResult.success) {
-          logger.error(
-            { articleId, error: postResult.error },
-            "[distribution] telegram post failed",
+          // Check rate limit before posting
+          const limit = await getRateLimitForPlatform(db, name);
+          const rateCheck = await rateLimiter.checkAndRecord(name, limit);
+          if (!rateCheck.allowed) {
+            logger.warn(
+              { articleId, platform: name, current: rateCheck.current, limit: rateCheck.limit },
+              "[distribution] rate limit reached, skipping",
+            );
+            results.push({
+              platform: name,
+              success: false,
+              error: `Rate limit reached (${rateCheck.current}/${rateCheck.limit}/hr)`,
+              rateLimited: true,
+              retryAfterMs: rateCheck.retryAfterMs,
+            });
+            continue;
+          }
+
+          // Fetch template for this platform
+          const template = await getTemplateForPlatform(db, name);
+
+          // Format post using provider
+          const text = provider!.formatPost(
+            {
+              title: article.title,
+              summary: article.llmSummary || article.title,
+              url: article.url,
+              sector: article.sectorName || "News",
+            },
+            template,
           );
 
-          // Mark as posting_failed (not approved, so it won't be retried automatically)
+          // Post to platform
+          const postResult = await provider!.post({ text });
+          results.push({
+            platform: name,
+            success: postResult.success,
+            postId: postResult.postId,
+            error: postResult.error,
+            rateLimited: false,
+          });
+
+          if (postResult.success) {
+            anySuccess = true;
+            await eventPublisher.publish({
+              type: "article:posted",
+              data: { id: articleId, platform: name, postId: postResult.postId },
+            });
+            logger.info(
+              { articleId, platform: name, postId: postResult.postId },
+              "[distribution] posted successfully",
+            );
+          } else {
+            logger.error(
+              { articleId, platform: name, error: postResult.error },
+              "[distribution] post failed",
+            );
+          }
+        }
+
+        // Update article stage based on results
+        if (anySuccess) {
+          await db.execute(sql`
+            UPDATE articles
+            SET
+              pipeline_stage = 'posted',
+              approved_at = COALESCE(approved_at, NOW())
+            WHERE id = ${articleId}::uuid
+          `);
+        } else if (results.length > 0) {
+          // All platforms failed
           await db.execute(sql`
             UPDATE articles
             SET pipeline_stage = 'posting_failed'
             WHERE id = ${articleId}::uuid
           `);
-
-          return { success: false, error: postResult.error };
         }
+        // If no platforms were enabled, leave as 'posting' (will be picked up when enabled)
 
-        // Update article to posted
-        await db.execute(sql`
-          UPDATE articles
-          SET
-            pipeline_stage = 'posted',
-            approved_at = COALESCE(approved_at, NOW())
-          WHERE id = ${articleId}::uuid
-        `);
-
-        // Publish event for real-time dashboard
-        await eventPublisher.publish({
-          type: "article:posted",
-          data: {
-            id: articleId,
-            platform: "telegram",
-            postId: postResult.postId,
-          },
-        });
-
-        logger.info(
-          { articleId, messageId: postResult.postId },
-          "[distribution] posted to telegram",
-        );
-
-        // ─────────────────────────────────────────────────────────────────────
-        // TODO: Add Facebook posting here when integrated:
-        // if (facebookConfig && await isFacebookAutoPostEnabled(db)) {
-        //   const fbText = facebook.formatSinglePost({ ... });
-        //   const fbResult = await facebook.post({ text: fbText });
-        //   if (fbResult.success) {
-        //     await eventPublisher.publish({
-        //       type: "article:posted",
-        //       data: { id: articleId, platform: "facebook", postId: fbResult.postId },
-        //     });
-        //   }
-        // }
-        // ─────────────────────────────────────────────────────────────────────
-        // TODO: Add LinkedIn posting here when integrated:
-        // if (linkedinConfig && await isLinkedinAutoPostEnabled(db)) {
-        //   const liText = linkedin.formatSinglePost({ ... });
-        //   const liResult = await linkedin.post({ text: liText });
-        //   if (liResult.success) {
-        //     await eventPublisher.publish({
-        //       type: "article:posted",
-        //       data: { id: articleId, platform: "linkedin", postId: liResult.postId },
-        //     });
-        //   }
-        // }
-        // ─────────────────────────────────────────────────────────────────────
-
-        return {
-          success: true,
-          platform: "telegram",
-          postId: postResult.postId,
-        };
+        return { success: anySuccess, results };
       }
 
       logger.warn({ jobName: job.name }, "[distribution] unknown job type");

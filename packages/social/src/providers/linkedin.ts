@@ -4,23 +4,121 @@ import type { SocialProvider, PostRequest, PostResult, ArticleForPost } from "..
 export type LinkedInConfig = {
   accessToken: string;
   organizationId: string;
+  timeoutMs?: number;
+};
+
+const LINKEDIN_API_BASE = "https://api.linkedin.com/v2";
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+/**
+ * Fetch with timeout support using AbortController.
+ */
+const fetchWithTimeout = async (
+  url: string,
+  options: RequestInit,
+  timeoutMs: number,
+): Promise<Response> => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 };
 
 export const createLinkedInProvider = (config: LinkedInConfig): SocialProvider => {
-  // Suppress unused variable warning - will be used when API is implemented
-  void config;
+  const { organizationId, accessToken } = config;
+  const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   return {
     name: "linkedin",
 
-    async post(_request: PostRequest): Promise<PostResult> {
-      // TODO: Implement LinkedIn API posting
-      return {
-        platform: "linkedin",
-        postId: "",
-        success: false,
-        error: "LinkedIn posting not implemented yet",
-      };
+    async post(request: PostRequest): Promise<PostResult> {
+      try {
+        const authorUrn = `urn:li:organization:${organizationId}`;
+
+        // Extract URL if present for article sharing
+        const urlMatch = request.text.match(/https?:\/\/[^\s]+/);
+        const textWithoutUrl = request.text.replace(/https?:\/\/[^\s]+/g, "").trim();
+
+        const postBody = {
+          author: authorUrn,
+          lifecycleState: "PUBLISHED",
+          specificContent: {
+            "com.linkedin.ugc.ShareContent": {
+              shareCommentary: {
+                text: textWithoutUrl,
+              },
+              shareMediaCategory: urlMatch ? "ARTICLE" : "NONE",
+              ...(urlMatch && {
+                media: [
+                  {
+                    status: "READY",
+                    originalUrl: urlMatch[0],
+                  },
+                ],
+              }),
+            },
+          },
+          visibility: {
+            "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC",
+          },
+        };
+
+        const response = await fetchWithTimeout(
+          `${LINKEDIN_API_BASE}/ugcPosts`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              "Content-Type": "application/json",
+              "X-Restli-Protocol-Version": "2.0.0",
+            },
+            body: JSON.stringify(postBody),
+          },
+          timeoutMs,
+        );
+
+        if (!response.ok) {
+          const error = (await response.json().catch(() => ({}))) as { message?: string };
+          return {
+            platform: "linkedin",
+            postId: "",
+            success: false,
+            error: error.message || `HTTP ${response.status}`,
+          };
+        }
+
+        const postId = response.headers.get("x-restli-id") || "";
+        return {
+          platform: "linkedin",
+          postId,
+          success: true,
+        };
+      } catch (err) {
+        let error: string;
+        if (err instanceof Error) {
+          if (err.name === "AbortError") {
+            error = `Request timeout after ${timeoutMs}ms`;
+          } else {
+            error = err.message;
+          }
+        } else {
+          error = "Unknown error";
+        }
+        return {
+          platform: "linkedin",
+          postId: "",
+          success: false,
+          error,
+        };
+      }
     },
 
     formatPost(article: ArticleForPost, template: PostTemplateConfig): string {

@@ -27,6 +27,7 @@ import { createLLMBrainWorker } from "./processors/llm-brain.js";
 import { createDistributionWorker } from "./processors/distribution.js";
 import { createEventPublisher } from "./events.js";
 import { ensureRepeatableJobs } from "./job-registry.js";
+import { createRateLimiter } from "./utils/rate-limiter.js";
 
 dotenv.config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) });
 
@@ -62,6 +63,9 @@ const main = async () => {
 
   // Event publisher for real-time UI updates
   const eventPublisher = createEventPublisher(redis);
+
+  // Rate limiter for social platform posting
+  const rateLimiter = createRateLimiter(redis);
 
   // DB init + verification
   const { db, close: closeDb } = createDb(env.DATABASE_URL);
@@ -166,21 +170,39 @@ const main = async () => {
 
   const primaryApiKey = getApiKeyForProvider(env.LLM_PROVIDER);
 
+  // Social platform configs (for maintenance worker scheduled posts)
+  const telegramConfigForMaintenance =
+    env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID
+      ? { botToken: env.TELEGRAM_BOT_TOKEN, defaultChatId: env.TELEGRAM_CHAT_ID }
+      : undefined;
+
+  const facebookConfigForMaintenance =
+    env.FB_PAGE_ID && env.FB_ACCESS_TOKEN
+      ? { pageId: env.FB_PAGE_ID, accessToken: env.FB_ACCESS_TOKEN }
+      : undefined;
+
+  const linkedinConfigForMaintenance =
+    env.LINKEDIN_ORG_ID && env.LINKEDIN_ACCESS_TOKEN
+      ? { organizationId: env.LINKEDIN_ORG_ID, accessToken: env.LINKEDIN_ACCESS_TOKEN }
+      : undefined;
+
+  const hasAnyPlatformForMaintenance =
+    telegramConfigForMaintenance || facebookConfigForMaintenance || linkedinConfigForMaintenance;
+
   const ingestWorker = createIngestWorker({ connection, db, eventPublisher });
   const maintenanceWorker = createMaintenanceWorker({
     connection,
     db,
     ingestQueue,
-    distributionQueue:
-      env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID ? distributionQueue : undefined,
-    telegramConfig:
-      env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID
-        ? { botToken: env.TELEGRAM_BOT_TOKEN, defaultChatId: env.TELEGRAM_CHAT_ID }
-        : undefined,
+    distributionQueue: hasAnyPlatformForMaintenance ? distributionQueue : undefined,
+    telegramConfig: telegramConfigForMaintenance,
+    facebookConfig: facebookConfigForMaintenance,
+    linkedinConfig: linkedinConfigForMaintenance,
     // Queues for self-healing job registration (only pass if feature is enabled)
     maintenanceQueue,
     semanticDedupQueue: env.OPENAI_API_KEY ? semanticDedupQueue : undefined,
     llmQueue: primaryApiKey ? llmQueue : undefined,
+    rateLimiter,
   });
 
   // Semantic dedup worker (only if embeddings enabled)
@@ -234,24 +256,40 @@ const main = async () => {
         eventPublisher,
         autoApproveThreshold: env.LLM_AUTO_APPROVE_THRESHOLD,
         autoRejectThreshold: env.LLM_AUTO_REJECT_THRESHOLD,
-        // Pass distribution queue only if Telegram is configured
-        distributionQueue: env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID ? distributionQueue : undefined,
+        // Pass distribution queue if any social platform is configured
+        distributionQueue: hasAnyPlatformForMaintenance ? distributionQueue : undefined,
       })
     : null;
 
-  // Distribution worker (only if Telegram configured)
-  const distributionWorker =
+  // Social platform configs (only create if credentials provided)
+  const telegramConfig =
     env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID
-      ? createDistributionWorker({
-          connection,
-          db,
-          telegramConfig: {
-            botToken: env.TELEGRAM_BOT_TOKEN,
-            defaultChatId: env.TELEGRAM_CHAT_ID,
-          },
-          eventPublisher,
-        })
-      : null;
+      ? { botToken: env.TELEGRAM_BOT_TOKEN, defaultChatId: env.TELEGRAM_CHAT_ID }
+      : undefined;
+
+  const facebookConfig =
+    env.FB_PAGE_ID && env.FB_ACCESS_TOKEN
+      ? { pageId: env.FB_PAGE_ID, accessToken: env.FB_ACCESS_TOKEN }
+      : undefined;
+
+  const linkedinConfig =
+    env.LINKEDIN_ORG_ID && env.LINKEDIN_ACCESS_TOKEN
+      ? { organizationId: env.LINKEDIN_ORG_ID, accessToken: env.LINKEDIN_ACCESS_TOKEN }
+      : undefined;
+
+  // Distribution worker (if any platform is configured)
+  const hasAnyPlatform = telegramConfig || facebookConfig || linkedinConfig;
+  const distributionWorker = hasAnyPlatform
+    ? createDistributionWorker({
+        connection,
+        db,
+        telegramConfig,
+        facebookConfig,
+        linkedinConfig,
+        eventPublisher,
+        rateLimiter,
+      })
+    : null;
 
   // Worker error handlers
   ingestWorker.on("failed", (job, err) => {
@@ -363,9 +401,14 @@ const main = async () => {
 
   // Distribution worker status
   if (distributionWorker) {
-    logger.info("[worker] distribution enabled (telegram)");
+    const platforms = [
+      telegramConfig && "telegram",
+      facebookConfig && "facebook",
+      linkedinConfig && "linkedin",
+    ].filter(Boolean);
+    logger.info(`[worker] distribution enabled (${platforms.join(", ")})`);
   } else {
-    logger.info("[worker] distribution disabled (no TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID)");
+    logger.info("[worker] distribution disabled (no social platform credentials configured)");
   }
 
   // Self-healing interval: re-register repeatable jobs if they were deleted (e.g., Redis wipe)

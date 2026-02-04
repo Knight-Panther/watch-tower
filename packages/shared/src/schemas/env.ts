@@ -49,6 +49,26 @@ export const baseEnvSchema = z.object({
     .string()
     .optional()
     .transform((val) => (val === "" ? undefined : val)),
+
+  // Facebook distribution
+  FB_PAGE_ID: z
+    .string()
+    .optional()
+    .transform((val) => (val === "" ? undefined : val)),
+  FB_ACCESS_TOKEN: z
+    .string()
+    .optional()
+    .transform((val) => (val === "" ? undefined : val)),
+
+  // LinkedIn distribution
+  LINKEDIN_ORG_ID: z
+    .string()
+    .optional()
+    .transform((val) => (val === "" ? undefined : val)),
+  LINKEDIN_ACCESS_TOKEN: z
+    .string()
+    .optional()
+    .transform((val) => (val === "" ? undefined : val)),
 });
 
 export type BaseEnv = z.infer<typeof baseEnvSchema>;

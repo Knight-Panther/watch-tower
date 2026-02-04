@@ -21,7 +21,11 @@ INSERT INTO app_config (key, value, updated_at) VALUES
   ('feed_fetch_runs_ttl_hours', '336', NOW()),
   ('llm_telemetry_ttl_days', '30', NOW()),
   ('article_images_ttl_days', '30', NOW()),
-  ('post_deliveries_ttl_days', '30', NOW())
+  ('post_deliveries_ttl_days', '30', NOW()),
+  -- Platform auto-post toggles (enable when ready to post to each platform)
+  ('auto_post_telegram', 'true', NOW()),
+  ('auto_post_facebook', 'false', NOW()),
+  ('auto_post_linkedin', 'false', NOW())
 ON CONFLICT (key) DO NOTHING;
 
 -- Seed default scoring rules for each sector
@@ -113,9 +117,28 @@ Respond with ONLY valid JSON: {"score": 3, "summary": "Summary here.", "reasonin
 FROM sectors s
 ON CONFLICT (sector_id) DO NOTHING;
 
--- Seed a Telegram social account so the Templates page has data
+-- Seed social accounts so the Templates page has data for each platform
 -- Credentials are empty since actual tokens come from environment variables
--- The template can be customized via the frontend Templates page
-INSERT INTO social_accounts (platform, account_name, credentials, is_active, rate_limit_per_hour) VALUES
-  ('telegram', 'Primary Telegram Channel', '{}', true, 4)
-ON CONFLICT DO NOTHING;
+-- Templates can be customized via the frontend Templates page
+-- Note: Using WHERE NOT EXISTS since there's no unique constraint on platform
+--
+-- Rate limits based on official platform limits:
+-- Telegram: ~30 msg/sec to different chats -> 20/hr (very generous)
+-- Facebook: ~25 posts/24hr per page -> 1/hr (conservative)
+-- LinkedIn: 100 posts/day per org -> 4/hr (safe)
+INSERT INTO social_accounts (platform, account_name, credentials, is_active, rate_limit_per_hour)
+SELECT 'telegram', 'Primary Telegram Channel', '{}'::jsonb, true, 20
+WHERE NOT EXISTS (SELECT 1 FROM social_accounts WHERE platform = 'telegram');
+
+INSERT INTO social_accounts (platform, account_name, credentials, is_active, rate_limit_per_hour)
+SELECT 'facebook', 'Company Facebook Page', '{}'::jsonb, true, 1
+WHERE NOT EXISTS (SELECT 1 FROM social_accounts WHERE platform = 'facebook');
+
+INSERT INTO social_accounts (platform, account_name, credentials, is_active, rate_limit_per_hour)
+SELECT 'linkedin', 'Company LinkedIn Page', '{}'::jsonb, true, 4
+WHERE NOT EXISTS (SELECT 1 FROM social_accounts WHERE platform = 'linkedin');
+
+-- To update existing records with realistic rate limits, run:
+-- UPDATE social_accounts SET rate_limit_per_hour = 20 WHERE platform = 'telegram';
+-- UPDATE social_accounts SET rate_limit_per_hour = 1 WHERE platform = 'facebook';
+-- UPDATE social_accounts SET rate_limit_per_hour = 4 WHERE platform = 'linkedin';
