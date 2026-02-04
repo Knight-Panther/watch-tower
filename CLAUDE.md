@@ -212,12 +212,23 @@ Articles store only `title + content_snippet` (not full article body).
 ## Social Posting
 
 - **Telegram**: Bot API, chat/channel posting (active)
-- **Facebook**: Graph API, page posting (planned)
-- **LinkedIn**: API, organization posting (planned)
-- Per-platform rate limiting (Redis sliding window, default 4/hour)
+- **Facebook**: Graph API, page posting (active)
+- **LinkedIn**: API, personal profile or organization posting (active)
+- Per-platform rate limiting (Redis sliding window)
+  - Telegram: 20/hour (generous)
+  - Facebook: 1/hour (conservative, ~25/day limit)
+  - LinkedIn: 4/hour (safe, 100/day limit)
 - Individual article posts (no digest/batch format)
 - Scheduling via `post_deliveries.scheduled_at` column
 - Future: AI image generation per post (interface stub exists)
+
+### Token Expiration
+
+| Platform | Token Lifetime | Refresh Strategy |
+|----------|---------------|------------------|
+| Telegram | Never expires | N/A |
+| Facebook | ~60 days | Manual re-auth or use long-lived page token |
+| LinkedIn | ~60 days | Manual re-auth (offline_access requires partner approval) |
 
 ## Development Workflow
 
@@ -225,6 +236,60 @@ Articles store only `title + content_snippet` (not full article body).
 npm run infra:up           # Start PostgreSQL + Redis
 npm run db:push            # Sync schema to local DB
 npm run dev                # Start API + Worker + Frontend
+```
+
+## Production Deployment Checklist
+
+### Environment Variables to Change
+
+| Variable | Development | Production |
+|----------|-------------|------------|
+| `NODE_ENV` | `development` | `production` |
+| `DATABASE_URL` | `localhost` | Production PostgreSQL URL |
+| `REDIS_HOST` | `127.0.0.1` | Redis container name or hosted Redis |
+| `API_KEY` | `local-dev-key` | Strong random string (32+ chars) |
+| `VITE_API_URL` | `http://localhost:3001` | `https://api.yourdomain.com` |
+| `VITE_API_KEY` | `local-dev-key` | Same as API_KEY |
+| `LOG_LEVEL` | `debug` | `info` or `warn` |
+
+### OAuth Redirect URLs
+
+OAuth callbacks happen in the browser, so production URLs must be registered in each platform's developer console:
+
+| Platform | Dev URL | Production URL |
+|----------|---------|----------------|
+| LinkedIn | `http://localhost:5173/linkedin/callback` | `https://yourdomain.com/linkedin/callback` |
+| Facebook | `http://localhost:5173/facebook/callback` | `https://yourdomain.com/facebook/callback` |
+
+**Note:** You can register multiple redirect URLs per app (both dev and prod).
+
+### Docker Considerations
+
+- Inside Docker network: services communicate via container names (e.g., `redis`, `postgres`)
+- OAuth redirects: happen in user's browser, need public URLs
+- Frontend: static files served by nginx or similar, not Vite dev server
+- API/Worker: run as separate containers, share same env vars for database/redis
+
+### Security Hardening
+
+- [ ] Generate strong `API_KEY` (e.g., `openssl rand -hex 32`)
+- [ ] Use HTTPS for all public endpoints
+- [ ] Set `NODE_ENV=production` (enables stricter rate limiting)
+- [ ] Rotate social platform tokens before expiry (LinkedIn/Facebook: 60 days)
+- [ ] Backup PostgreSQL database regularly
+- [ ] Monitor Redis memory usage
+
+### Post-Deploy Verification
+
+```bash
+# Check API health
+curl https://api.yourdomain.com/health
+
+# Check worker logs
+docker logs watchtower-worker --tail 100
+
+# Verify social posting works
+# (Enable auto_post_telegram in app_config, wait for score 5 article)
 ```
 
 ## Key Architecture Decisions
@@ -243,15 +308,15 @@ Implementation tasks are tracked in the `priority-tasks/` folder at the project 
 - **Completed tasks**: Renamed to `taskN_done.md` after all items are implemented
 - **Always check this folder first** when starting a new session to understand pending work
 
-Current tasks:
-- `task6.md` — Scheduled Posting System
-
 Completed:
 - `task1_done.md` — Infrastructure hardening & reliability
 - `task2_done.md` — Stage 2: Semantic Dedup Pipeline
 - `task3_done.md` — Stage 3: LLM Brain Pipeline (scoring + summarization + multi-provider)
 - `task4_done.md` — LLM Token Telemetry
 - `task5_done.md` — Articles Panel + Distribution Pipeline (Telegram)
+- `task6_done.md` — Scheduled Posting System
+- `task9_done.md` — Facebook & LinkedIn Integration
+- `task10_done.md` — Rate Limiting & Provider Hardening
 
 ---
 

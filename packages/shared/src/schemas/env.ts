@@ -61,10 +61,11 @@ export const baseEnvSchema = z.object({
     .transform((val) => (val === "" ? undefined : val)),
 
   // LinkedIn distribution
-  LINKEDIN_ORG_ID: z
+  LINKEDIN_AUTHOR_ID: z
     .string()
     .optional()
     .transform((val) => (val === "" ? undefined : val)),
+  LINKEDIN_AUTHOR_TYPE: z.enum(["person", "organization"]).default("person"),
   LINKEDIN_ACCESS_TOKEN: z
     .string()
     .optional()

@@ -3,12 +3,23 @@ import type { SocialProvider, PostRequest, PostResult, ArticleForPost } from "..
 
 export type LinkedInConfig = {
   accessToken: string;
-  organizationId: string;
+  authorId: string;
+  authorType: "person" | "organization";
   timeoutMs?: number;
 };
 
 const LINKEDIN_API_BASE = "https://api.linkedin.com/v2";
 const DEFAULT_TIMEOUT_MS = 30_000;
+
+// Regex to match LinkedIn access tokens in error messages (AQ... format, long alphanumeric)
+const LINKEDIN_TOKEN_REGEX = /AQ[A-Za-z0-9_-]{50,}/g;
+
+/**
+ * Sanitize error messages to remove any accidentally leaked access tokens
+ */
+const sanitizeError = (error: string): string => {
+  return error.replace(LINKEDIN_TOKEN_REGEX, "***REDACTED***");
+};
 
 /**
  * Fetch with timeout support using AbortController.
@@ -33,7 +44,7 @@ const fetchWithTimeout = async (
 };
 
 export const createLinkedInProvider = (config: LinkedInConfig): SocialProvider => {
-  const { organizationId, accessToken } = config;
+  const { authorId, authorType, accessToken } = config;
   const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   return {
@@ -41,7 +52,7 @@ export const createLinkedInProvider = (config: LinkedInConfig): SocialProvider =
 
     async post(request: PostRequest): Promise<PostResult> {
       try {
-        const authorUrn = `urn:li:organization:${organizationId}`;
+        const authorUrn = `urn:li:${authorType}:${authorId}`;
 
         // Extract URL if present for article sharing
         const urlMatch = request.text.match(/https?:\/\/[^\s]+/);
@@ -86,12 +97,12 @@ export const createLinkedInProvider = (config: LinkedInConfig): SocialProvider =
         );
 
         if (!response.ok) {
-          const error = (await response.json().catch(() => ({}))) as { message?: string };
+          const errorData = (await response.json().catch(() => ({}))) as { message?: string };
           return {
             platform: "linkedin",
             postId: "",
             success: false,
-            error: error.message || `HTTP ${response.status}`,
+            error: sanitizeError(errorData.message || `HTTP ${response.status}`),
           };
         }
 
@@ -107,7 +118,7 @@ export const createLinkedInProvider = (config: LinkedInConfig): SocialProvider =
           if (err.name === "AbortError") {
             error = `Request timeout after ${timeoutMs}ms`;
           } else {
-            error = err.message;
+            error = sanitizeError(err.message);
           }
         } else {
           error = "Unknown error";

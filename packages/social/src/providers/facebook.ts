@@ -11,6 +11,16 @@ const GRAPH_API_VERSION = "v18.0";
 const GRAPH_API_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+// Regex to match Facebook access tokens in error messages (EAA... format, 100+ chars)
+const FB_TOKEN_REGEX = /EAA[A-Za-z0-9]+/g;
+
+/**
+ * Sanitize error messages to remove any accidentally leaked access tokens
+ */
+const sanitizeError = (error: string): string => {
+  return error.replace(FB_TOKEN_REGEX, "***REDACTED***");
+};
+
 /**
  * Fetch with timeout support using AbortController.
  */
@@ -72,7 +82,7 @@ export const createFacebookProvider = (config: FacebookConfig): SocialProvider =
             platform: "facebook",
             postId: "",
             success: false,
-            error: result.error?.message || `HTTP ${response.status}`,
+            error: sanitizeError(result.error?.message || `HTTP ${response.status}`),
           };
         }
 
@@ -87,7 +97,7 @@ export const createFacebookProvider = (config: FacebookConfig): SocialProvider =
           if (err.name === "AbortError") {
             error = `Request timeout after ${timeoutMs}ms`;
           } else {
-            error = err.message;
+            error = sanitizeError(err.message);
           }
         } else {
           error = "Unknown error";

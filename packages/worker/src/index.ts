@@ -170,34 +170,37 @@ const main = async () => {
 
   const primaryApiKey = getApiKeyForProvider(env.LLM_PROVIDER);
 
-  // Social platform configs (for maintenance worker scheduled posts)
-  const telegramConfigForMaintenance =
+  // Social platform configs (shared by maintenance and distribution workers)
+  const telegramConfig =
     env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID
       ? { botToken: env.TELEGRAM_BOT_TOKEN, defaultChatId: env.TELEGRAM_CHAT_ID }
       : undefined;
 
-  const facebookConfigForMaintenance =
+  const facebookConfig =
     env.FB_PAGE_ID && env.FB_ACCESS_TOKEN
       ? { pageId: env.FB_PAGE_ID, accessToken: env.FB_ACCESS_TOKEN }
       : undefined;
 
-  const linkedinConfigForMaintenance =
-    env.LINKEDIN_ORG_ID && env.LINKEDIN_ACCESS_TOKEN
-      ? { organizationId: env.LINKEDIN_ORG_ID, accessToken: env.LINKEDIN_ACCESS_TOKEN }
+  const linkedinConfig =
+    env.LINKEDIN_AUTHOR_ID && env.LINKEDIN_ACCESS_TOKEN
+      ? {
+          authorId: env.LINKEDIN_AUTHOR_ID,
+          authorType: env.LINKEDIN_AUTHOR_TYPE,
+          accessToken: env.LINKEDIN_ACCESS_TOKEN,
+        }
       : undefined;
 
-  const hasAnyPlatformForMaintenance =
-    telegramConfigForMaintenance || facebookConfigForMaintenance || linkedinConfigForMaintenance;
+  const hasAnyPlatform = telegramConfig || facebookConfig || linkedinConfig;
 
   const ingestWorker = createIngestWorker({ connection, db, eventPublisher });
   const maintenanceWorker = createMaintenanceWorker({
     connection,
     db,
     ingestQueue,
-    distributionQueue: hasAnyPlatformForMaintenance ? distributionQueue : undefined,
-    telegramConfig: telegramConfigForMaintenance,
-    facebookConfig: facebookConfigForMaintenance,
-    linkedinConfig: linkedinConfigForMaintenance,
+    distributionQueue: hasAnyPlatform ? distributionQueue : undefined,
+    telegramConfig,
+    facebookConfig,
+    linkedinConfig,
     // Queues for self-healing job registration (only pass if feature is enabled)
     maintenanceQueue,
     semanticDedupQueue: env.OPENAI_API_KEY ? semanticDedupQueue : undefined,
@@ -257,28 +260,11 @@ const main = async () => {
         autoApproveThreshold: env.LLM_AUTO_APPROVE_THRESHOLD,
         autoRejectThreshold: env.LLM_AUTO_REJECT_THRESHOLD,
         // Pass distribution queue if any social platform is configured
-        distributionQueue: hasAnyPlatformForMaintenance ? distributionQueue : undefined,
+        distributionQueue: hasAnyPlatform ? distributionQueue : undefined,
       })
     : null;
 
-  // Social platform configs (only create if credentials provided)
-  const telegramConfig =
-    env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID
-      ? { botToken: env.TELEGRAM_BOT_TOKEN, defaultChatId: env.TELEGRAM_CHAT_ID }
-      : undefined;
-
-  const facebookConfig =
-    env.FB_PAGE_ID && env.FB_ACCESS_TOKEN
-      ? { pageId: env.FB_PAGE_ID, accessToken: env.FB_ACCESS_TOKEN }
-      : undefined;
-
-  const linkedinConfig =
-    env.LINKEDIN_ORG_ID && env.LINKEDIN_ACCESS_TOKEN
-      ? { organizationId: env.LINKEDIN_ORG_ID, accessToken: env.LINKEDIN_ACCESS_TOKEN }
-      : undefined;
-
   // Distribution worker (if any platform is configured)
-  const hasAnyPlatform = telegramConfig || facebookConfig || linkedinConfig;
   const distributionWorker = hasAnyPlatform
     ? createDistributionWorker({
         connection,
