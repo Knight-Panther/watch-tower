@@ -52,6 +52,9 @@ export const rssSources = pgTable("rss_sources", {
   sectorId: uuid("sector_id").references(() => sectors.id, { onDelete: "set null" }),
   maxAgeDays: smallint("max_age_days"),
   ingestIntervalMinutes: smallint("ingest_interval_minutes").notNull().default(15),
+  // Security: per-source quota overrides (NULL = use global default)
+  maxArticlesPerFetch: integer("max_articles_per_fetch"),
+  maxArticlesPerDay: integer("max_articles_per_day"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   lastFetchedAt: timestamp("last_fetched_at", { withTimezone: true }),
 });
@@ -257,4 +260,14 @@ export const platformHealth = pgTable("platform_health", {
   lastPostAt: timestamp("last_post_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ─── Allowed Domains (Security Layer 1) ──────────────────────────────────────
+
+export const allowedDomains = pgTable("allowed_domains", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  domain: text("domain").notNull().unique(), // e.g., "reuters.com"
+  notes: text("notes"), // Optional description
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

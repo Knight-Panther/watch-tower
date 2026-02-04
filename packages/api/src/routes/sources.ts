@@ -1,8 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import { eq, desc, inArray } from "drizzle-orm";
 import { rssSources, sectors } from "@watch-tower/db";
-import { JOB_INGEST_FETCH } from "@watch-tower/shared";
+import { JOB_INGEST_FETCH, validateFeedUrl } from "@watch-tower/shared";
 import type { ApiDeps } from "../server.js";
+import { isDomainAllowed } from "../utils/domain-whitelist.js";
 
 const clampMaxAgeDays = (value: number) => Math.min(15, Math.max(1, value));
 
@@ -67,6 +68,21 @@ export const registerSourceRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     }
     if (ingest_interval_minutes < 1 || ingest_interval_minutes > 4320) {
       return reply.code(400).send({ error: "ingest_interval_minutes must be 1-4320" });
+    }
+
+    // Security Layer 2: URL format and SSRF protection
+    const urlValidation = validateFeedUrl(url);
+    if (!urlValidation.valid) {
+      return reply.code(400).send({ error: urlValidation.error });
+    }
+
+    // Security Layer 1: Domain whitelist check
+    const whitelistCheck = await isDomainAllowed(deps.db, url);
+    if (!whitelistCheck.allowed) {
+      return reply.code(403).send({
+        error: whitelistCheck.reason || "Domain not authorized",
+        domain: whitelistCheck.domain,
+      });
     }
 
     let inserted;
@@ -198,6 +214,24 @@ export const registerSourceRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     if (ingest_interval_minutes !== undefined) {
       if (ingest_interval_minutes < 1 || ingest_interval_minutes > 4320) {
         return reply.code(400).send({ error: "ingest_interval_minutes must be 1-4320" });
+      }
+    }
+
+    // Security checks (only if URL is being changed)
+    if (url !== undefined) {
+      // Layer 2: URL format and SSRF protection
+      const urlValidation = validateFeedUrl(url);
+      if (!urlValidation.valid) {
+        return reply.code(400).send({ error: urlValidation.error });
+      }
+
+      // Layer 1: Domain whitelist check
+      const whitelistCheck = await isDomainAllowed(deps.db, url);
+      if (!whitelistCheck.allowed) {
+        return reply.code(403).send({
+          error: whitelistCheck.reason || "Domain not authorized",
+          domain: whitelistCheck.domain,
+        });
       }
     }
 

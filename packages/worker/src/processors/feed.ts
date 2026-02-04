@@ -1,8 +1,10 @@
 import { Worker } from "bullmq";
-import Parser from "rss-parser";
-import { JOB_INGEST_FETCH, QUEUE_INGEST, logger } from "@watch-tower/shared";
+import { JOB_INGEST_FETCH, QUEUE_INGEST, logger, securityEnvSchema } from "@watch-tower/shared";
 import { type Database, articles, feedFetchRuns } from "@watch-tower/db";
 import type { EventPublisher } from "../events.js";
+import { fetchFeedSecurely } from "../utils/secure-rss.js";
+import { checkArticleQuota } from "../utils/article-quota.js";
+import { isDomainAllowed } from "../utils/domain-whitelist.js";
 
 type IngestDeps = {
   connection: { host: string; port: number };
@@ -10,7 +12,10 @@ type IngestDeps = {
   eventPublisher: EventPublisher;
 };
 
-const parser = new Parser({ timeout: 15000 });
+// Parse security config at module load
+const securityEnv = securityEnvSchema.parse(process.env);
+const MAX_FEED_SIZE_BYTES = securityEnv.MAX_FEED_SIZE_MB * 1024 * 1024;
+const FEED_TIMEOUT_MS = 15000;
 
 const truncateSnippet = (text: string | undefined, maxLen = 500) => {
   if (!text) return null;
@@ -62,10 +67,38 @@ export const createIngestWorker = ({ connection, db, eventPublisher }: IngestDep
         sectorId?: string;
       };
       const startedAt = new Date();
-      let feed;
-      try {
-        feed = await parser.parseURL(url);
-      } catch (error) {
+
+      // Layer 1: Domain whitelist check (blocks fetch if domain not whitelisted)
+      const whitelistCheck = await isDomainAllowed(db, url);
+      if (!whitelistCheck.allowed) {
+        const finishedAt = new Date();
+        const errorMessage = whitelistCheck.whitelistEmpty
+          ? "WHITELIST_EMPTY: Add domains to Site Rules to enable ingestion"
+          : `DOMAIN_BLOCKED: ${whitelistCheck.reason}`;
+
+        await recordFetchRun(db, {
+          sourceId,
+          status: "error",
+          startedAt,
+          finishedAt,
+          durationMs: finishedAt.getTime() - startedAt.getTime(),
+          errorMessage,
+        });
+
+        logger.warn(
+          { sourceId, url, domain: whitelistCheck.domain, reason: whitelistCheck.reason },
+          "[ingest] domain not in whitelist, skipping fetch",
+        );
+        return;
+      }
+
+      // Layer 3 & 4: Secure fetch with size limit and XXE protection
+      const fetchResult = await fetchFeedSecurely(url, {
+        maxSizeBytes: MAX_FEED_SIZE_BYTES,
+        timeoutMs: FEED_TIMEOUT_MS,
+      });
+
+      if (!fetchResult.success) {
         const finishedAt = new Date();
         await recordFetchRun(db, {
           sourceId,
@@ -73,11 +106,13 @@ export const createIngestWorker = ({ connection, db, eventPublisher }: IngestDep
           startedAt,
           finishedAt,
           durationMs: finishedAt.getTime() - startedAt.getTime(),
-          errorMessage: error instanceof Error ? error.message : String(error),
+          errorMessage: fetchResult.error,
         });
-        logger.error(`[${sourceId}] failed to parse ${url}`, error);
+        logger.error({ sourceId, url, error: fetchResult.error }, "[ingest] secure fetch failed");
         return;
       }
+
+      const feed = fetchResult.feed!;
 
       const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
       const itemsToInsert = feed.items
@@ -103,12 +138,50 @@ export const createIngestWorker = ({ connection, db, eventPublisher }: IngestDep
         })
         .filter((item): item is NonNullable<typeof item> => Boolean(item));
 
+      // Layer 5: Check article quota before inserting
+      const quota = await checkArticleQuota(db, sourceId);
+
+      if (quota.allowed === 0) {
+        const finishedAt = new Date();
+        logger.warn(
+          { sourceId, dailyUsed: quota.dailyUsed, dailyLimit: quota.dailyLimit },
+          "[ingest] daily quota exhausted, skipping",
+        );
+        await recordFetchRun(db, {
+          sourceId,
+          status: "success", // Not an error, just quota reached
+          startedAt,
+          finishedAt,
+          durationMs: finishedAt.getTime() - startedAt.getTime(),
+          itemCount: itemsToInsert.length,
+          itemAdded: 0,
+          errorMessage: `Daily quota reached (${quota.dailyUsed}/${quota.dailyLimit})`,
+        });
+        return;
+      }
+
+      // Apply quota limit
+      const itemsWithinQuota = itemsToInsert.slice(0, quota.allowed);
+
+      if (itemsWithinQuota.length < itemsToInsert.length) {
+        logger.info(
+          {
+            sourceId,
+            original: itemsToInsert.length,
+            limited: itemsWithinQuota.length,
+            perFetchLimit: quota.perFetchLimit,
+            dailyRemaining: quota.dailyRemaining,
+          },
+          "[ingest] articles limited by quota",
+        );
+      }
+
       let itemAdded = 0;
-      if (itemsToInsert.length > 0) {
+      if (itemsWithinQuota.length > 0) {
         try {
           const inserted = await db
             .insert(articles)
-            .values(itemsToInsert)
+            .values(itemsWithinQuota)
             .onConflictDoNothing({ target: articles.url })
             .returning({ id: articles.id });
           itemAdded = inserted.length;
@@ -120,7 +193,7 @@ export const createIngestWorker = ({ connection, db, eventPublisher }: IngestDep
             startedAt,
             finishedAt,
             durationMs: finishedAt.getTime() - startedAt.getTime(),
-            itemCount: itemsToInsert.length,
+            itemCount: itemsWithinQuota.length,
             errorMessage: error instanceof Error ? error.message : String(error),
           });
           logger.error(`[${sourceId}] insert failed`, error);
@@ -137,7 +210,7 @@ export const createIngestWorker = ({ connection, db, eventPublisher }: IngestDep
         startedAt,
         finishedAt,
         durationMs,
-        itemCount: itemsToInsert.length,
+        itemCount: itemsWithinQuota.length,
         itemAdded,
       });
 
@@ -147,14 +220,14 @@ export const createIngestWorker = ({ connection, db, eventPublisher }: IngestDep
         data: {
           sourceId,
           sourceName: feed.title ?? null,
-          articlesFound: itemsToInsert.length,
+          articlesFound: itemsWithinQuota.length,
           articlesAdded: itemAdded,
           durationMs,
         },
       });
 
       logger.debug(
-        `[${sourceId}] parsed ${itemsToInsert.length}, added ${itemAdded} new from ${feed.title ?? url}`,
+        `[${sourceId}] parsed ${itemsWithinQuota.length}, added ${itemAdded} new from ${feed.title ?? url}`,
       );
     },
     { connection, concurrency: 5 },

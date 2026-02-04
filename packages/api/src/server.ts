@@ -28,6 +28,7 @@ import { registerScoringRulesRoutes } from "./routes/scoring-rules.js";
 import { registerResetRoutes } from "./routes/reset.js";
 import { registerSocialAccountRoutes } from "./routes/social-accounts.js";
 import { registerCreditsRoutes } from "./routes/credits.js";
+import { registerSiteRulesRoutes } from "./routes/site-rules.js";
 import { createRequireApiKey } from "./utils/auth.js";
 
 dotenv.config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) });
@@ -92,25 +93,44 @@ export const buildApp = async () => {
   const maintenanceQueue = new Queue(QUEUE_MAINTENANCE, { connection: redisConnection });
 
   const app = Fastify({ logger: true });
+
+  // Layer 6: CORS Whitelist - only allow configured origins
+  const allowedOrigins = env.ALLOWED_ORIGINS?.split(",").map((o) => o.trim()) || [
+    "http://localhost:5173",
+  ];
+
   await app.register(cors, {
-    origin: true,
+    origin: (origin, cb) => {
+      // Allow requests with no origin (like mobile apps, curl, or server-to-server)
+      if (!origin) {
+        cb(null, true);
+        return;
+      }
+
+      if (allowedOrigins.includes(origin)) {
+        cb(null, true);
+      } else {
+        logger.warn({ origin, allowedOrigins }, "[cors] blocked request from unauthorized origin");
+        cb(new Error("Not allowed by CORS"), false);
+      }
+    },
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+    credentials: false,
   });
 
-  // Rate limiting: disabled in dev, 200/min in production
-  // Only affects API HTTP requests, not internal worker processing
-  const isDev = process.env.NODE_ENV !== "production";
-  if (!isDev) {
-    await app.register(rateLimit, {
-      max: 200,
-      timeWindow: "1 minute",
-      errorResponseBuilder: () => ({
-        statusCode: 429,
-        error: "Too Many Requests",
-        message: "Rate limit exceeded. Try again later.",
-      }),
-    });
-  }
+  // Layer 7: API Rate Limiting - always enabled, configurable limit
+  const apiRateLimit = env.API_RATE_LIMIT_PER_MINUTE ?? 200;
+
+  await app.register(rateLimit, {
+    max: apiRateLimit,
+    timeWindow: "1 minute",
+    keyGenerator: (request) => request.ip,
+    errorResponseBuilder: (_, context) => ({
+      statusCode: 429,
+      error: "Too Many Requests",
+      message: `Rate limit exceeded. Limit: ${context.max} requests per minute.`,
+    }),
+  });
 
   const requireApiKey = createRequireApiKey(env.API_KEY ?? "");
   const deps: ApiDeps = {
@@ -136,6 +156,7 @@ export const buildApp = async () => {
   registerResetRoutes(app, deps);
   registerSocialAccountRoutes(app, deps);
   registerCreditsRoutes(app, deps);
+  registerSiteRulesRoutes(app, deps);
 
   const closeRedis = () => redis.quit();
   return { app, port: env.PORT, closeDb, closeRedis, ingestQueue, maintenanceQueue };

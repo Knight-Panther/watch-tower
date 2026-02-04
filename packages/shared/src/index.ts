@@ -6,3 +6,4 @@ export * from "./logger.js";
 export * from "./events.js";
 export * from "./prompt-builder.js";
 export * from "./types.js";
+export * from "./url-validator.js";

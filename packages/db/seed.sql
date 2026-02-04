@@ -25,7 +25,9 @@ INSERT INTO app_config (key, value, updated_at) VALUES
   -- Platform auto-post toggles (enable when ready to post to each platform)
   ('auto_post_telegram', 'true', NOW()),
   ('auto_post_facebook', 'false', NOW()),
-  ('auto_post_linkedin', 'false', NOW())
+  ('auto_post_linkedin', 'false', NOW()),
+  -- Security: Kill switch (Layer 8) - stops ALL social posting when enabled
+  ('emergency_stop', 'false', NOW())
 ON CONFLICT (key) DO NOTHING;
 
 -- Seed default scoring rules for each sector
@@ -142,3 +144,30 @@ WHERE NOT EXISTS (SELECT 1 FROM social_accounts WHERE platform = 'linkedin');
 -- UPDATE social_accounts SET rate_limit_per_hour = 20 WHERE platform = 'telegram';
 -- UPDATE social_accounts SET rate_limit_per_hour = 1 WHERE platform = 'facebook';
 -- UPDATE social_accounts SET rate_limit_per_hour = 4 WHERE platform = 'linkedin';
+
+-- ─── Domain Whitelist (Security Layer 1) ─────────────────────────────────────
+-- Only RSS sources from these domains can be added.
+-- Add your trusted news sources here.
+
+INSERT INTO allowed_domains (domain, notes) VALUES
+  -- Existing seed sources (domain must match URL extraction)
+  ('bbci.co.uk', 'BBC News (feeds.bbci.co.uk)'),
+  ('theverge.com', 'The Verge - Tech News'),
+  ('wired.com', 'Wired Magazine'),
+  -- Major news agencies
+  ('reuters.com', 'Reuters News Agency'),
+  ('apnews.com', 'Associated Press'),
+  ('bbc.com', 'BBC News (international)'),
+  ('npr.org', 'NPR News'),
+  -- Financial news
+  ('bloomberg.com', 'Bloomberg Financial News'),
+  ('wsj.com', 'Wall Street Journal'),
+  ('ft.com', 'Financial Times'),
+  ('cnbc.com', 'CNBC Financial'),
+  -- Tech news
+  ('techcrunch.com', 'TechCrunch'),
+  ('arstechnica.com', 'Ars Technica'),
+  -- Crypto news
+  ('coindesk.com', 'CoinDesk - Crypto News'),
+  ('cointelegraph.com', 'Cointelegraph - Crypto News')
+ON CONFLICT (domain) DO NOTHING;

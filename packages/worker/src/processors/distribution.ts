@@ -6,7 +6,7 @@
  */
 
 import { Worker } from "bullmq";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
   QUEUE_DISTRIBUTION,
   JOB_DISTRIBUTION_IMMEDIATE,
@@ -15,6 +15,7 @@ import {
   type PostTemplateConfig,
 } from "@watch-tower/shared";
 import type { Database } from "@watch-tower/db";
+import { appConfig } from "@watch-tower/db";
 import {
   createTelegramProvider,
   createFacebookProvider,
@@ -101,6 +102,17 @@ export const createDistributionWorker = ({
   return new Worker(
     QUEUE_DISTRIBUTION,
     async (job) => {
+      // Layer 8: Kill switch check - stop all posting if emergency_stop is true
+      const [emergencyStop] = await db
+        .select({ value: appConfig.value })
+        .from(appConfig)
+        .where(eq(appConfig.key, "emergency_stop"));
+
+      if (emergencyStop?.value === "true") {
+        logger.warn("[distribution] emergency stop active, skipping all posting");
+        return { skipped: true, reason: "emergency_stop" };
+      }
+
       // ─── Immediate Post (Score 5) ───────────────────────────────────────────
       if (job.name === JOB_DISTRIBUTION_IMMEDIATE) {
         const { articleId } = job.data as { articleId: string };

@@ -323,6 +323,17 @@ const processScheduledPosts = async (
   providers: PlatformProviders,
   rateLimiter: RateLimiter,
 ) => {
+  // Layer 8: Kill switch check - stop all posting if emergency_stop is true
+  const [emergencyStop] = await db
+    .select({ value: appConfig.value })
+    .from(appConfig)
+    .where(eq(appConfig.key, "emergency_stop"));
+
+  if (emergencyStop?.value === "true") {
+    logger.warn("[post-scheduler] emergency stop active, skipping scheduled posts");
+    return;
+  }
+
   const hasAnyProvider = providers.telegram || providers.facebook || providers.linkedin;
   if (!hasAnyProvider) {
     return; // No platforms configured, skip

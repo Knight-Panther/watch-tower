@@ -256,4 +256,31 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       return { enabled };
     },
   );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Layer 8: Kill Switch (Emergency Stop)
+  // When enabled, ALL social posting is halted across all platforms.
+  // Pipeline continues (fetch, embed, score) but no posts go out.
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  app.get("/config/emergency-stop", { preHandler: deps.requireApiKey }, async () => {
+    const enabled = await getBooleanConfig(deps, "emergency_stop", false);
+    return { enabled };
+  });
+
+  app.post<{ Body: { enabled: boolean } }>(
+    "/config/emergency-stop",
+    { preHandler: deps.requireApiKey },
+    async (request, reply) => {
+      const { enabled } = request.body ?? {};
+      if (typeof enabled !== "boolean") {
+        return reply.code(400).send({ error: "enabled must be a boolean" });
+      }
+      await upsertBooleanConfig(deps, "emergency_stop", enabled);
+      // Log this critical action
+      const action = enabled ? "ACTIVATED" : "DEACTIVATED";
+      console.warn(`[KILL SWITCH] Emergency stop ${action} via API`);
+      return { enabled };
+    },
+  );
 };

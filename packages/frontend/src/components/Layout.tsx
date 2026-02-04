@@ -11,6 +11,7 @@ const navItems = [
   { to: "/scoring-rules", label: "Scoring Rules" },
   { to: "/post-templates", label: "Post Formats" },
   { to: "/platform-settings", label: "Platforms" },
+  { to: "/site-rules", label: "Site Rules" },
   { to: "/settings", label: "DB/Telemetry" },
 ];
 

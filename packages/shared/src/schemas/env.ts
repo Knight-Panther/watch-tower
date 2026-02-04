@@ -1,6 +1,24 @@
 import { z } from "zod";
 
-export const baseEnvSchema = z.object({
+// ─── Security Environment Schema ─────────────────────────────────────────────
+// All security fields have sensible defaults and are optional.
+
+export const securityEnvSchema = z.object({
+  // Feed limits (Layer 3 & 5)
+  MAX_FEED_SIZE_MB: z.coerce.number().min(1).max(50).default(5),
+  MAX_ARTICLES_PER_FETCH: z.coerce.number().min(10).max(500).default(100),
+  MAX_ARTICLES_PER_SOURCE_DAILY: z.coerce.number().min(50).max(5000).default(500),
+  // CORS (Layer 6)
+  ALLOWED_ORIGINS: z.string().default("http://localhost:5173"),
+  // API rate limiting (Layer 7)
+  API_RATE_LIMIT_PER_MINUTE: z.coerce.number().min(10).max(1000).default(200),
+});
+
+export type SecurityEnv = z.infer<typeof securityEnvSchema>;
+
+// ─── Core Environment Schema (internal) ──────────────────────────────────────
+
+const coreEnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
   REDIS_HOST: z.string().min(1),
   REDIS_PORT: z.coerce.number().int().positive(),
@@ -71,6 +89,10 @@ export const baseEnvSchema = z.object({
     .optional()
     .transform((val) => (val === "" ? undefined : val)),
 });
+
+// ─── Base Environment Schema (merged with security) ──────────────────────────
+
+export const baseEnvSchema = coreEnvSchema.merge(securityEnvSchema);
 
 export type BaseEnv = z.infer<typeof baseEnvSchema>;
 

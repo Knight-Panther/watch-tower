@@ -52,6 +52,7 @@ import Scheduled from "./pages/Scheduled";
 import ScoringRules from "./pages/ScoringRules";
 import PostTemplates from "./pages/PostTemplates";
 import PlatformSettings from "./pages/PlatformSettings";
+import SiteRules from "./pages/SiteRules";
 
 const emptySourceForm = {
   url: "",
@@ -896,6 +897,7 @@ export default function App() {
         <Route path="/scoring-rules" element={<ScoringRules />} />
         <Route path="/post-templates" element={<PostTemplates />} />
         <Route path="/platform-settings" element={<PlatformSettings />} />
+        <Route path="/site-rules" element={<SiteRules />} />
         <Route
           path="/settings"
           element={
