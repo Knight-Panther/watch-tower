@@ -87,7 +87,9 @@ Core tables (PostgreSQL + pgvector):
 | `feed_fetch_runs` | Fetch attempt telemetry |
 | `llm_telemetry` | LLM API call tracking (tokens, cost, latency) |
 | `article_images` | AI-generated images for posts (future) |
-| `app_config` | Key-value settings (incl. `auto_post_score5` toggle) |
+| `app_config` | Key-value settings (incl. `auto_post_score5` toggle, `emergency_stop`) |
+| `platform_health` | Social platform health status, token expiry tracking |
+| `allowed_domains` | RSS source domain whitelist (security) |
 
 **Pipeline stages** (on `articles.pipeline_stage`):
 `ingested` → `embedded` → `scored` → `approved`/`rejected` → `posted` (or `duplicate`)
@@ -163,6 +165,13 @@ LLM_PROVIDER=claude              # 'claude' | 'openai' | 'deepseek'
 # Frontend
 VITE_API_URL=http://localhost:3001
 VITE_API_KEY=local-dev-key
+
+# Security (see Security Hardening section)
+MAX_FEED_SIZE_MB=5                    # Max RSS feed size in MB
+MAX_ARTICLES_PER_FETCH=100            # Max articles per single fetch
+MAX_ARTICLES_PER_SOURCE_DAILY=500     # Max articles per source per day
+ALLOWED_ORIGINS=http://localhost:5173 # Comma-separated allowed CORS origins
+API_RATE_LIMIT_PER_MINUTE=200         # Global API rate limit
 ```
 
 ## Logging
@@ -230,6 +239,59 @@ Articles store only `title + content_snippet` (not full article body).
 | Facebook | ~60 days | Manual re-auth or use long-lived page token |
 | LinkedIn | ~60 days | Manual re-auth (offline_access requires partner approval) |
 
+## Security Hardening (9-Layer Defense)
+
+Watch Tower implements defense-in-depth security to protect against malicious RSS feeds, API abuse, and content injection.
+
+### Security Layers
+
+| Layer | Protection | Configurable Via |
+|-------|------------|------------------|
+| 1. Domain Whitelist | Only trusted RSS source domains allowed | DB + UI (Site Rules page) |
+| 2. URL Validation | Block `file://`, private IPs, localhost, cloud metadata | Code only |
+| 3. Feed Size Limit | Max bytes per RSS fetch (default 5MB) | Env + UI |
+| 4. XXE Protection | Secure XML parser config (no external entities) | Code only |
+| 5. Article Quotas | Per-fetch limit (100) + daily limit per source (500) | Env + UI (per-source override) |
+| 6. CORS Whitelist | Only allowed frontend origins can call API | Env |
+| 7. API Rate Limiting | Per-endpoint request limits (200/min global) | Env + UI display |
+| 8. Kill Switch | Emergency stop all social posting | UI toggle |
+| 9. Nginx Basic Auth | Login required to access dashboard | Nginx config |
+
+### Domain Whitelist (Layer 1)
+
+- Backend-only list of approved RSS source domains (e.g., `reuters.com`, `bloomberg.com`)
+- Stored in `allowed_domains` table, managed via Site Rules UI
+- When adding RSS source, domain must be in whitelist or request returns 403
+- Protects against SSRF and malicious feed injection
+
+### Article Quotas (Layer 5)
+
+- **Global defaults** set via environment variables
+- **Per-source overrides** via `rss_sources.max_articles_per_fetch` and `rss_sources.max_articles_per_day`
+- Prevents database flooding from compromised/buggy feeds
+
+### Kill Switch (Layer 8)
+
+- `app_config.emergency_stop = true` stops ALL social posting
+- Pipeline continues (fetch, score) but no posts go out
+- Toggle via Site Rules UI or API: `POST /config/emergency-stop`
+
+### Nginx Basic Auth (Layer 9)
+
+- Browser login prompt before accessing any page
+- Configured at Nginx reverse proxy level (VPS deployment)
+- Credentials stored in `/etc/nginx/.htpasswd`
+- Free, no code changes required
+- `/api/health` excluded from auth (for monitoring tools)
+
+### Frontend: Site Rules Page
+
+New page with tabs for managing security settings:
+- **Domain Whitelist** - Add/remove allowed RSS domains
+- **Feed Limits** - View global defaults, set per-source overrides
+- **API Security** - View CORS origins, rate limits
+- **Emergency Controls** - Kill switch toggle
+
 ## Development Workflow
 
 ```bash
@@ -251,6 +313,7 @@ npm run dev                # Start API + Worker + Frontend
 | `VITE_API_URL` | `http://localhost:3001` | `https://api.yourdomain.com` |
 | `VITE_API_KEY` | `local-dev-key` | Same as API_KEY |
 | `LOG_LEVEL` | `debug` | `info` or `warn` |
+| `ALLOWED_ORIGINS` | `http://localhost:5173` | `https://yourdomain.com` |
 
 ### OAuth Redirect URLs
 
@@ -273,11 +336,16 @@ OAuth callbacks happen in the browser, so production URLs must be registered in 
 ### Security Hardening
 
 - [ ] Generate strong `API_KEY` (e.g., `openssl rand -hex 32`)
-- [ ] Use HTTPS for all public endpoints
+- [ ] Use HTTPS for all public endpoints (Let's Encrypt)
 - [ ] Set `NODE_ENV=production` (enables stricter rate limiting)
+- [ ] Configure `ALLOWED_ORIGINS` with production frontend URL
+- [ ] Seed `allowed_domains` table with trusted RSS source domains
+- [ ] Review and adjust `MAX_FEED_SIZE_MB`, `MAX_ARTICLES_PER_FETCH`, `MAX_ARTICLES_PER_SOURCE_DAILY`
+- [ ] Configure Nginx Basic Auth with `.htpasswd` file
 - [ ] Rotate social platform tokens before expiry (LinkedIn/Facebook: 60 days)
 - [ ] Backup PostgreSQL database regularly
 - [ ] Monitor Redis memory usage
+- [ ] Test kill switch functionality before going live
 
 ### Post-Deploy Verification
 
@@ -308,7 +376,11 @@ Implementation tasks are tracked in the `priority-tasks/` folder at the project 
 - **Completed tasks**: Renamed to `taskN_done.md` after all items are implemented
 - **Always check this folder first** when starting a new session to understand pending work
 
+Active:
+- `task12.md` — Security Hardening (9-layer defense system, Site Rules UI, Nginx Basic Auth)
+
 Completed:
+- `task11_done.md` — Platform Health Monitoring (token validity, expiry tracking, emergency brake)
 - `task1_done.md` — Infrastructure hardening & reliability
 - `task2_done.md` — Stage 2: Semantic Dedup Pipeline
 - `task3_done.md` — Stage 3: LLM Brain Pipeline (scoring + summarization + multi-provider)

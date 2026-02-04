@@ -4,7 +4,7 @@ export type { Sector, Source };
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
 const API_KEY = import.meta.env.VITE_API_KEY ?? "";
-const authHeaders = API_KEY ? { "x-api-key": API_KEY } : {};
+const authHeaders: Record<string, string> = API_KEY ? { "x-api-key": API_KEY } : {};
 
 export const listSectors = async (): Promise<Sector[]> => {
   const res = await fetch(`${API_URL}/sectors`, {
@@ -764,7 +764,7 @@ export const cancelDelivery = async (
 ): Promise<{ id: string; status: string }> => {
   const res = await fetch(`${API_URL}/scheduled/${deliveryId}`, {
     method: "DELETE",
-    headers: authHeaders as Record<string, string>,
+    headers: authHeaders,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -775,7 +775,7 @@ export const cancelDelivery = async (
 
 export const getScheduledStats = async (): Promise<ScheduledStats> => {
   const res = await fetch(`${API_URL}/scheduled/stats`, {
-    headers: authHeaders as Record<string, string>,
+    headers: authHeaders,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -863,7 +863,7 @@ export const saveScoringRule = async (
 export const deleteScoringRule = async (sectorId: string): Promise<{ success: boolean }> => {
   const res = await fetch(`${API_URL}/scoring-rules/${sectorId}`, {
     method: "DELETE",
-    headers: authHeaders as Record<string, string>,
+    headers: authHeaders,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -878,7 +878,7 @@ export const previewScoringPrompt = async (
 ): Promise<{ prompt: string }> => {
   const res = await fetch(`${API_URL}/scoring-rules/preview`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...(authHeaders as Record<string, string>) },
+    headers: { "Content-Type": "application/json", ...(authHeaders) },
     body: JSON.stringify({ config, sector_name: sectorName }),
   });
   if (!res.ok) {
@@ -895,7 +895,7 @@ export const previewScoringPrompt = async (
 // ── Telegram (Active) ──
 export const getAutoPostTelegram = async (): Promise<boolean> => {
   const res = await fetch(`${API_URL}/config/auto-post-telegram`, {
-    headers: authHeaders as Record<string, string>,
+    headers: authHeaders,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -908,7 +908,7 @@ export const getAutoPostTelegram = async (): Promise<boolean> => {
 export const setAutoPostTelegram = async (enabled: boolean): Promise<boolean> => {
   const res = await fetch(`${API_URL}/config/auto-post-telegram`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json", ...(authHeaders as Record<string, string>) },
+    headers: { "Content-Type": "application/json", ...(authHeaders) },
     body: JSON.stringify({ enabled }),
   });
   if (!res.ok) {
@@ -927,7 +927,7 @@ export const setAutoPostTelegram = async (enabled: boolean): Promise<boolean> =>
 // 3. Uncomment these functions and the UI toggle
 export const getAutoPostFacebook = async (): Promise<boolean> => {
   const res = await fetch(`${API_URL}/config/auto-post-facebook`, {
-    headers: authHeaders as Record<string, string>,
+    headers: authHeaders,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -940,7 +940,7 @@ export const getAutoPostFacebook = async (): Promise<boolean> => {
 export const setAutoPostFacebook = async (enabled: boolean): Promise<boolean> => {
   const res = await fetch(`${API_URL}/config/auto-post-facebook`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json", ...(authHeaders as Record<string, string>) },
+    headers: { "Content-Type": "application/json", ...(authHeaders) },
     body: JSON.stringify({ enabled }),
   });
   if (!res.ok) {
@@ -959,7 +959,7 @@ export const setAutoPostFacebook = async (enabled: boolean): Promise<boolean> =>
 // 3. Uncomment these functions and the UI toggle
 export const getAutoPostLinkedin = async (): Promise<boolean> => {
   const res = await fetch(`${API_URL}/config/auto-post-linkedin`, {
-    headers: authHeaders as Record<string, string>,
+    headers: authHeaders,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -972,7 +972,7 @@ export const getAutoPostLinkedin = async (): Promise<boolean> => {
 export const setAutoPostLinkedin = async (enabled: boolean): Promise<boolean> => {
   const res = await fetch(`${API_URL}/config/auto-post-linkedin`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json", ...(authHeaders as Record<string, string>) },
+    headers: { "Content-Type": "application/json", ...(authHeaders) },
     body: JSON.stringify({ enabled }),
   });
   if (!res.ok) {
@@ -1004,7 +1004,7 @@ export type ResetResult = {
 export const resetAllData = async (): Promise<ResetResult> => {
   const res = await fetch(`${API_URL}/reset`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...(authHeaders as Record<string, string>) },
+    headers: { "Content-Type": "application/json", ...(authHeaders) },
     body: JSON.stringify({ confirm: true }),
   });
   if (!res.ok) {
@@ -1042,7 +1042,7 @@ export interface SocialAccount {
 
 export const listSocialAccounts = async (): Promise<SocialAccount[]> => {
   const res = await fetch(`${API_URL}/social-accounts`, {
-    headers: authHeaders as Record<string, string>,
+    headers: authHeaders,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -1055,7 +1055,7 @@ export const getPostTemplate = async (
   accountId: string,
 ): Promise<{ platform: string; template: PostTemplateConfig; is_default: boolean }> => {
   const res = await fetch(`${API_URL}/social-accounts/${accountId}/template`, {
-    headers: authHeaders as Record<string, string>,
+    headers: authHeaders,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -1070,7 +1070,7 @@ export const savePostTemplate = async (
 ): Promise<{ success: boolean; platform: string; template: PostTemplateConfig }> => {
   const res = await fetch(`${API_URL}/social-accounts/${accountId}/template`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json", ...(authHeaders as Record<string, string>) },
+    headers: { "Content-Type": "application/json", ...(authHeaders) },
     body: JSON.stringify({ template }),
   });
   if (!res.ok) {
@@ -1085,7 +1085,7 @@ export const resetPostTemplate = async (
 ): Promise<{ success: boolean; message: string; template: PostTemplateConfig }> => {
   const res = await fetch(`${API_URL}/social-accounts/${accountId}/template`, {
     method: "DELETE",
-    headers: authHeaders as Record<string, string>,
+    headers: authHeaders,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -1101,7 +1101,7 @@ export const previewPost = async (
 ): Promise<{ platform: string; formatted_text: string; char_count: number }> => {
   const res = await fetch(`${API_URL}/social-accounts/preview`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...(authHeaders as Record<string, string>) },
+    headers: { "Content-Type": "application/json", ...(authHeaders) },
     body: JSON.stringify({ platform, template, article }),
   });
   if (!res.ok) {
@@ -1123,7 +1123,7 @@ export type PlatformUsage = {
 
 export const getSocialAccountsUsage = async (): Promise<{ usage: PlatformUsage[] }> => {
   const res = await fetch(`${API_URL}/social-accounts/usage`, {
-    headers: authHeaders as Record<string, string>,
+    headers: authHeaders,
   });
   if (!res.ok) {
     throw new Error("Failed to load usage stats");
@@ -1137,7 +1137,7 @@ export const updateSocialAccountRateLimit = async (
 ): Promise<{ success: boolean; platform: string; rate_limit_per_hour: number }> => {
   const res = await fetch(`${API_URL}/social-accounts/${accountId}/rate-limit`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json", ...(authHeaders as Record<string, string>) },
+    headers: { "Content-Type": "application/json", ...(authHeaders) },
     body: JSON.stringify({ rate_limit_per_hour: rateLimitPerHour }),
   });
   if (!res.ok) {
@@ -1168,7 +1168,7 @@ export type PlatformHealth = {
 
 export const getPlatformHealth = async (): Promise<PlatformHealth[]> => {
   const res = await fetch(`${API_URL}/health/platforms`, {
-    headers: authHeaders as Record<string, string>,
+    headers: authHeaders,
   });
   if (!res.ok) throw new Error("Failed to fetch platform health");
   const data = await res.json();
@@ -1178,7 +1178,7 @@ export const getPlatformHealth = async (): Promise<PlatformHealth[]> => {
 export const refreshPlatformHealth = async (): Promise<void> => {
   const res = await fetch(`${API_URL}/health/platforms/refresh`, {
     method: "POST",
-    headers: authHeaders as Record<string, string>,
+    headers: authHeaders,
   });
   if (!res.ok) throw new Error("Failed to trigger health check");
 };
@@ -1203,7 +1203,7 @@ export type ProviderBalancesResponse = {
 
 export const getProviderBalances = async (): Promise<ProviderBalancesResponse> => {
   const res = await fetch(`${API_URL}/credits`, {
-    headers: authHeaders as Record<string, string>,
+    headers: authHeaders,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -1215,7 +1215,7 @@ export const getProviderBalances = async (): Promise<ProviderBalancesResponse> =
 export const refreshProviderBalances = async (): Promise<ProviderBalancesResponse> => {
   const res = await fetch(`${API_URL}/credits/refresh`, {
     method: "POST",
-    headers: authHeaders as Record<string, string>,
+    headers: authHeaders,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

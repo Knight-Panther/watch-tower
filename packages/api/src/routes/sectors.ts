@@ -12,7 +12,16 @@ const slugify = (value: string) =>
 
 export const registerSectorRoutes = (app: FastifyInstance, deps: ApiDeps) => {
   app.get("/sectors", { preHandler: deps.requireApiKey }, async () => {
-    return deps.db.select().from(sectors).orderBy(asc(sectors.name));
+    return deps.db
+      .select({
+        id: sectors.id,
+        name: sectors.name,
+        slug: sectors.slug,
+        default_max_age_days: sectors.defaultMaxAgeDays,
+        created_at: sectors.createdAt,
+      })
+      .from(sectors)
+      .orderBy(asc(sectors.name));
   });
 
   app.post<{
@@ -38,7 +47,13 @@ export const registerSectorRoutes = (app: FastifyInstance, deps: ApiDeps) => {
           slug: slugify(name),
           defaultMaxAgeDays: default_max_age_days ?? 5,
         })
-        .returning();
+        .returning({
+          id: sectors.id,
+          name: sectors.name,
+          slug: sectors.slug,
+          default_max_age_days: sectors.defaultMaxAgeDays,
+          created_at: sectors.createdAt,
+        });
       return row;
     } catch (err: unknown) {
       const pgErr = err as { code?: string };
@@ -71,7 +86,13 @@ export const registerSectorRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       .update(sectors)
       .set({ defaultMaxAgeDays: default_max_age_days })
       .where(eq(sectors.id, id))
-      .returning();
+      .returning({
+        id: sectors.id,
+        name: sectors.name,
+        slug: sectors.slug,
+        default_max_age_days: sectors.defaultMaxAgeDays,
+        created_at: sectors.createdAt,
+      });
 
     if (!row) {
       return reply.code(404).send({ error: "Sector not found" });
@@ -88,7 +109,16 @@ export const registerSectorRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     // Clear sector_id from sources before deleting
     await deps.db.update(rssSources).set({ sectorId: null }).where(eq(rssSources.sectorId, id));
 
-    const [row] = await deps.db.delete(sectors).where(eq(sectors.id, id)).returning();
+    const [row] = await deps.db
+      .delete(sectors)
+      .where(eq(sectors.id, id))
+      .returning({
+        id: sectors.id,
+        name: sectors.name,
+        slug: sectors.slug,
+        default_max_age_days: sectors.defaultMaxAgeDays,
+        created_at: sectors.createdAt,
+      });
 
     if (!row) {
       return reply.code(404).send({ error: "Sector not found" });
