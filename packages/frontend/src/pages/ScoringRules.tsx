@@ -216,7 +216,7 @@ export default function ScoringRules() {
       <section className="sticky top-28 z-10 rounded-2xl border border-slate-800 bg-slate-900 p-5">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Scoring Rules</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">LLM Brain</h1>
             <p className="mt-1 text-sm text-slate-400">
               Configure how articles are scored and summarized per sector.
             </p>
@@ -469,8 +469,8 @@ export default function ScoringRules() {
               </div>
               <p className="mt-3 text-xs text-slate-500">
                 Scores between these thresholds go to manual review. Platform settings are on the{" "}
-                <a href="/platform-settings" className="text-emerald-400 hover:underline">
-                  Platforms
+                <a href="/media-channels" className="text-emerald-400 hover:underline">
+                  Media Channels
                 </a>{" "}
                 page.
               </p>

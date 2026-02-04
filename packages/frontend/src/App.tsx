@@ -47,8 +47,7 @@ import Monitoring from "./pages/Monitoring";
 import Settings from "./pages/Settings";
 import Home from "./pages/Home";
 import SectorManagement from "./pages/SectorManagement";
-import Articles from "./pages/Articles";
-import Scheduled from "./pages/Scheduled";
+import ArticleScheduler from "./pages/ArticleScheduler";
 import ScoringRules from "./pages/ScoringRules";
 import MediaChannelControl from "./pages/MediaChannelControl";
 import SiteRules from "./pages/SiteRules";
@@ -891,8 +890,7 @@ export default function App() {
             />
           }
         />
-        <Route path="/articles" element={<Articles />} />
-        <Route path="/scheduled" element={<Scheduled />} />
+        <Route path="/article-scheduler" element={<ArticleScheduler />} />
         <Route path="/scoring-rules" element={<ScoringRules />} />
         <Route path="/media-channels" element={<MediaChannelControl />} />
         <Route path="/site-rules" element={<SiteRules />} />

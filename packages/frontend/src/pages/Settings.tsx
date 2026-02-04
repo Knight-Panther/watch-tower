@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type {
   TelemetrySummary,
   TelemetryByProvider,
@@ -108,6 +108,8 @@ export default function Settings({
   onPostDeliveriesTtlChange,
   onSavePostDeliveriesTtl,
 }: SettingsProps) {
+  const [activeTab, setActiveTab] = useState<"telemetry" | "cleanup">("telemetry");
+
   const totalCostToday = telemetrySummary?.today.cost_usd ?? 0;
   const totalCost30d = telemetrySummary?.last_30_days.cost_usd ?? 0;
 
@@ -117,14 +119,41 @@ export default function Settings({
   }, [telemetryDaily]);
 
   return (
-    <div className="grid gap-8">
-      {/* ═══════════════════════════════════════════════════════════════════════
-          TELEMETRY SECTION
-          ═══════════════════════════════════════════════════════════════════════ */}
+    <div className="grid gap-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">DB / Telemetry</h1>
+        <p className="mt-1 text-sm text-slate-400">
+          LLM usage metrics and database retention settings.
+        </p>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 border-b border-slate-800">
+        {[
+          { id: "telemetry", label: "LLM Telemetry" },
+          { id: "cleanup", label: "Database Cleanup" },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id as typeof activeTab)}
+            className={`px-4 py-2 text-sm font-medium transition ${
+              activeTab === tab.id
+                ? "border-b-2 border-cyan-400 text-cyan-400"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* LLM Telemetry Tab */}
+      {activeTab === "telemetry" && (
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">LLM Telemetry</h1>
+            <h2 className="text-lg font-semibold">LLM Telemetry</h2>
             <p className="mt-1 text-sm text-slate-400">
               Token usage, costs, and latency metrics.
             </p>
@@ -364,12 +393,12 @@ export default function Settings({
           </div>
         ) : null}
       </section>
+      )}
 
-      {/* ═══════════════════════════════════════════════════════════════════════
-          DATABASE CLEANUP SECTION
-          ═══════════════════════════════════════════════════════════════════════ */}
+      {/* Database Cleanup Tab */}
+      {activeTab === "cleanup" && (
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
-        <h1 className="text-2xl font-semibold tracking-tight">Database Cleanup</h1>
+        <h2 className="text-lg font-semibold">Database Cleanup</h2>
         <p className="mt-1 text-sm text-slate-400">
           Control retention and TTL settings for database tables.
         </p>
@@ -506,6 +535,7 @@ export default function Settings({
           </div>
         )}
       </section>
+      )}
     </div>
   );
 }

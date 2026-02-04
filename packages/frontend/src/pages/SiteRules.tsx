@@ -139,7 +139,7 @@ export default function SiteRules() {
     <div className="grid gap-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Site Rules</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Restrictions</h1>
         <p className="mt-1 text-sm text-slate-400">
           Security settings, domain whitelist, and emergency controls.
         </p>

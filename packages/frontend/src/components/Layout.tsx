@@ -5,12 +5,11 @@ import type { ConnectionStatus } from "../hooks/useServerEvents";
 const navItems = [
   { to: "/", label: "Home" },
   { to: "/monitoring", label: "Monitoring" },
-  { to: "/articles", label: "Articles" },
-  { to: "/scheduled", label: "Scheduled" },
+  { to: "/article-scheduler", label: "Article Scheduler" },
   { to: "/sectors", label: "Sectors" },
-  { to: "/scoring-rules", label: "Scoring Rules" },
+  { to: "/scoring-rules", label: "LLM Brain" },
   { to: "/media-channels", label: "Media Channels" },
-  { to: "/site-rules", label: "Site Rules" },
+  { to: "/site-rules", label: "Restrictions" },
   { to: "/settings", label: "DB/Telemetry" },
 ];
 
