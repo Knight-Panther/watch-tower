@@ -4,69 +4,89 @@
 
 Add health monitoring for social platforms (Telegram, Facebook, LinkedIn) with:
 - Token validity checks
-- Token expiry tracking (Facebook from API, LinkedIn auto-calculated)
-- Platform API rate limit visibility
+- Token expiry tracking (Facebook from API, LinkedIn auto-calculated with rotation detection)
+- Platform API rate limit visibility (informational, separate from our Redis posting limits)
 - Status dashboard in existing Platform Settings page
+- Emergency brake: skip posting to unhealthy platforms
 
 ## Architecture Decisions
 
 | Decision | Choice |
 |----------|--------|
 | LinkedIn expiry tracking | Auto-calculate 60 days from first successful health check |
-| Health check frequency | Worker startup + every 6 hours via maintenance job |
-| Storage | New `platform_health` database table |
-| Platform rate limit data | Capture on healthCheck(), store in DB, show in UI |
+| LinkedIn token rotation | Detect via `tokenHash` (SHA256) - reset timer on change |
+| Health check frequency | Startup (via immediate job) + every 6 hours recurring |
+| Storage | New `platform_health` table (camelCase Drizzle → snake_case DB) |
+| Platform rate limit data | Informational only - Redis handles posting enforcement |
 | UI location | Extend existing `/platform-settings` page |
-| Emergency brake | Not implemented (rely on app-side limits) |
+| Emergency brake | Distribution/maintenance workers check `healthy` before posting |
+| API path convention | `/platforms/health` (no `/api` prefix, matches existing routes) |
 
 ---
 
 ## Phase 1: Database Schema
 
-### 1.1 Create migration for `platform_health` table
-
-**File:** `packages/db/drizzle/XXXX_platform_health.sql`
-
-```sql
-CREATE TABLE platform_health (
-  platform VARCHAR(20) PRIMARY KEY,        -- 'telegram' | 'facebook' | 'linkedin'
-  healthy BOOLEAN NOT NULL DEFAULT false,
-  error TEXT,
-
-  -- Token expiry tracking
-  token_expires_at TIMESTAMPTZ,            -- Facebook: from API, LinkedIn: calculated
-  token_first_seen_at TIMESTAMPTZ,         -- For LinkedIn 60-day calculation
-
-  -- Platform API rate limit data (captured on health check)
-  rate_limit_remaining INTEGER,            -- LinkedIn: absolute count remaining
-  rate_limit_max INTEGER,                  -- LinkedIn: daily limit
-  rate_limit_percent INTEGER,              -- Facebook: usage percentage (0-100)
-  rate_limit_resets_at TIMESTAMPTZ,        -- LinkedIn: when limit resets
-
-  -- Timestamps
-  last_check_at TIMESTAMPTZ NOT NULL,
-  last_post_at TIMESTAMPTZ,                -- Updated when post succeeds
-
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-```
-
-### 1.2 Add Drizzle schema
+### 1.1 Add Drizzle schema (generates migration)
 
 **File:** `packages/db/src/schema.ts`
 
-Add `platformHealth` table definition with proper types.
+> **IMPORTANT**: Use camelCase property names mapped to snake_case columns (matches existing pattern).
+
+```typescript
+// ─── Platform Health ─────────────────────────────────────────────────────────
+
+export const platformHealth = pgTable("platform_health", {
+  platform: text("platform").primaryKey(), // 'telegram' | 'facebook' | 'linkedin'
+  healthy: boolean("healthy").notNull().default(false),
+  error: text("error"),
+
+  // Token tracking
+  tokenExpiresAt: timestamp("token_expires_at", { withTimezone: true }),
+  tokenFirstSeenAt: timestamp("token_first_seen_at", { withTimezone: true }),
+  tokenHash: text("token_hash"), // SHA256 of token - detect rotation
+
+  // Platform API rate limits (informational - captured from health check)
+  rateLimitRemaining: integer("rate_limit_remaining"),
+  rateLimitMax: integer("rate_limit_max"),
+  rateLimitPercent: integer("rate_limit_percent"), // Facebook: 0-100
+  rateLimitResetsAt: timestamp("rate_limit_resets_at", { withTimezone: true }),
+
+  // Timestamps
+  lastCheckAt: timestamp("last_check_at", { withTimezone: true }).notNull(),
+  lastPostAt: timestamp("last_post_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+```
+
+### 1.2 Export from db package
+
+**File:** `packages/db/src/index.ts`
+
+```typescript
+export { platformHealth } from "./schema.js";
+```
+
+### 1.3 Generate and run migration
+
+```bash
+npm run db:generate   # Creates migration in packages/db/drizzle/
+npm run db:migrate    # Applies migration
+```
 
 ---
 
 ## Phase 2: Provider Health Checks
 
-### 2.1 Update SocialProvider interface
+### 2.1 Add HealthCheckResult type and update interface
 
 **File:** `packages/social/src/types.ts`
 
 ```typescript
+import type { PostTemplateConfig } from "@watch-tower/shared";
+
+// ... existing types ...
+
 export interface HealthCheckResult {
   platform: string;
   healthy: boolean;
@@ -87,18 +107,32 @@ export interface HealthCheckResult {
 }
 
 export interface SocialProvider {
-  name: string;
+  readonly name: string;  // Keep readonly (existing pattern)
   post(request: PostRequest): Promise<PostResult>;
   healthCheck(): Promise<HealthCheckResult>;  // NEW
+
+  // Template-aware formatting (preferred)
   formatPost(article: ArticleForPost, template: PostTemplateConfig): string;
+
+  // Legacy methods (delegate to formatPost with platform defaults)
   formatSinglePost(article: ArticleForPost): string;
   formatDigestPost(articles: ArticleForPost[], sector: string): string;
 }
 ```
 
-### 2.2 Implement Telegram healthCheck()
+### 2.2 Export HealthCheckResult
+
+**File:** `packages/social/src/index.ts`
+
+```typescript
+export type { HealthCheckResult } from "./types.js";
+```
+
+### 2.3 Implement Telegram healthCheck()
 
 **File:** `packages/social/src/providers/telegram.ts`
+
+Add inside `createTelegramProvider` return object:
 
 ```typescript
 async healthCheck(): Promise<HealthCheckResult> {
@@ -124,8 +158,7 @@ async healthCheck(): Promise<HealthCheckResult> {
       platform: "telegram",
       healthy: true,
       checkedAt: new Date(),
-      // No rate limit data available for Telegram
-      // No token expiry (Telegram tokens don't expire)
+      // Telegram: no rate limit headers, tokens don't expire
     };
   } catch (err) {
     return {
@@ -135,12 +168,14 @@ async healthCheck(): Promise<HealthCheckResult> {
       checkedAt: new Date(),
     };
   }
-}
+},
 ```
 
-### 2.3 Implement Facebook healthCheck()
+### 2.4 Implement Facebook healthCheck()
 
 **File:** `packages/social/src/providers/facebook.ts`
+
+Add inside `createFacebookProvider` return object:
 
 ```typescript
 async healthCheck(): Promise<HealthCheckResult> {
@@ -169,11 +204,14 @@ async healthCheck(): Promise<HealthCheckResult> {
         rateLimit = {
           percent: Math.max(usage.call_count || 0, usage.total_cputime || 0, usage.total_time || 0),
         };
-      } catch {}
+      } catch {
+        // Ignore parse errors
+      }
     }
 
     // Get token expiry from debug_token response
-    const expiresAt = result.data.expires_at
+    // Handle expires_at = 0 as "never expires" (long-lived page tokens)
+    const expiresAt = result.data.expires_at && result.data.expires_at > 0
       ? new Date(result.data.expires_at * 1000)
       : undefined;
 
@@ -192,12 +230,14 @@ async healthCheck(): Promise<HealthCheckResult> {
       checkedAt: new Date(),
     };
   }
-}
+},
 ```
 
-### 2.4 Implement LinkedIn healthCheck()
+### 2.5 Implement LinkedIn healthCheck()
 
 **File:** `packages/social/src/providers/linkedin.ts`
+
+Add inside `createLinkedInProvider` return object:
 
 ```typescript
 async healthCheck(): Promise<HealthCheckResult> {
@@ -219,12 +259,12 @@ async healthCheck(): Promise<HealthCheckResult> {
       return {
         platform: "linkedin",
         healthy: false,
-        error: sanitizeError(errorData.message || `HTTP ${response.status}`),
+        error: sanitizeError((errorData as { message?: string }).message || `HTTP ${response.status}`),
         checkedAt: new Date(),
       };
     }
 
-    // Parse rate limit headers
+    // Parse rate limit headers (may not always be present)
     const limitHeader = response.headers.get("X-RateLimit-Limit");
     const remainingHeader = response.headers.get("X-RateLimit-Remaining");
     const resetHeader = response.headers.get("X-RateLimit-Reset");
@@ -239,7 +279,7 @@ async healthCheck(): Promise<HealthCheckResult> {
       healthy: true,
       rateLimit: Object.keys(rateLimit).length > 0 ? rateLimit : undefined,
       checkedAt: new Date(),
-      // Note: tokenExpiresAt will be calculated from token_first_seen_at + 60 days
+      // Note: tokenExpiresAt calculated in upsertPlatformHealth from tokenFirstSeenAt + 60 days
     };
   } catch (err) {
     return {
@@ -249,74 +289,230 @@ async healthCheck(): Promise<HealthCheckResult> {
       checkedAt: new Date(),
     };
   }
-}
+},
 ```
 
 ---
 
 ## Phase 3: Worker Integration
 
-### 3.1 Add health check on worker startup
-
-**File:** `packages/worker/src/index.ts`
-
-After creating providers, before starting workers:
-
-```typescript
-// Run health checks for all configured platforms on startup
-const runStartupHealthChecks = async () => {
-  const providers = [
-    telegramConfig ? createTelegramProvider(telegramConfig) : null,
-    facebookConfig ? createFacebookProvider(facebookConfig) : null,
-    linkedinConfig ? createLinkedInProvider(linkedinConfig) : null,
-  ].filter(Boolean);
-
-  for (const provider of providers) {
-    try {
-      const result = await provider.healthCheck();
-      await upsertPlatformHealth(db, result);
-
-      if (result.healthy) {
-        logger.info(`[${provider.name}] ✓ Health check passed`);
-      } else {
-        logger.warn(`[${provider.name}] ✗ Health check failed: ${result.error}`);
-      }
-    } catch (err) {
-      logger.error(`[${provider.name}] Health check error`, err);
-    }
-  }
-};
-
-await runStartupHealthChecks();
-```
-
-### 3.2 Add periodic health check job
+### 3.1 Add job constant
 
 **File:** `packages/shared/src/index.ts`
-
-Add new job constant:
 
 ```typescript
 export const JOB_PLATFORM_HEALTH_CHECK = "platform-health-check";
 ```
 
-### 3.3 Implement health check in maintenance worker
+### 3.2 Create health check utility
+
+**File:** `packages/worker/src/utils/platform-health.ts`
+
+```typescript
+import { createHash } from "crypto";
+import { eq } from "drizzle-orm";
+import type { Database } from "@watch-tower/db";
+import { platformHealth } from "@watch-tower/db";
+import type { HealthCheckResult } from "@watch-tower/social";
+
+const LINKEDIN_TOKEN_LIFETIME_DAYS = 60;
+
+/**
+ * Compute SHA256 hash of access token for rotation detection
+ */
+export const hashToken = (token: string): string => {
+  return createHash("sha256").update(token).digest("hex");
+};
+
+/**
+ * Upsert platform health record.
+ * Handles LinkedIn token rotation via hash comparison.
+ */
+export const upsertPlatformHealth = async (
+  db: Database,
+  result: HealthCheckResult,
+  currentTokenHash?: string // Pass hash if available (LinkedIn)
+): Promise<void> => {
+  const existing = await db.query.platformHealth.findFirst({
+    where: eq(platformHealth.platform, result.platform),
+  });
+
+  let tokenExpiresAt = result.tokenExpiresAt;
+  let tokenFirstSeenAt = existing?.tokenFirstSeenAt ?? null;
+  let tokenHash = currentTokenHash ?? existing?.tokenHash ?? null;
+
+  // LinkedIn: calculate expiry from firstSeenAt, detect token rotation
+  if (result.platform === "linkedin" && result.healthy) {
+    const tokenChanged = currentTokenHash && existing?.tokenHash && currentTokenHash !== existing.tokenHash;
+
+    if (!tokenFirstSeenAt || tokenChanged) {
+      // First time seeing this token OR token was rotated - reset timer
+      tokenFirstSeenAt = new Date();
+      tokenHash = currentTokenHash ?? null;
+    }
+
+    // Calculate 60 days from first seen
+    tokenExpiresAt = new Date(
+      tokenFirstSeenAt.getTime() + LINKEDIN_TOKEN_LIFETIME_DAYS * 24 * 60 * 60 * 1000
+    );
+  }
+
+  const data = {
+    platform: result.platform,
+    healthy: result.healthy,
+    error: result.error ?? null,
+    tokenExpiresAt: tokenExpiresAt ?? null,
+    tokenFirstSeenAt: tokenFirstSeenAt,
+    tokenHash: tokenHash,
+    rateLimitRemaining: result.rateLimit?.remaining ?? null,
+    rateLimitMax: result.rateLimit?.limit ?? null,
+    rateLimitPercent: result.rateLimit?.percent ?? null,
+    rateLimitResetsAt: result.rateLimit?.resetsAt ?? null,
+    lastCheckAt: result.checkedAt,
+    updatedAt: new Date(),
+  };
+
+  await db
+    .insert(platformHealth)
+    .values({ ...data, createdAt: new Date() })
+    .onConflictDoUpdate({
+      target: platformHealth.platform,
+      set: data,
+    });
+};
+
+/**
+ * Update lastPostAt timestamp after successful post.
+ * Also marks platform as healthy (successful post = working).
+ */
+export const updateLastPostAt = async (db: Database, platform: string): Promise<void> => {
+  await db
+    .update(platformHealth)
+    .set({
+      lastPostAt: new Date(),
+      healthy: true, // Successful post proves platform works
+      error: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(platformHealth.platform, platform));
+};
+
+/**
+ * Check if platform is healthy before posting.
+ * Returns true if healthy or no health record exists.
+ */
+export const isPlatformHealthy = async (db: Database, platform: string): Promise<boolean> => {
+  const health = await db.query.platformHealth.findFirst({
+    where: eq(platformHealth.platform, platform),
+  });
+
+  // No record = assume healthy (first run)
+  if (!health) return true;
+
+  return health.healthy;
+};
+```
+
+### 3.3 Add health check to job registry
+
+**File:** `packages/worker/src/job-registry.ts`
+
+Add to the `jobs` array inside `ensureRepeatableJobs`:
+
+```typescript
+import {
+  JOB_MAINTENANCE_CLEANUP,
+  JOB_MAINTENANCE_SCHEDULE,
+  JOB_SEMANTIC_BATCH,
+  JOB_LLM_SCORE_BATCH,
+  JOB_PLATFORM_HEALTH_CHECK,  // ADD
+  logger,
+} from "@watch-tower/shared";
+
+// Inside ensureRepeatableJobs, add to jobs array:
+{
+  queue: maintenanceQueue,
+  name: JOB_PLATFORM_HEALTH_CHECK,
+  jobId: JOB_PLATFORM_HEALTH_CHECK,
+  every: 6 * 60 * 60 * 1000, // 6 hours
+},
+```
+
+### 3.4 Add health check handler to maintenance worker
 
 **File:** `packages/worker/src/processors/maintenance.ts`
 
-Add handler for `JOB_PLATFORM_HEALTH_CHECK`:
+Add imports at top:
 
 ```typescript
-case JOB_PLATFORM_HEALTH_CHECK: {
+import { JOB_PLATFORM_HEALTH_CHECK } from "@watch-tower/shared";
+import { upsertPlatformHealth, hashToken } from "../utils/platform-health.js";
+```
+
+Add to `MaintenanceDeps` type:
+
+```typescript
+type MaintenanceDeps = {
+  // ... existing fields ...
+  // Token hashes for rotation detection (computed at startup)
+  linkedinTokenHash?: string;
+};
+```
+
+Add new job handler inside the worker processor (use `if`, not `switch`):
+
+```typescript
+if (job.name === JOB_PLATFORM_HEALTH_CHECK) {
   logger.debug("[maintenance] running platform health checks");
-  await runPlatformHealthChecks(db, providers);
+
+  for (const [name, provider] of Object.entries(providers)) {
+    if (!provider) continue;
+
+    try {
+      const result = await provider.healthCheck();
+      // Pass token hash for LinkedIn rotation detection
+      const tokenHash = name === "linkedin" ? linkedinTokenHash : undefined;
+      await upsertPlatformHealth(db, result, tokenHash);
+
+      if (result.healthy) {
+        logger.info({ platform: name }, "[health-check] passed");
+      } else {
+        logger.warn({ platform: name, error: result.error }, "[health-check] failed");
+      }
+    } catch (err) {
+      logger.error({ platform: name, error: err }, "[health-check] error");
+    }
+  }
   return;
 }
 ```
 
-### 3.4 Register recurring health check job
+Update `createMaintenanceWorker` to accept and compute token hash:
+
+```typescript
+export const createMaintenanceWorker = ({
+  // ... existing deps ...
+  linkedinConfig,
+}: MaintenanceDeps) => {
+  // Compute LinkedIn token hash once at startup
+  const linkedinTokenHash = linkedinConfig?.accessToken
+    ? hashToken(linkedinConfig.accessToken)
+    : undefined;
+
+  // ... rest of function ...
+```
+
+### 3.5 Register health check job at startup
 
 **File:** `packages/worker/src/index.ts`
+
+Add import:
+
+```typescript
+import { JOB_PLATFORM_HEALTH_CHECK } from "@watch-tower/shared";
+```
+
+After existing job registrations, add:
 
 ```typescript
 // Health check every 6 hours
@@ -325,157 +521,188 @@ await maintenanceQueue.add(
   {},
   { repeat: { every: 6 * 60 * 60 * 1000 }, jobId: JOB_PLATFORM_HEALTH_CHECK }
 );
+
+// Run health check immediately on startup
+await maintenanceQueue.add(
+  JOB_PLATFORM_HEALTH_CHECK,
+  {},
+  { jobId: "health-check-startup" }
+);
+logger.info("[worker] platform health check enabled (every 6h)");
 ```
 
-### 3.5 Create health check utility function
-
-**File:** `packages/worker/src/utils/platform-health.ts`
-
-```typescript
-import type { Database } from "@watch-tower/db";
-import type { SocialProvider, HealthCheckResult } from "@watch-tower/social";
-import { platformHealth } from "@watch-tower/db";
-import { eq } from "drizzle-orm";
-
-const LINKEDIN_TOKEN_LIFETIME_DAYS = 60;
-
-export const upsertPlatformHealth = async (
-  db: Database,
-  result: HealthCheckResult
-) => {
-  const existing = await db.query.platformHealth.findFirst({
-    where: eq(platformHealth.platform, result.platform),
-  });
-
-  // For LinkedIn: calculate expiry from first_seen_at
-  let tokenExpiresAt = result.tokenExpiresAt;
-  let tokenFirstSeenAt = existing?.token_first_seen_at;
-
-  if (result.platform === "linkedin" && result.healthy) {
-    if (!tokenFirstSeenAt) {
-      // First time seeing this token - record now
-      tokenFirstSeenAt = new Date();
-    }
-    // Calculate 60 days from first seen
-    tokenExpiresAt = new Date(tokenFirstSeenAt.getTime() + LINKEDIN_TOKEN_LIFETIME_DAYS * 24 * 60 * 60 * 1000);
-  }
-
-  const data = {
-    platform: result.platform,
-    healthy: result.healthy,
-    error: result.error || null,
-    token_expires_at: tokenExpiresAt || null,
-    token_first_seen_at: tokenFirstSeenAt || null,
-    rate_limit_remaining: result.rateLimit?.remaining || null,
-    rate_limit_max: result.rateLimit?.limit || null,
-    rate_limit_percent: result.rateLimit?.percent || null,
-    rate_limit_resets_at: result.rateLimit?.resetsAt || null,
-    last_check_at: result.checkedAt,
-    updated_at: new Date(),
-  };
-
-  await db.insert(platformHealth)
-    .values({ ...data, created_at: new Date() })
-    .onConflictDoUpdate({
-      target: platformHealth.platform,
-      set: data,
-    });
-};
-
-export const updateLastPostAt = async (db: Database, platform: string) => {
-  await db.update(platformHealth)
-    .set({ last_post_at: new Date(), updated_at: new Date() })
-    .where(eq(platformHealth.platform, platform));
-};
-```
-
-### 3.6 Update distribution worker to track last_post_at
+### 3.6 Update lastPostAt in both post paths
 
 **File:** `packages/worker/src/processors/distribution.ts`
+
+Add import:
+
+```typescript
+import { updateLastPostAt, isPlatformHealthy } from "../utils/platform-health.js";
+```
+
+Add health check before posting (inside the platform loop):
+
+```typescript
+// Check platform health before posting (emergency brake)
+const isHealthy = await isPlatformHealthy(db, name);
+if (!isHealthy) {
+  logger.warn({ articleId, platform: name }, "[distribution] platform unhealthy, skipping");
+  results.push({
+    platform: name,
+    success: false,
+    error: "Platform marked unhealthy - skipping",
+  });
+  continue;
+}
+```
+
+After successful post (where `postResult.success` is true):
+
+```typescript
+if (postResult.success) {
+  anySuccess = true;
+  await updateLastPostAt(db, name);  // ADD THIS
+  // ... existing event publish code ...
+}
+```
+
+**File:** `packages/worker/src/processors/maintenance.ts`
+
+Add import (if not already):
+
+```typescript
+import { updateLastPostAt, isPlatformHealthy } from "../utils/platform-health.js";
+```
+
+In `processScheduledPosts`, add health check before posting:
+
+```typescript
+// Check platform health before posting (emergency brake)
+const isHealthy = await isPlatformHealthy(db, delivery.platform);
+if (!isHealthy) {
+  logger.warn(
+    { deliveryId: delivery.id, platform: delivery.platform },
+    "[post-scheduler] platform unhealthy, rescheduling"
+  );
+  // Reschedule for 1 hour later
+  const retryAt = new Date(Date.now() + 60 * 60 * 1000);
+  await db
+    .update(postDeliveries)
+    .set({
+      status: "scheduled",
+      scheduledAt: retryAt,
+      errorMessage: "Platform unhealthy, retrying in 1 hour",
+    })
+    .where(eq(postDeliveries.id, delivery.id));
+  continue;
+}
+```
 
 After successful post:
 
 ```typescript
-if (result.success) {
-  await updateLastPostAt(db, platform);
+if (postResult.success) {
+  // Success: update delivery and article
+  await updateLastPostAt(db, delivery.platform);  // ADD THIS
+  // ... existing update code ...
 }
 ```
 
 ---
 
-## Phase 4: API Endpoint
+## Phase 4: API Endpoints
 
-### 4.1 Add GET /api/platforms/health endpoint
+### 4.1 Create platforms routes file
 
 **File:** `packages/api/src/routes/platforms.ts`
 
 ```typescript
+import type { FastifyInstance } from "fastify";
 import { platformHealth } from "@watch-tower/db";
+import { JOB_PLATFORM_HEALTH_CHECK } from "@watch-tower/shared";
+import type { ApiDeps } from "../server.js";
 
-// GET /api/platforms/health
-app.get("/api/platforms/health", async (request, reply) => {
-  const rows = await db.select().from(platformHealth);
+export const registerPlatformsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
+  const { db, maintenanceQueue, requireApiKey } = deps;
 
-  const platforms = rows.map((row) => {
-    // Calculate status
-    let status: "active" | "expiring" | "expired" | "error" = "active";
-    let daysRemaining: number | undefined;
+  // ─────────────────────────────────────────────────────────────────────────────
+  // GET /platforms/health - Get health status for all platforms
+  // ─────────────────────────────────────────────────────────────────────────────
+  app.get("/platforms/health", { preHandler: requireApiKey }, async (_req, reply) => {
+    const rows = await db.select().from(platformHealth);
 
-    if (!row.healthy) {
-      status = "error";
-    } else if (row.token_expires_at) {
-      const now = new Date();
-      const msRemaining = row.token_expires_at.getTime() - now.getTime();
-      daysRemaining = Math.floor(msRemaining / (24 * 60 * 60 * 1000));
+    const platforms = rows.map((row) => {
+      // Calculate status
+      let status: "active" | "expiring" | "expired" | "error" = "active";
+      let daysRemaining: number | undefined;
 
-      if (daysRemaining <= 0) {
-        status = "expired";
-      } else if (daysRemaining <= 7) {
-        status = "expiring";  // Orange/Red warning
-      } else if (daysRemaining <= 14) {
-        status = "expiring";  // Yellow warning
+      if (!row.healthy) {
+        status = "error";
+      } else if (row.tokenExpiresAt) {
+        const now = new Date();
+        const msRemaining = row.tokenExpiresAt.getTime() - now.getTime();
+        daysRemaining = Math.floor(msRemaining / (24 * 60 * 60 * 1000));
+
+        if (daysRemaining <= 0) {
+          status = "expired";
+        } else if (daysRemaining <= 7) {
+          status = "expiring";
+        } else if (daysRemaining <= 14) {
+          status = "expiring";
+        }
       }
-    }
 
-    return {
-      platform: row.platform,
-      healthy: row.healthy,
-      status,
-      error: row.error,
-      expiresAt: row.token_expires_at?.toISOString() || null,
-      daysRemaining,
-      lastCheck: row.last_check_at.toISOString(),
-      lastPost: row.last_post_at?.toISOString() || null,
-      rateLimit: {
-        remaining: row.rate_limit_remaining,
-        limit: row.rate_limit_max,
-        percent: row.rate_limit_percent,
-        resetsAt: row.rate_limit_resets_at?.toISOString() || null,
-      },
-    };
+      return {
+        platform: row.platform,
+        healthy: row.healthy,
+        status,
+        error: row.error,
+        expiresAt: row.tokenExpiresAt?.toISOString() ?? null,
+        daysRemaining,
+        lastCheck: row.lastCheckAt.toISOString(),
+        lastPost: row.lastPostAt?.toISOString() ?? null,
+        rateLimit: {
+          remaining: row.rateLimitRemaining,
+          limit: row.rateLimitMax,
+          percent: row.rateLimitPercent,
+          resetsAt: row.rateLimitResetsAt?.toISOString() ?? null,
+        },
+      };
+    });
+
+    return reply.send({ platforms });
   });
 
-  return reply.send({ platforms });
-});
+  // ─────────────────────────────────────────────────────────────────────────────
+  // POST /platforms/health/refresh - Trigger immediate health check
+  // ─────────────────────────────────────────────────────────────────────────────
+  app.post("/platforms/health/refresh", { preHandler: requireApiKey }, async (_req, reply) => {
+    await maintenanceQueue.add(
+      JOB_PLATFORM_HEALTH_CHECK,
+      {},
+      { priority: 1, jobId: `health-refresh-${Date.now()}` }
+    );
+
+    return reply.send({ message: "Health check queued" });
+  });
+};
 ```
 
-### 4.2 Add POST /api/platforms/health/refresh endpoint
+### 4.2 Register routes in server.ts
 
-**File:** `packages/api/src/routes/platforms.ts`
+**File:** `packages/api/src/server.ts`
+
+Add import:
 
 ```typescript
-// POST /api/platforms/health/refresh
-// Triggers immediate health check for all platforms
-app.post("/api/platforms/health/refresh", async (request, reply) => {
-  // Add job to maintenance queue with high priority
-  await maintenanceQueue.add(
-    JOB_PLATFORM_HEALTH_CHECK,
-    {},
-    { priority: 1, jobId: `health-refresh-${Date.now()}` }
-  );
+import { registerPlatformsRoutes } from "./routes/platforms.js";
+```
 
-  return reply.send({ message: "Health check queued" });
-});
+Add registration (after other routes):
+
+```typescript
+registerPlatformsRoutes(app, deps);
 ```
 
 ---
@@ -487,26 +714,28 @@ app.post("/api/platforms/health/refresh", async (request, reply) => {
 **File:** `packages/frontend/src/api.ts`
 
 ```typescript
+// ─── Platform Health ──────────────────────────────────────────────────────────
+
 export type PlatformHealth = {
   platform: string;
   healthy: boolean;
   status: "active" | "expiring" | "expired" | "error";
-  error?: string;
-  expiresAt?: string;
+  error: string | null;
+  expiresAt: string | null;
   daysRemaining?: number;
   lastCheck: string;
-  lastPost?: string;
+  lastPost: string | null;
   rateLimit: {
-    remaining?: number;
-    limit?: number;
-    percent?: number;
-    resetsAt?: string;
+    remaining: number | null;
+    limit: number | null;
+    percent: number | null;
+    resetsAt: string | null;
   };
 };
 
 export const getPlatformHealth = async (): Promise<PlatformHealth[]> => {
-  const res = await fetch(`${API_URL}/api/platforms/health`, {
-    headers: { "x-api-key": API_KEY },
+  const res = await fetch(`${API_URL}/platforms/health`, {
+    headers: authHeaders as Record<string, string>,
   });
   if (!res.ok) throw new Error("Failed to fetch platform health");
   const data = await res.json();
@@ -514,22 +743,50 @@ export const getPlatformHealth = async (): Promise<PlatformHealth[]> => {
 };
 
 export const refreshPlatformHealth = async (): Promise<void> => {
-  const res = await fetch(`${API_URL}/api/platforms/health/refresh`, {
+  const res = await fetch(`${API_URL}/platforms/health/refresh`, {
     method: "POST",
-    headers: { "x-api-key": API_KEY },
+    headers: authHeaders as Record<string, string>,
   });
   if (!res.ok) throw new Error("Failed to trigger health check");
 };
 ```
 
-### 5.2 Update PlatformSettings page
+### 5.2 Add formatRelativeTime helper
 
 **File:** `packages/frontend/src/pages/PlatformSettings.tsx`
 
-Add new "Connection Status" section at the top:
+Add helper function (or import from shared utils):
 
-```tsx
-// New state
+```typescript
+const formatRelativeTime = (isoString: string): string => {
+  const date = new Date(isoString);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return "just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return `${diffDays}d ago`;
+};
+```
+
+### 5.3 Update PlatformSettings page
+
+**File:** `packages/frontend/src/pages/PlatformSettings.tsx`
+
+Add imports:
+
+```typescript
+import { getPlatformHealth, refreshPlatformHealth, type PlatformHealth } from "../api";
+```
+
+Add state and effects:
+
+```typescript
+// Platform Health state
 const [platformHealth, setPlatformHealth] = useState<PlatformHealth[]>([]);
 const [isHealthLoading, setIsHealthLoading] = useState(true);
 const [isRefreshing, setIsRefreshing] = useState(false);
@@ -555,10 +812,13 @@ const handleRefreshHealth = async () => {
   try {
     await refreshPlatformHealth();
     toast.info("Health check queued - refreshing in 5s...");
-    // Wait for job to complete then refresh
     setTimeout(async () => {
-      const health = await getPlatformHealth();
-      setPlatformHealth(health);
+      try {
+        const health = await getPlatformHealth();
+        setPlatformHealth(health);
+      } catch {
+        // Ignore
+      }
       setIsRefreshing(false);
     }, 5000);
   } catch {
@@ -568,10 +828,10 @@ const handleRefreshHealth = async () => {
 };
 ```
 
-### 5.3 Connection Status section UI
+### 5.4 Add Connection Status section (at top of page)
 
 ```tsx
-{/* Connection Status Section - NEW */}
+{/* Connection Status Section */}
 <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
   <div className="flex items-center justify-between">
     <div>
@@ -585,44 +845,53 @@ const handleRefreshHealth = async () => {
       disabled={isRefreshing}
       className="rounded-lg border border-slate-700 px-3 py-2 text-sm hover:border-slate-500 disabled:opacity-50"
     >
-      {isRefreshing ? "Checking..." : "↻ Refresh"}
+      {isRefreshing ? "Checking..." : "Refresh"}
     </button>
   </div>
 
   <div className="mt-6 space-y-3">
+    {isHealthLoading && (
+      <p className="text-sm text-slate-500">Loading health status...</p>
+    )}
+    {!isHealthLoading && platformHealth.length === 0 && (
+      <p className="text-sm text-slate-500">No platforms configured</p>
+    )}
     {platformHealth.map((health) => (
       <PlatformHealthCard key={health.platform} health={health} />
     ))}
-    {platformHealth.length === 0 && !isHealthLoading && (
-      <p className="text-sm text-slate-500">No platforms configured</p>
-    )}
   </div>
 </section>
 ```
 
-### 5.4 PlatformHealthCard component
+### 5.5 PlatformHealthCard component
 
 ```tsx
-const STATUS_COLORS = {
+const PLATFORM_ICONS: Record<string, string> = {
+  telegram: "📱",
+  facebook: "📘",
+  linkedin: "💼",
+};
+
+const STATUS_COLORS: Record<string, string> = {
   active: "bg-emerald-500",
   expiring: "bg-amber-500",
   expired: "bg-red-500",
   error: "bg-red-500",
 };
 
-const STATUS_TEXT = {
-  active: "Connected",
-  expiring: "Token expiring soon",
-  expired: "Token expired",
-  error: "Error",
-};
-
 function PlatformHealthCard({ health }: { health: PlatformHealth }) {
-  const icon = PLATFORM_ICONS[health.platform] || "📱";
-  const statusColor = STATUS_COLORS[health.status];
-
-  // Format last check as relative time
+  const icon = PLATFORM_ICONS[health.platform] ?? "📱";
+  const statusColor = STATUS_COLORS[health.status] ?? "bg-slate-500";
   const lastCheckRelative = formatRelativeTime(health.lastCheck);
+
+  const getStatusText = () => {
+    if (health.status === "error") return health.error ?? "Error";
+    if (health.status === "expired") return "Token expired - renew required";
+    if (health.status === "expiring" && health.daysRemaining !== undefined) {
+      return `Expires in ${health.daysRemaining} days`;
+    }
+    return "Connected";
+  };
 
   return (
     <div className="flex items-center justify-between rounded-xl border border-slate-700 bg-slate-950 px-4 py-3">
@@ -631,24 +900,18 @@ function PlatformHealthCard({ health }: { health: PlatformHealth }) {
         <span className="text-xl">{icon}</span>
         <div>
           <p className="font-medium text-slate-200 capitalize">{health.platform}</p>
-          <p className="text-xs text-slate-500">
-            {health.status === "error" && health.error}
-            {health.status === "expiring" && health.daysRemaining !== undefined &&
-              `Expires in ${health.daysRemaining} days`}
-            {health.status === "expired" && "Token expired - renew required"}
-            {health.status === "active" && STATUS_TEXT.active}
-          </p>
+          <p className="text-xs text-slate-500">{getStatusText()}</p>
         </div>
       </div>
 
       <div className="text-right">
         <p className="text-xs text-slate-500">Checked {lastCheckRelative}</p>
-        {health.rateLimit.remaining !== undefined && (
+        {health.rateLimit.remaining !== null && health.rateLimit.limit !== null && (
           <p className="text-xs text-slate-400">
             API: {health.rateLimit.remaining}/{health.rateLimit.limit} remaining
           </p>
         )}
-        {health.rateLimit.percent !== undefined && (
+        {health.rateLimit.percent !== null && (
           <p className="text-xs text-slate-400">
             API usage: {health.rateLimit.percent}%
           </p>
@@ -665,15 +928,19 @@ function PlatformHealthCard({ health }: { health: PlatformHealth }) {
 
 ### 6.1 Manual testing checklist
 
-- [ ] Worker startup runs health checks and logs results
-- [ ] Health check job runs every 6 hours
-- [ ] `/api/platforms/health` returns correct data
+- [ ] Database migration creates `platform_health` table
+- [ ] Worker startup triggers immediate health check
+- [ ] Health check runs every 6 hours (verify in Redis/BullMQ)
+- [ ] `/platforms/health` returns correct data (all platforms)
+- [ ] `/platforms/health/refresh` triggers immediate check
 - [ ] UI shows Connection Status section with color-coded badges
-- [ ] Refresh button triggers new health check
-- [ ] Facebook token expiry shows from API
+- [ ] Refresh button works and updates after 5s
+- [ ] Facebook token expiry shows from API (or null for long-lived)
 - [ ] LinkedIn token expiry calculated from first_seen_at + 60 days
+- [ ] LinkedIn token rotation resets the 60-day timer
 - [ ] Platform rate limits displayed (Facebook %, LinkedIn remaining)
-- [ ] last_post_at updates when posting succeeds
+- [ ] `lastPostAt` updates in BOTH distribution and maintenance paths
+- [ ] Emergency brake: unhealthy platforms are skipped during posting
 
 ### 6.2 Edge cases to verify
 
@@ -682,7 +949,11 @@ function PlatformHealthCard({ health }: { health: PlatformHealth }) {
 - [ ] Network timeout → shows error with timeout message
 - [ ] Token close to expiry (7 days) → shows yellow/orange warning
 - [ ] Token expired → shows red status
-- [ ] First LinkedIn health check → stores token_first_seen_at
+- [ ] First LinkedIn health check → stores `tokenFirstSeenAt` and `tokenHash`
+- [ ] LinkedIn token changed in .env → timer resets on next health check
+- [ ] Facebook `expires_at = 0` → treated as "never expires"
+- [ ] Successful post after health failure → marks platform healthy again
+- [ ] No health record exists → posting proceeds (assumes healthy)
 
 ---
 
@@ -690,25 +961,28 @@ function PlatformHealthCard({ health }: { health: PlatformHealth }) {
 
 | Package | Files Changed/Added |
 |---------|---------------------|
-| `packages/db` | `schema.ts`, new migration file |
-| `packages/social` | `types.ts`, `telegram.ts`, `facebook.ts`, `linkedin.ts` |
-| `packages/shared` | `index.ts` (new constant) |
-| `packages/worker` | `index.ts`, `maintenance.ts`, new `platform-health.ts` util |
-| `packages/api` | `routes/platforms.ts` (new or extended) |
+| `packages/db` | `schema.ts` (add platformHealth table) |
+| `packages/social` | `types.ts`, `index.ts`, `telegram.ts`, `facebook.ts`, `linkedin.ts` |
+| `packages/shared` | `index.ts` (add JOB_PLATFORM_HEALTH_CHECK) |
+| `packages/worker` | `job-registry.ts`, `index.ts`, `maintenance.ts`, `distribution.ts`, new `utils/platform-health.ts` |
+| `packages/api` | `server.ts`, new `routes/platforms.ts` |
 | `packages/frontend` | `api.ts`, `PlatformSettings.tsx` |
 
 ---
 
 ## Implementation Order
 
-1. **Database** - Create migration and Drizzle schema
-2. **Social package** - Add `healthCheck()` to all providers
-3. **Worker utilities** - Add `upsertPlatformHealth()` helper
-4. **Worker startup** - Run health checks on boot
-5. **Maintenance job** - Add periodic health check
-6. **API endpoint** - Add `/api/platforms/health`
-7. **Frontend** - Add Connection Status section to Platform Settings
-8. **Testing** - Verify all functionality
+1. **Database** - Add Drizzle schema, generate and run migration
+2. **Shared** - Add `JOB_PLATFORM_HEALTH_CHECK` constant
+3. **Social package** - Add `HealthCheckResult` type, `healthCheck()` to all providers
+4. **Worker utilities** - Create `utils/platform-health.ts`
+5. **Worker job registry** - Add health check to `ensureRepeatableJobs`
+6. **Worker maintenance** - Add health check job handler
+7. **Worker index** - Register recurring job + startup check
+8. **Worker distribution/maintenance** - Add `updateLastPostAt` + emergency brake
+9. **API** - Create `routes/platforms.ts`, register in server.ts
+10. **Frontend** - Add API functions, update PlatformSettings page
+11. **Testing** - Verify all functionality
 
 ---
 
@@ -717,6 +991,6 @@ function PlatformHealthCard({ health }: { health: PlatformHealth }) {
 - [ ] Phase 1: Database Schema
 - [ ] Phase 2: Provider Health Checks
 - [ ] Phase 3: Worker Integration
-- [ ] Phase 4: API Endpoint
+- [ ] Phase 4: API Endpoints
 - [ ] Phase 5: Frontend UI
 - [ ] Phase 6: Testing & Verification
