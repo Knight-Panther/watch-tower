@@ -212,8 +212,8 @@ export default function ScoringRules() {
 
   return (
     <div className="grid gap-6">
-      {/* Header */}
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+      {/* Header - sticky below nav */}
+      <section className="sticky top-28 z-10 rounded-2xl border border-slate-800 bg-slate-900 p-5">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Scoring Rules</h1>

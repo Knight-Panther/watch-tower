@@ -3,3 +3,18 @@
 body {
   margin: 0;
 }
+
+/* Exo 2 for headings and section titles */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: "Exo 2", sans-serif;
+}
+
+/* Also apply to elements with font-heading class */
+.font-heading {
+  font-family: "Exo 2", sans-serif;
+}
