@@ -50,8 +50,7 @@ import SectorManagement from "./pages/SectorManagement";
 import Articles from "./pages/Articles";
 import Scheduled from "./pages/Scheduled";
 import ScoringRules from "./pages/ScoringRules";
-import PostTemplates from "./pages/PostTemplates";
-import PlatformSettings from "./pages/PlatformSettings";
+import MediaChannelControl from "./pages/MediaChannelControl";
 import SiteRules from "./pages/SiteRules";
 
 const emptySourceForm = {
@@ -895,8 +894,7 @@ export default function App() {
         <Route path="/articles" element={<Articles />} />
         <Route path="/scheduled" element={<Scheduled />} />
         <Route path="/scoring-rules" element={<ScoringRules />} />
-        <Route path="/post-templates" element={<PostTemplates />} />
-        <Route path="/platform-settings" element={<PlatformSettings />} />
+        <Route path="/media-channels" element={<MediaChannelControl />} />
         <Route path="/site-rules" element={<SiteRules />} />
         <Route
           path="/settings"

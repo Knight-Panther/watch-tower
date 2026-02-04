@@ -9,8 +9,7 @@ const navItems = [
   { to: "/scheduled", label: "Scheduled" },
   { to: "/sectors", label: "Sectors" },
   { to: "/scoring-rules", label: "Scoring Rules" },
-  { to: "/post-templates", label: "Post Formats" },
-  { to: "/platform-settings", label: "Platforms" },
+  { to: "/media-channels", label: "Media Channels" },
   { to: "/site-rules", label: "Site Rules" },
   { to: "/settings", label: "DB/Telemetry" },
 ];
