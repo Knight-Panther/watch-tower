@@ -38,6 +38,9 @@ import {
   type TelemetryByProvider,
   type TelemetryByOperation,
   type TelemetryDaily,
+  getProviderBalances,
+  refreshProviderBalances,
+  type ProviderBalancesResponse,
 } from "./api";
 import Layout from "./components/Layout";
 import Monitoring from "./pages/Monitoring";
@@ -119,6 +122,10 @@ export default function App() {
   const [telemetryLoading, setTelemetryLoading] = useState(false);
   const [telemetryError, setTelemetryError] = useState<string | null>(null);
   const [telemetryUpdatedAt, setTelemetryUpdatedAt] = useState<string | null>(null);
+
+  // Provider balances state
+  const [providerBalances, setProviderBalances] = useState<ProviderBalancesResponse | null>(null);
+  const [balancesLoading, setBalancesLoading] = useState(false);
 
   const activeCount = useMemo(() => sources.filter((source) => source.active).length, [sources]);
 
@@ -761,22 +768,36 @@ export default function App() {
     setTelemetryLoading(true);
     setTelemetryError(null);
     try {
-      const [summary, byProvider, byOperation, daily] = await Promise.all([
+      const [summary, byProvider, byOperation, daily, balances] = await Promise.all([
         getTelemetrySummary(),
         getTelemetryByProvider(30),
         getTelemetryByOperation(30),
         getTelemetryDaily(30),
+        getProviderBalances().catch(() => null), // Don't fail telemetry if balances fail
       ]);
       setTelemetrySummary(summary);
       setTelemetryByProvider(byProvider);
       setTelemetryByOperation(byOperation);
       setTelemetryDaily(daily);
+      if (balances) setProviderBalances(balances);
       setTelemetryUpdatedAt(new Date().toLocaleTimeString());
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load telemetry data";
       setTelemetryError(message);
     } finally {
       setTelemetryLoading(false);
+    }
+  };
+
+  const refreshBalances = async () => {
+    setBalancesLoading(true);
+    try {
+      const balances = await refreshProviderBalances();
+      setProviderBalances(balances);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to refresh balances");
+    } finally {
+      setBalancesLoading(false);
     }
   };
 
@@ -887,6 +908,9 @@ export default function App() {
               telemetryError={telemetryError}
               telemetryLastUpdated={telemetryUpdatedAt}
               onRefreshTelemetry={refreshTelemetry}
+              providerBalances={providerBalances}
+              balancesLoading={balancesLoading}
+              onRefreshBalances={refreshBalances}
               isLoading={isLoading}
               ttlDays={ttlDays}
               ttlError={ttlError}

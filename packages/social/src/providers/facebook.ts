@@ -194,8 +194,18 @@ export const createFacebookProvider = (config: FacebookConfig): SocialProvider =
       const parts: string[] = [];
 
       // Facebook: Short, punchy, image-focused, plain text
-      if (template.showBreakingLabel && template.breakingEmoji && template.breakingText) {
-        parts.push(`${template.breakingEmoji} ${template.breakingText}: ${article.sector.toUpperCase()}`);
+      // 1. Breaking label + Sector tag (first line)
+      if (template.showBreakingLabel || template.showSectorTag) {
+        let header = "";
+        if (template.showBreakingLabel && template.breakingEmoji && template.breakingText) {
+          header += `${template.breakingEmoji} ${template.breakingText}`;
+          if (template.showSectorTag) {
+            header += `: ${article.sector.toUpperCase()}`;
+          }
+        } else if (template.showSectorTag) {
+          header += `📰 ${article.sector.toUpperCase()}`;
+        }
+        if (header) parts.push(header);
       }
 
       if (template.showTitle) {

@@ -26,3 +26,12 @@ export {
   microdollarsToUsd,
   microdollarsToNumber,
 } from "./pricing.js";
+
+// Balance/credits API
+export type { ProviderBalance, BalanceFetcher, BalanceRegistryEntry } from "./balance/index.js";
+export {
+  balanceRegistry,
+  getConfiguredProviders,
+  getConfiguredBalances,
+  getProviderDisplayName,
+} from "./balance/index.js";

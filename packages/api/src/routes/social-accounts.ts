@@ -206,8 +206,15 @@ export const registerSocialAccountRoutes = (app: FastifyInstance, deps: ApiDeps)
         if (t.showUrl) parts.push(`<a href="${article.url}">${t.urlLinkText}</a>`);
       } else {
         // Plain text for LinkedIn/Facebook
-        if (t.showBreakingLabel && t.breakingEmoji && t.breakingText) {
-          parts.push(`${t.breakingEmoji} ${t.breakingText}: ${article.sector.toUpperCase()}`);
+        if (t.showBreakingLabel || t.showSectorTag) {
+          let header = "";
+          if (t.showBreakingLabel && t.breakingEmoji && t.breakingText) {
+            header += `${t.breakingEmoji} ${t.breakingText}`;
+            if (t.showSectorTag) header += `: ${article.sector.toUpperCase()}`;
+          } else if (t.showSectorTag) {
+            header += `📰 ${article.sector.toUpperCase()}`;
+          }
+          if (header) parts.push(header);
         }
         if (t.showTitle) parts.push(article.title);
         if (t.showSummary && article.summary) parts.push(article.summary);

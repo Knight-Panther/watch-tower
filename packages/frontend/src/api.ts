@@ -1182,3 +1182,44 @@ export const refreshPlatformHealth = async (): Promise<void> => {
   });
   if (!res.ok) throw new Error("Failed to trigger health check");
 };
+
+// ─── Provider Credits/Balances ───────────────────────────────────────────────
+
+export type ProviderBalance = {
+  provider: string;
+  display_name: string;
+  available: boolean;
+  currency: string;
+  total_balance: number | null;
+  granted_balance: number | null;
+  topped_up_balance: number | null;
+  error: string | null;
+};
+
+export type ProviderBalancesResponse = {
+  providers: ProviderBalance[];
+  generated_at: string;
+};
+
+export const getProviderBalances = async (): Promise<ProviderBalancesResponse> => {
+  const res = await fetch(`${API_URL}/credits`, {
+    headers: authHeaders as Record<string, string>,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load provider balances");
+  }
+  return res.json();
+};
+
+export const refreshProviderBalances = async (): Promise<ProviderBalancesResponse> => {
+  const res = await fetch(`${API_URL}/credits/refresh`, {
+    method: "POST",
+    headers: authHeaders as Record<string, string>,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to refresh provider balances");
+  }
+  return res.json();
+};

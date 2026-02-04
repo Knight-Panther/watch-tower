@@ -238,8 +238,18 @@ export const createLinkedInProvider = (config: LinkedInConfig): SocialProvider =
       const parts: string[] = [];
 
       // LinkedIn: No HTML, plain text only, professional tone
-      if (template.showBreakingLabel && template.breakingEmoji && template.breakingText) {
-        parts.push(`${template.breakingEmoji} ${template.breakingText}`);
+      // 1. Breaking label + Sector tag (first line)
+      if (template.showBreakingLabel || template.showSectorTag) {
+        let header = "";
+        if (template.showBreakingLabel && template.breakingEmoji && template.breakingText) {
+          header += `${template.breakingEmoji} ${template.breakingText}`;
+          if (template.showSectorTag) {
+            header += `: ${article.sector.toUpperCase()}`;
+          }
+        } else if (template.showSectorTag) {
+          header += `📰 ${article.sector.toUpperCase()}`;
+        }
+        if (header) parts.push(header);
       }
 
       if (template.showTitle) {

@@ -4,6 +4,7 @@ import type {
   TelemetryByProvider,
   TelemetryByOperation,
   TelemetryDaily,
+  ProviderBalancesResponse,
 } from "../api";
 import Spinner from "../components/Spinner";
 
@@ -17,6 +18,10 @@ type SettingsProps = {
   telemetryError: string | null;
   telemetryLastUpdated: string | null;
   onRefreshTelemetry: () => void;
+  // Provider balances props
+  providerBalances: ProviderBalancesResponse | null;
+  balancesLoading: boolean;
+  onRefreshBalances: () => void;
   // Database props
   isLoading: boolean;
   ttlDays: string;
@@ -76,6 +81,9 @@ export default function Settings({
   telemetryError,
   telemetryLastUpdated,
   onRefreshTelemetry,
+  providerBalances,
+  balancesLoading,
+  onRefreshBalances,
   isLoading,
   ttlDays,
   ttlError,
@@ -134,6 +142,63 @@ export default function Settings({
           </div>
         </div>
         {telemetryError ? <p className="mt-3 text-sm text-red-400">{telemetryError}</p> : null}
+
+        {/* Provider Balances */}
+        {providerBalances && providerBalances.providers.length > 0 ? (
+          <div className="mt-5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-slate-300">Provider Credits</h2>
+              <button
+                onClick={onRefreshBalances}
+                disabled={balancesLoading}
+                className="text-xs text-slate-400 hover:text-slate-200 disabled:opacity-50"
+              >
+                {balancesLoading ? "Refreshing..." : "Refresh"}
+              </button>
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-4">
+              {providerBalances.providers.map((provider) => (
+                <div
+                  key={provider.provider}
+                  className={`rounded-xl border p-4 ${
+                    provider.error
+                      ? "border-slate-700 bg-slate-950/50"
+                      : provider.total_balance !== null && provider.total_balance < 5
+                        ? "border-amber-500/40 bg-amber-950/20"
+                        : "border-slate-800 bg-slate-950/70"
+                  }`}
+                >
+                  <p className="text-xs uppercase tracking-wide text-slate-500">
+                    {provider.display_name}
+                  </p>
+                  {provider.total_balance !== null ? (
+                    <>
+                      <p
+                        className={`mt-2 text-2xl font-semibold ${
+                          provider.total_balance < 5 ? "text-amber-300" : "text-cyan-300"
+                        }`}
+                      >
+                        ${provider.total_balance.toFixed(2)}
+                      </p>
+                      {provider.granted_balance !== null && provider.granted_balance > 0 ? (
+                        <p className="mt-1 text-xs text-slate-400">
+                          ${provider.granted_balance.toFixed(2)} granted
+                        </p>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <p className="mt-2 text-lg font-semibold text-slate-400">N/A</p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {provider.error ?? "Balance unavailable"}
+                      </p>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         {/* Summary Cards */}
         <div className="mt-5 grid gap-3 md:grid-cols-4">
