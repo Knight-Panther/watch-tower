@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   getAllowedDomains,
   addAllowedDomain,
@@ -12,7 +13,21 @@ import {
 } from "../api";
 import Spinner from "../components/Spinner";
 
+type TabId = "domains" | "limits" | "api" | "emergency";
+
 export default function SiteRules() {
+  // URL-based tab state
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const activeTab: TabId =
+    tabParam === "limits" || tabParam === "api" || tabParam === "emergency"
+      ? tabParam
+      : "domains";
+
+  const setActiveTab = (tab: TabId) => {
+    setSearchParams(tab === "domains" ? {} : { tab }, { replace: true });
+  };
+
   // Domain whitelist state
   const [domains, setDomains] = useState<AllowedDomain[]>([]);
   const [domainsLoading, setDomainsLoading] = useState(true);
@@ -29,9 +44,6 @@ export default function SiteRules() {
   const [emergencyStop, setEmergencyStopState] = useState(false);
   const [killSwitchLoading, setKillSwitchLoading] = useState(true);
   const [killSwitchToggling, setKillSwitchToggling] = useState(false);
-
-  // Active tab
-  const [activeTab, setActiveTab] = useState<"domains" | "limits" | "api" | "emergency">("domains");
 
   // Load domains
   const loadDomains = useCallback(async () => {

@@ -1,9 +1,19 @@
-import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import PostTemplates from "./PostTemplates";
 import PlatformSettings from "./PlatformSettings";
 
+type TabId = "formats" | "platforms";
+
 export default function MediaChannelControl() {
-  const [activeTab, setActiveTab] = useState<"formats" | "platforms">("formats");
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Read tab from URL, default to "formats"
+  const tabParam = searchParams.get("tab");
+  const activeTab: TabId = tabParam === "platforms" ? "platforms" : "formats";
+
+  const setActiveTab = (tab: TabId) => {
+    setSearchParams(tab === "formats" ? {} : { tab }, { replace: true });
+  };
 
   return (
     <div className="grid gap-6">

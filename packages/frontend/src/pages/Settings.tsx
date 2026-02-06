@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import type {
   TelemetrySummary,
   TelemetryByProvider,
@@ -47,6 +48,8 @@ type SettingsProps = {
   onPostDeliveriesTtlChange: (value: string) => void;
   onSavePostDeliveriesTtl: () => void;
 };
+
+type TabId = "telemetry" | "cleanup";
 
 const formatCost = (usd: number): string => {
   if (usd < 0.01) {
@@ -108,7 +111,14 @@ export default function Settings({
   onPostDeliveriesTtlChange,
   onSavePostDeliveriesTtl,
 }: SettingsProps) {
-  const [activeTab, setActiveTab] = useState<"telemetry" | "cleanup">("telemetry");
+  // URL-based tab state
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const activeTab: TabId = tabParam === "cleanup" ? "cleanup" : "telemetry";
+
+  const setActiveTab = (tab: TabId) => {
+    setSearchParams(tab === "telemetry" ? {} : { tab }, { replace: true });
+  };
 
   const totalCostToday = telemetrySummary?.today.cost_usd ?? 0;
   const totalCost30d = telemetrySummary?.last_30_days.cost_usd ?? 0;
