@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import Spinner from "../components/Spinner";
+import { useLocalStorageFilters } from "../hooks/useLocalStorageFilters";
 import {
   getScheduledDeliveries,
   rescheduleDelivery,
@@ -33,9 +34,8 @@ export default function Scheduled() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filter state - use local state only (no persistence) to avoid stale filters
-  // when used as a tab within ArticleScheduler
-  const [filters, setFilters] = useState<ScheduledFilters>({
+  // Filter state with localStorage persistence (no URL sync to avoid tab conflicts)
+  const [filters, setFilter] = useLocalStorageFilters<ScheduledFilters>("scheduled-filters", {
     page: 1,
     limit: 50,
     status: "scheduled",
@@ -82,16 +82,11 @@ export default function Scheduled() {
   }, [loadStats]);
 
   const handleFilterChange = (key: keyof ScheduledFilters, value: string | number | undefined) => {
-    setFilters((prev) => ({
-      ...prev,
-      [key]: value === "" ? undefined : value,
-      // Reset page to 1 when changing filters (except for page itself)
-      ...(key !== "page" ? { page: 1 } : {}),
-    }));
+    setFilter(key, value);
   };
 
   const handlePageChange = (newPage: number) => {
-    setFilters((prev) => ({ ...prev, page: newPage }));
+    setFilter("page", newPage);
   };
 
   const handleCancel = async (delivery: ScheduledDelivery) => {

@@ -1,9 +1,19 @@
-import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import Articles from "./Articles";
 import Scheduled from "./Scheduled";
 
+type TabId = "articles" | "scheduled";
+
 export default function ArticleScheduler() {
-  const [activeTab, setActiveTab] = useState<"articles" | "scheduled">("articles");
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Read tab from URL, default to "articles"
+  const tabParam = searchParams.get("tab");
+  const activeTab: TabId = tabParam === "scheduled" ? "scheduled" : "articles";
+
+  const setActiveTab = (tab: TabId) => {
+    setSearchParams(tab === "articles" ? {} : { tab }, { replace: true });
+  };
 
   return (
     <div className="grid gap-6">

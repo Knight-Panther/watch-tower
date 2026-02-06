@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import Spinner from "../components/Spinner";
 import ScheduleModal from "../components/ScheduleModal";
-import { usePersistedFilters } from "../hooks/usePersistedFilters";
+import { useLocalStorageFilters } from "../hooks/useLocalStorageFilters";
 import {
   getArticles,
   getArticleFilterOptions,
@@ -33,13 +33,16 @@ export default function Articles() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filter state with persistence (localStorage + URL sync)
-  const [filters, setFilter, setFilters] = usePersistedFilters<ArticleFilters>("articles-filters", {
-    page: 1,
-    limit: 50,
-    sort_by: "published_at",
-    sort_dir: "desc",
-  });
+  // Filter state with localStorage persistence (no URL sync to avoid tab conflicts)
+  const [filters, setFilter, setFilters] = useLocalStorageFilters<ArticleFilters>(
+    "articles-filters",
+    {
+      page: 1,
+      limit: 50,
+      sort_by: "published_at",
+      sort_dir: "desc",
+    },
+  );
 
   // Schedule modal state
   const [schedulingArticle, setSchedulingArticle] = useState<Article | null>(null);
