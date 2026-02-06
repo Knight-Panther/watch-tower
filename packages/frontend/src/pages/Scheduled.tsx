@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import Spinner from "../components/Spinner";
-import { usePersistedFilters } from "../hooks/usePersistedFilters";
 import {
   getScheduledDeliveries,
   rescheduleDelivery,
@@ -34,8 +33,9 @@ export default function Scheduled() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filter state with persistence (localStorage + URL sync)
-  const [filters, setFilter] = usePersistedFilters<ScheduledFilters>("scheduled-filters", {
+  // Filter state - use local state only (no persistence) to avoid stale filters
+  // when used as a tab within ArticleScheduler
+  const [filters, setFilters] = useState<ScheduledFilters>({
     page: 1,
     limit: 50,
     status: "scheduled",
@@ -82,11 +82,16 @@ export default function Scheduled() {
   }, [loadStats]);
 
   const handleFilterChange = (key: keyof ScheduledFilters, value: string | number | undefined) => {
-    setFilter(key, value);
+    setFilters((prev) => ({
+      ...prev,
+      [key]: value === "" ? undefined : value,
+      // Reset page to 1 when changing filters (except for page itself)
+      ...(key !== "page" ? { page: 1 } : {}),
+    }));
   };
 
   const handlePageChange = (newPage: number) => {
-    setFilter("page", newPage);
+    setFilters((prev) => ({ ...prev, page: newPage }));
   };
 
   const handleCancel = async (delivery: ScheduledDelivery) => {
