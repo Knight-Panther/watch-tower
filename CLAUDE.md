@@ -376,10 +376,8 @@ Implementation tasks are tracked in the `priority-tasks/` folder at the project 
 - **Completed tasks**: Renamed to `taskN_done.md` after all items are implemented
 - **Always check this folder first** when starting a new session to understand pending work
 
-Active:
-- `task12.md` — Security Hardening (9-layer defense system, Site Rules UI, Nginx Basic Auth)
-
 Completed:
+- `task12_done.md` — Security Hardening (9-layer defense system, Site Rules UI, security tests)
 - `task11_done.md` — Platform Health Monitoring (token validity, expiry tracking, emergency brake)
 - `task1_done.md` — Infrastructure hardening & reliability
 - `task2_done.md` — Stage 2: Semantic Dedup Pipeline

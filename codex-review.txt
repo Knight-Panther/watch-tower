@@ -1,37 +1,19 @@
-**Findings**
-- High: `createEmbeddingProvider` uses `require()` in an ESM package (`"type": "module"`), which will throw at runtime; use `await import()` or `createRequire` instead. `priority-tasks/task2.md:184-189`.
-- High: The worker only selects `ingested` rows where `embedding IS NULL`; if any error occurs after the embedding is written but before stage is updated, the article gets stuck forever (`ingested` + non-null embedding won’t be picked up). Fix with a transaction or select by `pipeline_stage='ingested'` regardless of embedding and skip re-embed. `priority-tasks/task2.md:404-418`, `priority-tasks/task2.md:447-484`.
-- High: Rollback says set `OPENAI_API_KEY=""`, but env schema marks it `optional()` and `min(1)`, so empty string is invalid and may crash startup. Make it `optional().or(z.literal(""))` or strip empty strings before validation. `priority-tasks/task2.md:349-352`, `priority-tasks/task2.md:696-699`.
-- Medium: No concurrency control—multiple workers can fetch the same rows and do duplicate embeddings/updates; use `FOR UPDATE SKIP LOCKED` or a claim/update pattern. `priority-tasks/task2.md:404-418`, `priority-tasks/task2.md:399-505`.
-- Medium: Similarity query chooses “original” purely by distance, so a newer article can become the canonical source; add `created_at <= current` and/or `ORDER BY distance, created_at ASC`. `priority-tasks/task2.md:281-295`, `priority-tasks/task2.md:463-472`.
-- Medium: Embedding batching assumes “2048 inputs per batch,” but the API limit is token/size-based; you’ll need chunking by token count or conservative batch sizes to avoid failures. `priority-tasks/task2.md:224-228`.
-- Medium: Plan doesn’t mention adding/confirming schema fields used in updates (`pipeline_stage` enum value `embedded`, `is_semantic_duplicate`, `duplicate_of_id`, `similarity_score`); if not already present, this will fail at runtime. `priority-tasks/task2.md:465-484`.
+**Inaccuracies (task14.md vs current code)**
+- Distribution worker does **not** update `post_deliveries`; it only updates `articles.pipeline_stage` and returns results. `post_deliveries` are handled by the maintenance scheduler, not by immediate distribution. `packages/worker/src/processors/distribution.ts:121-283`
+- LLM brain only enqueues **immediate Telegram** distribution (if `auto_post_telegram` is enabled) rather than “auto‑approved articles for all platforms.” `packages/worker/src/processors/llm-brain.ts:379-401`
+- The pipeline stages described omit existing active stages `embedding` and `scoring_failed`, and the system already uses `posting` / `posting_failed`. `packages/worker/src/processors/semantic-dedup.ts:55-118`, `packages/worker/src/processors/llm-brain.ts:411-418`, `packages/worker/src/processors/distribution.ts:124-283`
 
-**Completeness**
-- Missing edge cases: empty/very short inputs (`title` + `contentSnippet` can be empty), which may produce low-quality embeddings or cluster all empties as duplicates. `priority-tasks/task2.md:427-430`.
-- Missing: rate-limit/backoff handling at the embedding layer (not just BullMQ retries), plus partial-failure recovery to avoid stuck rows. `priority-tasks/task2.md:432-438`.
-- Missing: model-change strategy (if `EMBEDDING_MODEL` changes, embeddings in DB are now mixed-dimension or semantically incompatible). Suggest storing `embedding_model` or a version tag. `priority-tasks/task2.md:338-352`.
+**Missing considerations**
+- API responses for articles don’t include `title_ka` / `llm_summary_ka`; the frontend can’t display translations without updating these selects. `packages/api/src/routes/articles.ts:103-121`, `packages/api/src/routes/articles.ts:154-173`
+- The plan’s translation stage is bypassed by current auto‑post behavior: LLM brain queues immediate posting on approve, so translation must be gated before distribution. `packages/worker/src/processors/llm-brain.ts:379-401`, `packages/worker/src/processors/distribution.ts:121-234`
+- `app_config` helpers only handle numeric + boolean keys; there’s no existing pattern for JSON arrays (e.g., `translation_scores`) or strings beyond raw JSONB values. `packages/api/src/routes/config.ts:16-55`
+- `GOOGLE_AI_API_KEY` (Gemini) is not in the environment schema; translation won’t start without extending env parsing. `packages/shared/src/schemas/env.ts:21-91`
+- No maintenance logic for a new `translating` stage (zombie reset / retries) is planned; only `embedding` and `scoring` are recovered today. `packages/worker/src/processors/maintenance.ts:152-198`
 
-**Technical accuracy**
-- The SQL for pgvector is fine, but `similarity = 1 - (embedding <=> vector)` assumes `<=>` is cosine distance; confirm pgvector version and operator semantics. If using `vector_cosine_ops`, `<=>` is correct. `priority-tasks/task2.md:286-294`.
-- `updateArticleEmbeddings` claims to “use a transaction” but does not; either remove the claim or wrap in `db.transaction`. `priority-tasks/task2.md:304-318`.
+**Risks / potential issues**
+- If translation is inserted “after scoring” without disabling immediate distribution, approved articles can be posted before translation completes (or even when Georgian mode is enabled). `packages/worker/src/processors/llm-brain.ts:379-401`, `packages/worker/src/processors/distribution.ts:226-234`
+- Georgian posting mode would still post English today because distribution/maintenance formatters always use `title` + `llm_summary`; without enforced blocking, posts go out in the wrong language. `packages/worker/src/processors/distribution.ts:226-234`, `packages/worker/src/processors/maintenance.ts:452-459`
+- `app_config` writes currently coerce numbers to strings and booleans to booleans; the proposed `JSON.stringify` pattern for translation settings would double‑encode arrays/strings and break reads unless parsing logic is added. `packages/api/src/routes/config.ts:16-55`
 
-**Architecture concerns**
-- N+1 queries in dedup loop (one similarity query per article) will be slow as volume grows. Consider a batched approach or a temporary table to compare multiple embeddings at once. `priority-tasks/task2.md:443-500`.
-- No guardrail for duplicate-of chains (A duplicates B, B duplicates C); if that’s possible, you may want to always point to the earliest canonical article to avoid long chains. `priority-tasks/task2.md:463-472`.
-
-**Order of implementation**
-- Mostly good. I’d move “Environment variables/schema update” earlier (before worker wiring) to avoid wiring code to undefined env values. Current order is OK but slightly riskier for integration. `priority-tasks/task2.md:667-676`.
-
-**Risks not mentioned**
-- Stuck rows as noted above (embedding set but pipeline stage not advanced).
-- OpenAI rate limiting or transient outages causing backlog growth; repeated retries can spike costs.
-- 30‑day window can miss long-tail duplicates; if business expects longer, document or make configurable. `priority-tasks/task2.md:268-276`.
-- If embeddings are not normalized, cosine distance/similarity thresholds might be off.
-
-**Suggestions**
-- Add a “claim” step (`UPDATE ... SET pipeline_stage='embedding' WHERE ... RETURNING`) to avoid duplicate work and allow safe restarts. `priority-tasks/task2.md:404-418`.
-- Store `embedding_model` and/or `embedding_dim` per row to support future model changes. `priority-tasks/task2.md:338-352`.
-- Use a single `UPDATE ... SET embedding = ...` and `pipeline_stage` in the same transaction once similarity is decided. `priority-tasks/task2.md:447-484`.
-
-Overall, the plan is solid and detailed, especially the testing checklist and cost notes. The main gaps are concurrency safety, stuck-row recovery, and the ESM `require()` bug.
+**Overall assessment**
+Not fully implementable as written. The core idea is workable, but it needs updates to align with the current pipeline (auto‑post flow, existing stages), API shape (`/articles` fields), config storage/parsing, and env schema before it will behave correctly.
