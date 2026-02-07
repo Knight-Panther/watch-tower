@@ -632,6 +632,27 @@ export const batchRejectArticles = async (
   return res.json();
 };
 
+export const updateArticle = async (
+  id: string,
+  updates: {
+    title?: string;
+    llm_summary?: string;
+    title_ka?: string;
+    llm_summary_ka?: string;
+  },
+): Promise<Article> => {
+  const res = await fetch(`${API_URL}/articles/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to update article");
+  }
+  return res.json();
+};
+
 // ─── Scheduled Deliveries Types ──────────────────────────────────────────────
 
 export type ScheduledDelivery = {

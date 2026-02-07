@@ -194,21 +194,36 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     },
   );
 
-  // PATCH /articles/:id - Update article (edit summary, approve/reject)
+  // PATCH /articles/:id - Update article (edit title, summary, translations, approve/reject)
   app.patch<{
     Params: { id: string };
     Body: {
+      title?: string;
       llm_summary?: string;
+      title_ka?: string;
+      llm_summary_ka?: string;
       pipeline_stage?: "approved" | "rejected" | "posted";
     };
   }>("/articles/:id", { preHandler: deps.requireApiKey }, async (request, reply) => {
     const { id } = request.params;
-    const { llm_summary, pipeline_stage } = request.body ?? {};
+    const { title, llm_summary, title_ka, llm_summary_ka, pipeline_stage } = request.body ?? {};
 
     const updates: Record<string, unknown> = {};
 
+    if (title !== undefined) {
+      updates.title = title;
+    }
+
     if (llm_summary !== undefined) {
       updates.llmSummary = llm_summary;
+    }
+
+    if (title_ka !== undefined) {
+      updates.titleKa = title_ka;
+    }
+
+    if (llm_summary_ka !== undefined) {
+      updates.llmSummaryKa = llm_summary_ka;
     }
 
     if (pipeline_stage !== undefined) {
@@ -234,7 +249,10 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
 
     return {
       id: updated.id,
+      title: updated.title,
       llm_summary: updated.llmSummary,
+      title_ka: updated.titleKa,
+      llm_summary_ka: updated.llmSummaryKa,
       pipeline_stage: updated.pipelineStage,
       approved_at: updated.approvedAt,
     };

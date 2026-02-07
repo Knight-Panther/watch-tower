@@ -6,6 +6,8 @@ import { useLocalStorageFilters } from "../hooks/useLocalStorageFilters";
 import {
   getArticles,
   getArticleFilterOptions,
+  getTranslationConfig,
+  updateArticle,
   rejectArticle,
   scheduleArticle,
   type Article,
@@ -44,6 +46,15 @@ export default function Articles() {
     },
   );
 
+  // Language from translation config
+  const [postingLanguage, setPostingLanguage] = useState<"en" | "ka">("en");
+
+  // Inline edit state
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editSummary, setEditSummary] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
   // Schedule modal state
   const [schedulingArticle, setSchedulingArticle] = useState<Article | null>(null);
 
@@ -79,6 +90,49 @@ export default function Articles() {
   useEffect(() => {
     loadFilterOptions();
   }, [loadFilterOptions]);
+
+  // Fetch posting language from translation config
+  useEffect(() => {
+    getTranslationConfig()
+      .then((config) => setPostingLanguage(config.posting_language))
+      .catch(() => {});
+  }, []);
+
+  const startEditing = (article: Article) => {
+    setEditingId(article.id);
+    if (postingLanguage === "ka") {
+      setEditTitle(article.title_ka || "");
+      setEditSummary(article.llm_summary_ka || "");
+    } else {
+      setEditTitle(article.title);
+      setEditSummary(article.llm_summary || "");
+    }
+  };
+
+  const cancelEditing = () => {
+    setEditingId(null);
+    setEditTitle("");
+    setEditSummary("");
+  };
+
+  const saveEditing = async (articleId: string) => {
+    setIsSaving(true);
+    try {
+      const updates =
+        postingLanguage === "ka"
+          ? { title_ka: editTitle, llm_summary_ka: editSummary }
+          : { title: editTitle, llm_summary: editSummary };
+      await updateArticle(articleId, updates);
+      toast.success("Article updated");
+      setEditingId(null);
+      loadArticles();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to save";
+      toast.error(message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const handleSort = (column: "published_at" | "importance_score" | "created_at") => {
     const newDir = filters.sort_by === column && filters.sort_dir === "desc" ? "asc" : "desc";
@@ -329,29 +383,103 @@ export default function Articles() {
                     </span>
                   </td>
                   <td className="px-4 py-3 max-w-md">
-                    <a
-                      href={article.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-slate-200 hover:text-white hover:underline font-medium line-clamp-1"
-                    >
-                      {article.title}
-                    </a>
-                    {article.llm_summary && (
-                      <p className="text-xs text-slate-400 mt-1 line-clamp-2">
-                        {article.llm_summary}
-                      </p>
-                    )}
-                    {article.translation_status === "translated" && article.llm_summary_ka && (
-                      <p className="text-xs text-slate-500 mt-1 line-clamp-2 border-l-2 border-emerald-700 pl-2">
-                        KA: {article.llm_summary_ka}
-                      </p>
-                    )}
-                    {article.translation_status === "translating" && (
-                      <span className="text-xs text-amber-400 mt-1 inline-block">Translating...</span>
-                    )}
-                    {article.translation_status === "failed" && (
-                      <span className="text-xs text-red-400 mt-1 inline-block">Translation failed</span>
+                    {editingId === article.id ? (
+                      <div className="space-y-2">
+                        <input
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                          className="w-full rounded border border-slate-600 bg-slate-800 px-2 py-1 text-sm text-slate-200 outline-none focus:border-slate-400"
+                          placeholder="Title"
+                        />
+                        <textarea
+                          value={editSummary}
+                          onChange={(e) => setEditSummary(e.target.value)}
+                          rows={3}
+                          className="w-full rounded border border-slate-600 bg-slate-800 px-2 py-1 text-xs text-slate-300 outline-none focus:border-slate-400 resize-y"
+                          placeholder="Summary"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => saveEditing(article.id)}
+                            disabled={isSaving}
+                            className="px-2 py-1 bg-emerald-500/20 text-emerald-200 rounded text-xs hover:bg-emerald-500/30 disabled:opacity-50"
+                          >
+                            {isSaving ? "Saving..." : "Save"}
+                          </button>
+                          <button
+                            onClick={cancelEditing}
+                            className="px-2 py-1 bg-slate-700/50 text-slate-300 rounded text-xs hover:bg-slate-700"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="group relative">
+                        {postingLanguage === "ka" ? (
+                          <>
+                            {article.translation_status === "translated" && article.title_ka ? (
+                              <a
+                                href={article.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-slate-200 hover:text-white hover:underline font-medium line-clamp-1"
+                              >
+                                {article.title_ka}
+                              </a>
+                            ) : (
+                              <a
+                                href={article.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-slate-200 hover:text-white hover:underline font-medium line-clamp-1 italic opacity-60"
+                              >
+                                {article.title}
+                              </a>
+                            )}
+                            {article.translation_status === "translated" && article.llm_summary_ka ? (
+                              <p className="text-xs text-slate-400 mt-1 line-clamp-2">
+                                {article.llm_summary_ka}
+                              </p>
+                            ) : article.translation_status === "translating" ? (
+                              <span className="text-xs text-amber-400 mt-1 inline-block">
+                                Translating...
+                              </span>
+                            ) : article.translation_status === "failed" ? (
+                              <span className="text-xs text-red-400 mt-1 inline-block">
+                                Translation failed
+                              </span>
+                            ) : article.llm_summary ? (
+                              <p className="text-xs text-slate-500 mt-1 line-clamp-2 italic opacity-60">
+                                {article.llm_summary}
+                              </p>
+                            ) : null}
+                          </>
+                        ) : (
+                          <>
+                            <a
+                              href={article.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-slate-200 hover:text-white hover:underline font-medium line-clamp-1"
+                            >
+                              {article.title}
+                            </a>
+                            {article.llm_summary && (
+                              <p className="text-xs text-slate-400 mt-1 line-clamp-2">
+                                {article.llm_summary}
+                              </p>
+                            )}
+                          </>
+                        )}
+                        <button
+                          onClick={() => startEditing(article)}
+                          className="absolute top-0 right-0 opacity-0 group-hover:opacity-100 transition-opacity px-1.5 py-0.5 bg-slate-700/80 text-slate-300 rounded text-xs hover:bg-slate-600"
+                          title="Edit title & summary"
+                        >
+                          Edit
+                        </button>
+                      </div>
                     )}
                   </td>
                   <td className="px-4 py-3">
