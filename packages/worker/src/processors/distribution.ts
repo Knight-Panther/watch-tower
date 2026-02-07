@@ -15,7 +15,7 @@ import {
   type PostTemplateConfig,
 } from "@watch-tower/shared";
 import type { Database } from "@watch-tower/db";
-import { appConfig } from "@watch-tower/db";
+import { appConfig, postDeliveries } from "@watch-tower/db";
 import {
   createTelegramProvider,
   createFacebookProvider,
@@ -274,6 +274,17 @@ export const createDistributionWorker = ({
             postId: postResult.postId,
             error: postResult.error,
             rateLimited: false,
+          });
+
+          // Create post_deliveries record for audit trail
+          await db.insert(postDeliveries).values({
+            articleId,
+            platform: name,
+            scheduledAt: null, // immediate
+            status: postResult.success ? "posted" : "failed",
+            platformPostId: postResult.postId ?? null,
+            errorMessage: postResult.error ?? null,
+            sentAt: postResult.success ? new Date() : null,
           });
 
           if (postResult.success) {

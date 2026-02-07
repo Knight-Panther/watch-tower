@@ -212,13 +212,20 @@ export const createTranslationWorker = ({ connection, db, distributionQueue }: T
           // 4. Auto-post: If article is already 'approved' (score 5 auto-approve),
           // queue it for distribution now that translation is ready
           if (article.pipelineStage === "approved" && distributionQueue) {
-            // Check if auto-post is enabled for any platform
-            const [autoPostRow] = await db
-              .select({ value: appConfig.value })
+            // Check if ANY platform has auto-post enabled
+            const autoPostRows = await db
+              .select({ key: appConfig.key, value: appConfig.value })
               .from(appConfig)
-              .where(eq(appConfig.key, "auto_post_telegram"));
-            const autoPostEnabled =
-              autoPostRow?.value === true || autoPostRow?.value === "true";
+              .where(
+                inArray(appConfig.key, [
+                  "auto_post_telegram",
+                  "auto_post_facebook",
+                  "auto_post_linkedin",
+                ]),
+              );
+            const autoPostEnabled = autoPostRows.some(
+              (r) => r.value === true || r.value === "true",
+            );
 
             if (autoPostEnabled) {
               await distributionQueue.add(

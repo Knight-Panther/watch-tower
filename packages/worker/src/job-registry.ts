@@ -5,6 +5,7 @@ import {
   JOB_SEMANTIC_BATCH,
   JOB_LLM_SCORE_BATCH,
   JOB_PLATFORM_HEALTH_CHECK,
+  JOB_TRANSLATION_BATCH,
   logger,
 } from "@watch-tower/shared";
 
@@ -19,6 +20,7 @@ type JobRegistryDeps = {
   maintenanceQueue: Queue;
   semanticDedupQueue?: Queue;
   llmQueue?: Queue;
+  translationQueue?: Queue;
 };
 
 /**
@@ -34,6 +36,7 @@ export const ensureRepeatableJobs = async ({
   maintenanceQueue,
   semanticDedupQueue,
   llmQueue,
+  translationQueue,
 }: JobRegistryDeps): Promise<{ registered: number; alreadyExisted: number }> => {
   const jobs: RepeatableJobDef[] = [
     {
@@ -72,6 +75,15 @@ export const ensureRepeatableJobs = async ({
       name: JOB_LLM_SCORE_BATCH,
       jobId: "llm-score-recurring",
       every: 10 * 1000, // 10 seconds
+    });
+  }
+
+  if (translationQueue) {
+    jobs.push({
+      queue: translationQueue,
+      name: JOB_TRANSLATION_BATCH,
+      jobId: "translation-batch-repeat",
+      every: 15 * 1000, // 15 seconds
     });
   }
 

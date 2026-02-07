@@ -1,5 +1,5 @@
 import { Worker, Queue } from "bullmq";
-import { sql, eq } from "drizzle-orm";
+import { sql, eq, inArray } from "drizzle-orm";
 import {
   QUEUE_LLM_BRAIN,
   JOB_LLM_SCORE_BATCH,
@@ -17,37 +17,33 @@ import { calculateLLMCost } from "@watch-tower/llm";
 import type { EventPublisher } from "../events.js";
 
 /**
- * Check if Telegram auto-posting is enabled in app_config.
- * Defaults to true if not set.
- *
- * Note: Checks both new key (auto_post_telegram) and legacy key (auto_post_score5)
- * for backward compatibility during migration.
+ * Check if ANY platform has auto-posting enabled in app_config.
+ * The distribution worker handles per-platform gating — this just decides
+ * whether to queue a distribution job at all.
  */
-const isTelegramAutoPostEnabled = async (db: Database): Promise<boolean> => {
-  // Try new key first
-  const [newRow] = await db
-    .select({ value: appConfig.value })
+const isAnyAutoPostEnabled = async (db: Database): Promise<boolean> => {
+  const rows = await db
+    .select({ key: appConfig.key, value: appConfig.value })
     .from(appConfig)
-    .where(eq(appConfig.key, "auto_post_telegram"));
-  if (newRow) {
-    return newRow.value === true || newRow.value === "true";
+    .where(
+      inArray(appConfig.key, [
+        "auto_post_telegram",
+        "auto_post_facebook",
+        "auto_post_linkedin",
+      ]),
+    );
+
+  if (rows.length === 0) {
+    // Legacy: check old key, default true
+    const [legacyRow] = await db
+      .select({ value: appConfig.value })
+      .from(appConfig)
+      .where(eq(appConfig.key, "auto_post_score5"));
+    return legacyRow ? legacyRow.value === true || legacyRow.value === "true" : true;
   }
 
-  // Fall back to legacy key for backward compatibility
-  const [legacyRow] = await db
-    .select({ value: appConfig.value })
-    .from(appConfig)
-    .where(eq(appConfig.key, "auto_post_score5"));
-  if (legacyRow) {
-    return legacyRow.value === true || legacyRow.value === "true";
-  }
-
-  return true; // Default to enabled
+  return rows.some((r) => r.value === true || r.value === "true");
 };
-
-// TODO: Add similar functions when Facebook/LinkedIn are integrated:
-// const isFacebookAutoPostEnabled = async (db: Database): Promise<boolean> => { ... }
-// const isLinkedinAutoPostEnabled = async (db: Database): Promise<boolean> => { ... }
 
 type LLMBrainDeps = {
   connection: { host: string; port: number };
@@ -392,7 +388,7 @@ export const createLLMBrainWorker = ({
                   "[llm-brain] Georgian mode — translation worker will handle distribution",
                 );
               } else {
-                const telegramEnabled = await isTelegramAutoPostEnabled(db);
+                const telegramEnabled = await isAnyAutoPostEnabled(db);
                 if (telegramEnabled) {
                   await distributionQueue.add(
                     JOB_DISTRIBUTION_IMMEDIATE,
@@ -401,12 +397,12 @@ export const createLLMBrainWorker = ({
                   );
                   logger.info(
                     { articleId: result.articleId, score: result.score },
-                    "[llm-brain] queued for immediate Telegram distribution",
+                    "[llm-brain] queued for immediate distribution",
                   );
                 } else {
                   logger.debug(
                     { articleId: result.articleId, score: result.score },
-                    "[llm-brain] Telegram auto-post disabled, skipping",
+                    "[llm-brain] all auto-post platforms disabled, skipping",
                   );
                 }
               }

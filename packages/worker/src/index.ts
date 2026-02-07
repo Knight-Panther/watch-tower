@@ -473,6 +473,7 @@ const main = async () => {
         maintenanceQueue,
         semanticDedupQueue: env.OPENAI_API_KEY ? semanticDedupQueue : undefined,
         llmQueue: primaryApiKey ? llmQueue : undefined,
+        translationQueue: hasTranslationKey ? translationQueue : undefined,
       });
     } catch (err) {
       logger.error("[worker] self-heal check failed", err);
