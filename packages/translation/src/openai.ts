@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import type { TranslationResult } from "./types.js";
-import { buildTranslationPrompt, DEFAULT_TRANSLATION_INSTRUCTIONS } from "./prompts.js";
+import { buildSystemPrompt, buildUserPrompt } from "./prompts.js";
 import { logger } from "@watch-tower/shared";
 
 export const translateWithOpenAI = async (
@@ -10,11 +10,8 @@ export const translateWithOpenAI = async (
   summary: string,
   instructions?: string,
 ): Promise<TranslationResult> => {
-  const prompt = buildTranslationPrompt(
-    title,
-    summary,
-    instructions || DEFAULT_TRANSLATION_INSTRUCTIONS,
-  );
+  const systemPrompt = buildSystemPrompt(instructions);
+  const userPrompt = buildUserPrompt(title, summary);
 
   const startTime = Date.now();
 
@@ -23,7 +20,10 @@ export const translateWithOpenAI = async (
     const response = await client.chat.completions.create({
       model,
       max_tokens: 1024,
-      messages: [{ role: "user", content: prompt }],
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
       response_format: { type: "json_object" },
     });
 

@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import type { TranslationResult } from "./types.js";
-import { buildTranslationPrompt, DEFAULT_TRANSLATION_INSTRUCTIONS } from "./prompts.js";
+import { buildSystemPrompt, buildUserPrompt } from "./prompts.js";
 import { logger } from "@watch-tower/shared";
 
 export const translateWithGemini = async (
@@ -10,11 +10,8 @@ export const translateWithGemini = async (
   summary: string,
   instructions?: string,
 ): Promise<TranslationResult> => {
-  const prompt = buildTranslationPrompt(
-    title,
-    summary,
-    instructions || DEFAULT_TRANSLATION_INSTRUCTIONS,
-  );
+  const systemPrompt = buildSystemPrompt(instructions);
+  const userPrompt = buildUserPrompt(title, summary);
 
   const startTime = Date.now();
 
@@ -22,13 +19,14 @@ export const translateWithGemini = async (
     const client = new GoogleGenerativeAI(apiKey);
     const genModel = client.getGenerativeModel({
       model,
+      systemInstruction: systemPrompt,
       generationConfig: {
         responseMimeType: "application/json",
         maxOutputTokens: 1024,
       },
     });
 
-    const result = await genModel.generateContent(prompt);
+    const result = await genModel.generateContent(userPrompt);
     const response = result.response;
     const text = response.text();
     const latencyMs = Date.now() - startTime;
