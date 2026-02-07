@@ -15,6 +15,8 @@ import {
   QUEUE_SEMANTIC_DEDUP,
   QUEUE_LLM_BRAIN,
   QUEUE_DISTRIBUTION,
+  QUEUE_TRANSLATION,
+  JOB_TRANSLATION_BATCH,
   setLogLevel,
   logger,
 } from "@watch-tower/shared";
@@ -26,6 +28,7 @@ import { createMaintenanceWorker } from "./processors/maintenance.js";
 import { createSemanticDedupWorker } from "./processors/semantic-dedup.js";
 import { createLLMBrainWorker } from "./processors/llm-brain.js";
 import { createDistributionWorker } from "./processors/distribution.js";
+import { createTranslationWorker } from "./processors/translation.js";
 import { createEventPublisher } from "./events.js";
 import { ensureRepeatableJobs } from "./job-registry.js";
 import { createRateLimiter } from "./utils/rate-limiter.js";
@@ -126,6 +129,17 @@ const main = async () => {
     defaultJobOptions: {
       attempts: 3,
       backoff: { type: "exponential", delay: 30000 }, // Longer backoff for rate limits
+      removeOnComplete: 100,
+      removeOnFail: 50,
+    },
+  });
+
+  // Translation queue
+  const translationQueue = new Queue(QUEUE_TRANSLATION, {
+    connection,
+    defaultJobOptions: {
+      attempts: 3,
+      backoff: { type: "exponential", delay: 10000 },
       removeOnComplete: 100,
       removeOnFail: 50,
     },
@@ -278,6 +292,16 @@ const main = async () => {
       })
     : null;
 
+  // Translation worker (needs at least one translation provider key)
+  const hasTranslationKey = !!(env.GOOGLE_AI_API_KEY || env.OPENAI_API_KEY);
+  const translationWorker = hasTranslationKey
+    ? createTranslationWorker({
+        connection,
+        db,
+        distributionQueue: hasAnyPlatform ? distributionQueue : undefined,
+      })
+    : null;
+
   // Worker error handlers
   ingestWorker.on("failed", (job, err) => {
     logger.error(`[ingest] job ${job?.id ?? "unknown"} failed`, err.message);
@@ -335,12 +359,25 @@ const main = async () => {
     });
   }
 
+  if (translationWorker) {
+    translationWorker.on("failed", (job, err) => {
+      logger.error(`[translation] job ${job?.id ?? "unknown"} failed`, err.message);
+    });
+    translationWorker.on("error", (err) => {
+      logger.error("[translation] worker error", err.message);
+    });
+    translationWorker.on("stalled", (jobId) => {
+      logger.warn(`[translation] job ${jobId} stalled - will be retried`);
+    });
+  }
+
   // Clean failed jobs from previous runs (waiting jobs are preserved)
   await ingestQueue.clean(0, 0, "failed");
   await maintenanceQueue.clean(0, 0, "failed");
   await semanticDedupQueue.clean(0, 0, "failed");
   await llmQueue.clean(0, 0, "failed");
   await distributionQueue.clean(0, 0, "failed");
+  await translationQueue.clean(0, 0, "failed");
   logger.info("[worker] cleaned failed jobs");
 
   // Set up recurring jobs (BullMQ deduplicates by jobId automatically)
@@ -416,6 +453,18 @@ const main = async () => {
     logger.info("[worker] distribution disabled (no social platform credentials configured)");
   }
 
+  // Translation recurring job (every 15 seconds)
+  if (translationWorker) {
+    await translationQueue.add(
+      JOB_TRANSLATION_BATCH,
+      {},
+      { repeat: { every: 15_000 }, jobId: "translation-batch-repeat" },
+    );
+    logger.info("[worker] translation enabled (gemini/openai)");
+  } else {
+    logger.info("[worker] translation disabled (no GOOGLE_AI_API_KEY or OPENAI_API_KEY)");
+  }
+
   // Self-healing interval: re-register repeatable jobs if they were deleted (e.g., Redis wipe)
   // This runs independently of BullMQ jobs to solve chicken-and-egg problem
   const selfHealInterval = setInterval(async () => {
@@ -451,11 +500,13 @@ const main = async () => {
       await semanticDedupWorker?.close();
       await llmBrainWorker?.close();
       await distributionWorker?.close();
+      await translationWorker?.close();
       await ingestQueue.close();
       await maintenanceQueue.close();
       await semanticDedupQueue.close();
       await llmQueue.close();
       await distributionQueue.close();
+      await translationQueue.close();
       await redis.quit();
       await closeDb();
     } finally {

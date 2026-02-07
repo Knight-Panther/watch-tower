@@ -41,6 +41,11 @@ const coreEnvSchema = z.object({
     .string()
     .optional()
     .transform((val) => (val === "" ? undefined : val)),
+  // Translation (Gemini)
+  GOOGLE_AI_API_KEY: z
+    .string()
+    .optional()
+    .transform((val) => (val === "" ? undefined : val)),
 
   // Primary LLM provider: "claude" | "openai" | "deepseek" (extensible)
   LLM_PROVIDER: z.string().default("claude"),

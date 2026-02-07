@@ -190,11 +190,50 @@ const resetZombieScoringArticles = async (db: Database) => {
 };
 
 /**
- * Reset all zombie articles (embedding + scoring stages)
+ * Reset articles stuck in 'translating' state (translation_status only).
+ * Does NOT touch pipeline_stage — translation is decoupled.
+ * Uses 10 min threshold for stuck translations.
+ */
+const resetZombieTranslations = async (db: Database) => {
+  const staleThreshold = new Date(Date.now() - 10 * 60 * 1000);
+
+  // Reset stuck 'translating' → NULL (allows re-claim)
+  const translatingResult = await db.execute(sql`
+    UPDATE articles
+    SET translation_status = NULL
+    WHERE translation_status = 'translating'
+      AND created_at < ${staleThreshold}
+    RETURNING id
+  `);
+  if (translatingResult.rows.length > 0) {
+    logger.warn(
+      `[maintenance] reset ${translatingResult.rows.length} zombie translating articles`,
+    );
+  }
+
+  // Reset 'failed' → NULL after 1 hour (allows retry)
+  const failedThreshold = new Date(Date.now() - 60 * 60 * 1000);
+  const failedResult = await db.execute(sql`
+    UPDATE articles
+    SET translation_status = NULL
+    WHERE translation_status = 'failed'
+      AND created_at < ${failedThreshold}
+    RETURNING id
+  `);
+  if (failedResult.rows.length > 0) {
+    logger.warn(
+      `[maintenance] reset ${failedResult.rows.length} failed translations for retry`,
+    );
+  }
+};
+
+/**
+ * Reset all zombie articles (embedding + scoring + translation stages)
  */
 const resetZombieArticles = async (db: Database) => {
   await resetZombieEmbeddingArticles(db);
   await resetZombieScoringArticles(db);
+  await resetZombieTranslations(db);
 };
 
 /**
@@ -228,16 +267,34 @@ const resetZombieDeliveries = async (db: Database) => {
 const rescueOrphanedApprovedArticles = async (db: Database, distributionQueue?: Queue) => {
   if (!distributionQueue) return 0;
 
+  // Check posting language once
+  const [langRow] = await db
+    .select({ value: appConfig.value })
+    .from(appConfig)
+    .where(eq(appConfig.key, "posting_language"));
+  const postingLanguage = (langRow?.value as string) ?? "en";
+
   // Find approved articles that haven't progressed in 5 minutes
   // These are likely orphaned due to Redis queue failure
+  // In Georgian mode, only rescue articles that have been translated
   const staleThreshold = new Date(Date.now() - 5 * 60 * 1000);
-  const orphanedResult = await db.execute(sql`
-    SELECT id FROM articles
-    WHERE pipeline_stage = 'approved'
-      AND approved_at IS NOT NULL
-      AND approved_at < ${staleThreshold}
-    LIMIT 20
-  `);
+  const orphanedResult =
+    postingLanguage === "ka"
+      ? await db.execute(sql`
+          SELECT id FROM articles
+          WHERE pipeline_stage = 'approved'
+            AND approved_at IS NOT NULL
+            AND approved_at < ${staleThreshold}
+            AND title_ka IS NOT NULL
+          LIMIT 20
+        `)
+      : await db.execute(sql`
+          SELECT id FROM articles
+          WHERE pipeline_stage = 'approved'
+            AND approved_at IS NOT NULL
+            AND approved_at < ${staleThreshold}
+          LIMIT 20
+        `);
 
   const orphaned = orphanedResult.rows as { id: string }[];
   if (orphaned.length === 0) return 0;
@@ -270,6 +327,8 @@ type ArticleForPost = {
   llmSummary: string | null;
   importanceScore: number | null;
   sectorName: string | null;
+  titleKa: string | null;
+  llmSummaryKa: string | null;
 };
 
 type ClaimedDelivery = {
@@ -422,7 +481,7 @@ const processScheduledPosts = async (
         continue;
       }
 
-      // Fetch article data
+      // Fetch article data (including Georgian translation fields)
       const articleResult = await db.execute(sql`
         SELECT
           a.id,
@@ -430,6 +489,8 @@ const processScheduledPosts = async (
           a.url,
           a.llm_summary as "llmSummary",
           a.importance_score as "importanceScore",
+          a.title_ka as "titleKa",
+          a.llm_summary_ka as "llmSummaryKa",
           s.name as "sectorName"
         FROM articles a
         LEFT JOIN sectors s ON a.sector_id = s.id
@@ -446,14 +507,42 @@ const processScheduledPosts = async (
         continue;
       }
 
+      // Read posting language
+      const [langRow] = await db
+        .select({ value: appConfig.value })
+        .from(appConfig)
+        .where(eq(appConfig.key, "posting_language"));
+      const postingLanguage = (langRow?.value as string) ?? "en";
+
+      // Georgian mode: check translation is available
+      if (postingLanguage === "ka" && (!article.titleKa || !article.llmSummaryKa)) {
+        logger.warn(
+          { deliveryId: delivery.id, articleId: delivery.articleId },
+          "[post-scheduler] Georgian mode but no translation — marking failed",
+        );
+        await db
+          .update(postDeliveries)
+          .set({ status: "failed", errorMessage: "No Georgian translation available" })
+          .where(eq(postDeliveries.id, delivery.id));
+        continue;
+      }
+
+      // Resolve content based on language
+      const postTitle =
+        postingLanguage === "ka" && article.titleKa ? article.titleKa : article.title;
+      const postSummary =
+        postingLanguage === "ka" && article.llmSummaryKa
+          ? article.llmSummaryKa
+          : article.llmSummary || article.title;
+
       // Get template for this platform
       const template = await getTemplateForPlatform(db, delivery.platform);
 
-      // Format and post using template
+      // Format and post using template (uses resolved language content)
       const text = provider.formatPost(
         {
-          title: article.title,
-          summary: article.llmSummary || article.title,
+          title: postTitle,
+          summary: postSummary,
           url: article.url,
           sector: article.sectorName || "News",
         },

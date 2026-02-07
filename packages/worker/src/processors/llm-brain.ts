@@ -378,25 +378,37 @@ export const createLLMBrainWorker = ({
 
             // Queue for immediate distribution to Telegram (auto-approved articles)
             // Only if auto_post_telegram is enabled in app_config
-            // TODO: When FB/LinkedIn are integrated, check their settings too and
-            // pass platform info to distribution worker: { articleId, platforms: ['telegram', 'facebook'] }
             if (distributionQueue) {
-              const telegramEnabled = await isTelegramAutoPostEnabled(db);
-              if (telegramEnabled) {
-                await distributionQueue.add(
-                  JOB_DISTRIBUTION_IMMEDIATE,
-                  { articleId: result.articleId },
-                  { jobId: `immediate-${result.articleId}` },
-                );
-                logger.info(
-                  { articleId: result.articleId, score: result.score },
-                  "[llm-brain] queued for immediate Telegram distribution",
-                );
-              } else {
+              // Check posting language — Georgian mode defers to translation worker
+              const [langRow] = await db
+                .select({ value: appConfig.value })
+                .from(appConfig)
+                .where(eq(appConfig.key, "posting_language"));
+              const postingLanguage = (langRow?.value as string) ?? "en";
+
+              if (postingLanguage === "ka") {
                 logger.debug(
                   { articleId: result.articleId, score: result.score },
-                  "[llm-brain] Telegram auto-post disabled, skipping",
+                  "[llm-brain] Georgian mode — translation worker will handle distribution",
                 );
+              } else {
+                const telegramEnabled = await isTelegramAutoPostEnabled(db);
+                if (telegramEnabled) {
+                  await distributionQueue.add(
+                    JOB_DISTRIBUTION_IMMEDIATE,
+                    { articleId: result.articleId },
+                    { jobId: `immediate-${result.articleId}` },
+                  );
+                  logger.info(
+                    { articleId: result.articleId, score: result.score },
+                    "[llm-brain] queued for immediate Telegram distribution",
+                  );
+                } else {
+                  logger.debug(
+                    { articleId: result.articleId, score: result.score },
+                    "[llm-brain] Telegram auto-post disabled, skipping",
+                  );
+                }
               }
             }
           } else {

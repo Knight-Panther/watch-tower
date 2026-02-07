@@ -45,6 +45,8 @@ type ArticleForDistribution = {
   llmSummary: string | null;
   importanceScore: number | null;
   sectorName: string | null;
+  titleKa: string | null;
+  llmSummaryKa: string | null;
 };
 
 // Helper: Check if platform is enabled in app_config
@@ -132,6 +134,8 @@ export const createDistributionWorker = ({
             url,
             llm_summary as "llmSummary",
             importance_score as "importanceScore",
+            title_ka as "titleKa",
+            llm_summary_ka as "llmSummaryKa",
             (SELECT name FROM sectors WHERE id = articles.sector_id) as "sectorName"
         `);
 
@@ -164,6 +168,34 @@ export const createDistributionWorker = ({
         }
 
         const article = claimedArticles[0];
+
+        // Read posting language
+        const [langRow] = await db
+          .select({ value: appConfig.value })
+          .from(appConfig)
+          .where(eq(appConfig.key, "posting_language"));
+        const postingLanguage = (langRow?.value as string) ?? "en";
+
+        // Georgian mode: check translation is available
+        if (postingLanguage === "ka" && (!article.titleKa || !article.llmSummaryKa)) {
+          // Roll back to approved — translation worker hasn't finished yet
+          await db.execute(sql`
+            UPDATE articles SET pipeline_stage = 'approved' WHERE id = ${articleId}::uuid
+          `);
+          logger.warn(
+            { articleId },
+            "[distribution] Georgian mode but no translation — rolled back to approved",
+          );
+          return { skipped: true, reason: "awaiting_translation" };
+        }
+
+        // Resolve content based on language
+        const postTitle =
+          postingLanguage === "ka" && article.titleKa ? article.titleKa : article.title;
+        const postSummary =
+          postingLanguage === "ka" && article.llmSummaryKa
+            ? article.llmSummaryKa
+            : article.llmSummary || article.title;
 
         // Build list of platforms to post to
         const platforms = [
@@ -223,11 +255,11 @@ export const createDistributionWorker = ({
           // Fetch template for this platform
           const template = await getTemplateForPlatform(db, name);
 
-          // Format post using provider
+          // Format post using provider (uses resolved language content)
           const text = provider!.formatPost(
             {
-              title: article.title,
-              summary: article.llmSummary || article.title,
+              title: postTitle,
+              summary: postSummary,
               url: article.url,
               sector: article.sectorName || "News",
             },

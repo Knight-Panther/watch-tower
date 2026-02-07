@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 import {
   getAllowedDomains,
   addAllowedDomain,
@@ -8,19 +9,22 @@ import {
   getSecurityConfig,
   getEmergencyStop,
   setEmergencyStop,
+  getTranslationConfig,
+  updateTranslationConfig,
   type AllowedDomain,
   type SecurityConfig,
+  type TranslationConfig,
 } from "../api";
 import Spinner from "../components/Spinner";
 
-type TabId = "domains" | "limits" | "api" | "emergency";
+type TabId = "domains" | "limits" | "api" | "emergency" | "translation";
 
 export default function SiteRules() {
   // URL-based tab state
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
   const activeTab: TabId =
-    tabParam === "limits" || tabParam === "api" || tabParam === "emergency"
+    tabParam === "limits" || tabParam === "api" || tabParam === "emergency" || tabParam === "translation"
       ? tabParam
       : "domains";
 
@@ -44,6 +48,9 @@ export default function SiteRules() {
   const [emergencyStop, setEmergencyStopState] = useState(false);
   const [killSwitchLoading, setKillSwitchLoading] = useState(true);
   const [killSwitchToggling, setKillSwitchToggling] = useState(false);
+
+  // Translation config state
+  const [translationConfig, setTranslationConfig] = useState<TranslationConfig | null>(null);
 
   // Load domains
   const loadDomains = useCallback(async () => {
@@ -85,12 +92,23 @@ export default function SiteRules() {
     }
   }, []);
 
+  // Load translation config
+  const loadTranslationConfig = useCallback(async () => {
+    try {
+      const data = await getTranslationConfig();
+      setTranslationConfig(data);
+    } catch {
+      // Non-critical
+    }
+  }, []);
+
   // Initial load
   useEffect(() => {
     loadDomains();
     loadSecurityConfig();
     loadKillSwitch();
-  }, [loadDomains, loadSecurityConfig, loadKillSwitch]);
+    loadTranslationConfig();
+  }, [loadDomains, loadSecurityConfig, loadKillSwitch, loadTranslationConfig]);
 
   // Add domain
   const handleAddDomain = async () => {
@@ -164,6 +182,7 @@ export default function SiteRules() {
           { id: "limits", label: "Feed Limits" },
           { id: "api", label: "API Security" },
           { id: "emergency", label: "Emergency Controls" },
+          { id: "translation", label: "Translation" },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -379,6 +398,163 @@ MAX_ARTICLES_PER_SOURCE_DAILY=500`}
 {`ALLOWED_ORIGINS=https://yourdomain.com
 API_RATE_LIMIT_PER_MINUTE=200`}
             </pre>
+          </div>
+        </section>
+      )}
+
+      {/* Translation Tab */}
+      {activeTab === "translation" && (
+        <section className="grid gap-6">
+          {/* Posting Language Toggle */}
+          <div className="rounded-2xl border border-amber-800/50 bg-amber-950/20 p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-medium text-amber-200">Posting Language</h3>
+                <p className="text-sm text-amber-200/70">
+                  All posts will use this language. Georgian requires translation to be configured.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    updateTranslationConfig({ posting_language: "en" })
+                      .then(() => toast.success("Switched to English"))
+                      .catch(() => toast.error("Failed to update language"));
+                    setTranslationConfig((prev) => prev ? { ...prev, posting_language: "en" } : null);
+                  }}
+                  className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+                    translationConfig?.posting_language === "en"
+                      ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50"
+                      : "bg-slate-700 text-slate-300 hover:bg-slate-600"
+                  }`}
+                >
+                  English
+                </button>
+                <button
+                  onClick={() => {
+                    updateTranslationConfig({ posting_language: "ka" })
+                      .then(() => toast.success("Switched to Georgian"))
+                      .catch(() => toast.error("Failed to update language"));
+                    setTranslationConfig((prev) => prev ? { ...prev, posting_language: "ka" } : null);
+                  }}
+                  className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+                    translationConfig?.posting_language === "ka"
+                      ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50"
+                      : "bg-slate-700 text-slate-300 hover:bg-slate-600"
+                  }`}
+                >
+                  Georgian
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Scores to Translate */}
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+            <h3 className="text-lg font-medium mb-4">Translate Articles with Score</h3>
+            <div className="flex gap-4">
+              {[3, 4, 5].map((score) => (
+                <label key={score} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={translationConfig?.scores.includes(score) ?? false}
+                    onChange={(e) => {
+                      const newScores = e.target.checked
+                        ? [...(translationConfig?.scores ?? []), score]
+                        : (translationConfig?.scores ?? []).filter((s) => s !== score);
+                      updateTranslationConfig({ scores: newScores })
+                        .then(() => toast.success("Translation scores updated"))
+                        .catch(() => toast.error("Failed to update scores"));
+                      setTranslationConfig((prev) => prev ? { ...prev, scores: newScores } : null);
+                    }}
+                    className="rounded border-slate-600"
+                  />
+                  <span className="text-sm text-slate-200">Score {score}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Translation Provider & Model */}
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+            <h3 className="text-lg font-medium mb-4">Translation Provider & Model</h3>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="block text-sm text-slate-400 mb-2">Provider</label>
+                <select
+                  value={translationConfig?.provider ?? "gemini"}
+                  onChange={(e) => {
+                    const provider = e.target.value as "gemini" | "openai";
+                    const defaultModel = provider === "openai" ? "gpt-4o-mini" : "gemini-2.0-flash";
+                    updateTranslationConfig({ provider, model: defaultModel })
+                      .then(() => toast.success(`Provider set to ${provider}`))
+                      .catch(() => toast.error("Failed to update provider"));
+                    setTranslationConfig((prev) =>
+                      prev ? { ...prev, provider, model: defaultModel } : null,
+                    );
+                  }}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm"
+                >
+                  <option value="gemini">Gemini (Google)</option>
+                  <option value="openai">OpenAI</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-2">Model</label>
+                <select
+                  value={translationConfig?.model ?? "gemini-2.0-flash"}
+                  onChange={(e) => {
+                    updateTranslationConfig({ model: e.target.value })
+                      .then(() => toast.success(`Model set to ${e.target.value}`))
+                      .catch(() => toast.error("Failed to update model"));
+                    setTranslationConfig((prev) => prev ? { ...prev, model: e.target.value } : null);
+                  }}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm"
+                >
+                  {translationConfig?.provider === "openai" ? (
+                    <>
+                      <option value="gpt-4o-mini">gpt-4o-mini (fast, cheap)</option>
+                      <option value="gpt-4o">gpt-4o (quality)</option>
+                      <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                      <option value="gpt-4.1-nano">gpt-4.1-nano</option>
+                    </>
+                  ) : (
+                    <>
+                      <option value="gemini-2.0-flash">gemini-2.0-flash (fast, cheap)</option>
+                      <option value="gemini-2.0-pro">gemini-2.0-pro (quality)</option>
+                      <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+                      <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+                    </>
+                  )}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Translation Instructions */}
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+            <h3 className="text-lg font-medium mb-4">Translation Instructions</h3>
+            <p className="text-sm text-slate-400 mb-4">
+              Customize how the AI translates content to Georgian
+            </p>
+            <textarea
+              value={translationConfig?.instructions ?? ""}
+              onChange={(e) => {
+                setTranslationConfig((prev) =>
+                  prev ? { ...prev, instructions: e.target.value } : null,
+                );
+              }}
+              onBlur={() => {
+                if (translationConfig) {
+                  updateTranslationConfig({ instructions: translationConfig.instructions })
+                    .then(() => toast.success("Instructions saved"))
+                    .catch(() => toast.error("Failed to save instructions"));
+                }
+              }}
+              rows={6}
+              className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm"
+              placeholder="Translate the following English news summary into Georgian..."
+            />
           </div>
         </section>
       )}

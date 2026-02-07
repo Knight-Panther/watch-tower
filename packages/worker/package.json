@@ -17,6 +17,7 @@
     "@watch-tower/embeddings": "file:../embeddings",
     "@watch-tower/llm": "file:../llm",
     "@watch-tower/shared": "file:../shared",
+    "@watch-tower/translation": "file:../translation",
     "bullmq": "^5.66.5",
     "dotenv": "^17.2.3",
     "drizzle-orm": "^0.44.0",

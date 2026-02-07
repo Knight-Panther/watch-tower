@@ -342,6 +342,17 @@ export default function Articles() {
                         {article.llm_summary}
                       </p>
                     )}
+                    {article.translation_status === "translated" && article.llm_summary_ka && (
+                      <p className="text-xs text-slate-500 mt-1 line-clamp-2 border-l-2 border-emerald-700 pl-2">
+                        KA: {article.llm_summary_ka}
+                      </p>
+                    )}
+                    {article.translation_status === "translating" && (
+                      <span className="text-xs text-amber-400 mt-1 inline-block">Translating...</span>
+                    )}
+                    {article.translation_status === "failed" && (
+                      <span className="text-xs text-red-400 mt-1 inline-block">Translation failed</span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <span

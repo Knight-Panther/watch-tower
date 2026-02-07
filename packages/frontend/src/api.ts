@@ -499,6 +499,10 @@ export type Article = {
   source_url: string | null;
   sector_id: string | null;
   sector_name: string | null;
+  // Translation fields
+  title_ka: string | null;
+  llm_summary_ka: string | null;
+  translation_status: string | null;
 };
 
 export type ArticlesResponse = {
@@ -1323,4 +1327,33 @@ export const setEmergencyStop = async (enabled: boolean): Promise<{ enabled: boo
     throw new Error(body.error || "Failed to set emergency stop");
   }
   return res.json();
+};
+
+// ─── Translation Config ─────────────────────────────────────────────────────
+
+export type TranslationConfig = {
+  posting_language: "en" | "ka";
+  scores: number[];
+  provider: "gemini" | "openai";
+  model: string;
+  instructions: string;
+};
+
+export const getTranslationConfig = async (): Promise<TranslationConfig> => {
+  const res = await fetch(`${API_URL}/config/translation`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) throw new Error("Failed to get translation config");
+  return res.json();
+};
+
+export const updateTranslationConfig = async (
+  config: Partial<TranslationConfig>,
+): Promise<void> => {
+  const res = await fetch(`${API_URL}/config/translation`, {
+    method: "PATCH",
+    headers: { ...authHeaders, "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  if (!res.ok) throw new Error("Failed to update translation config");
 };

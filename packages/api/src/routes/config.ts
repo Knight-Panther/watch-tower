@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { appConfig } from "@watch-tower/db";
+import { logger } from "@watch-tower/shared";
 import type { ApiDeps } from "../server.js";
 
 const CONSTRAINTS = {
@@ -43,6 +44,22 @@ const upsertConfig = async (deps: ApiDeps, key: string, value: number) => {
 };
 
 const upsertBooleanConfig = async (deps: ApiDeps, key: string, value: boolean) => {
+  const [row] = await deps.db
+    .insert(appConfig)
+    .values({ key, value, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: appConfig.key,
+      set: { value, updatedAt: new Date() },
+    })
+    .returning();
+  return row;
+};
+
+/**
+ * Write a typed value to app_config. Drizzle handles JSONB serialization.
+ * Use for arrays, strings, and complex types.
+ */
+const upsertTypedConfig = async (deps: ApiDeps, key: string, value: unknown) => {
   const [row] = await deps.db
     .insert(appConfig)
     .values({ key, value, updatedAt: new Date() })
@@ -283,4 +300,92 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       return { enabled };
     },
   );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Translation Settings
+  // Controls Georgian translation and posting language.
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  // GET /config/translation
+  app.get("/config/translation", { preHandler: deps.requireApiKey }, async () => {
+    const keys = [
+      "posting_language",
+      "translation_scores",
+      "translation_provider",
+      "translation_model",
+      "translation_instructions",
+    ];
+
+    const rows = await deps.db
+      .select({ key: appConfig.key, value: appConfig.value })
+      .from(appConfig)
+      .where(inArray(appConfig.key, keys));
+
+    const m = new Map(rows.map((r) => [r.key, r.value]));
+
+    return {
+      posting_language: (m.get("posting_language") as string) ?? "en",
+      scores: (m.get("translation_scores") as number[]) ?? [3, 4, 5],
+      provider: (m.get("translation_provider") as string) ?? "gemini",
+      model: (m.get("translation_model") as string) ?? "gemini-2.0-flash",
+      instructions: (m.get("translation_instructions") as string) ?? "",
+    };
+  });
+
+  // PATCH /config/translation
+  app.patch<{
+    Body: {
+      posting_language?: "en" | "ka";
+      scores?: number[];
+      provider?: "gemini" | "openai";
+      model?: string;
+      instructions?: string;
+    };
+  }>("/config/translation", { preHandler: deps.requireApiKey }, async (request, reply) => {
+    const { posting_language, scores, provider, model, instructions } = request.body ?? {};
+
+    // Validate posting_language
+    if (posting_language !== undefined && !["en", "ka"].includes(posting_language)) {
+      return reply.code(400).send({ error: "posting_language must be 'en' or 'ka'" });
+    }
+
+    // Validate scores
+    if (scores !== undefined) {
+      if (!Array.isArray(scores) || scores.some((s) => s < 1 || s > 5)) {
+        return reply.code(400).send({ error: "scores must be an array of numbers 1-5" });
+      }
+    }
+
+    // Validate provider
+    if (provider !== undefined && !["gemini", "openai"].includes(provider)) {
+      return reply.code(400).send({ error: "provider must be 'gemini' or 'openai'" });
+    }
+
+    const updates: { key: string; value: unknown }[] = [];
+
+    if (posting_language !== undefined) {
+      updates.push({ key: "posting_language", value: posting_language });
+
+      // Backfill guard: when switching to Georgian, record when it was enabled
+      if (posting_language === "ka") {
+        updates.push({
+          key: "translation_enabled_since",
+          value: new Date().toISOString(),
+        });
+      }
+    }
+    if (scores !== undefined) updates.push({ key: "translation_scores", value: scores });
+    if (provider !== undefined) updates.push({ key: "translation_provider", value: provider });
+    if (model !== undefined) updates.push({ key: "translation_model", value: model });
+    if (instructions !== undefined) {
+      updates.push({ key: "translation_instructions", value: instructions });
+    }
+
+    for (const { key, value } of updates) {
+      await upsertTypedConfig(deps, key, value);
+    }
+
+    logger.info("[config] translation settings updated");
+    return { success: true };
+  });
 };

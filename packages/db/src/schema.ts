@@ -82,6 +82,12 @@ export const articles = pgTable(
     importanceScore: smallint("importance_score"),
     llmSummary: text("llm_summary"),
     scoringModel: text("scoring_model"),
+    // Georgian translation fields
+    titleKa: text("title_ka"),
+    llmSummaryKa: text("llm_summary_ka"),
+    translationModel: text("translation_model"),
+    translationStatus: text("translation_status"), // NULL | 'translating' | 'translated' | 'failed'
+    translatedAt: timestamp("translated_at", { withTimezone: true }),
     // Timestamps
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     scoredAt: timestamp("scored_at", { withTimezone: true }),
