@@ -1,381 +1,518 @@
 # Task 14: Georgian Translation Layer
 
-Add a modular translation layer that converts English article summaries to Georgian using Gemini (or other LLM providers). This enables posting in Georgian across all social platforms with a single global toggle.
+Add a translation layer that converts English article titles and summaries to Georgian using Gemini or OpenAI. This enables posting in Georgian across all social platforms with a single global toggle.
 
 ---
 
 ## Table of Contents
 
 1. [Requirements Summary](#1-requirements-summary)
-2. [Architecture Analysis](#2-architecture-analysis)
-3. [Integration Strategy](#3-integration-strategy)
-4. [Schema Changes](#4-schema-changes)
-5. [Implementation Steps](#5-implementation-steps)
-6. [Testing Checklist](#6-testing-checklist)
+2. [Architecture: Decoupled Translation Status](#2-architecture-decoupled-translation-status)
+3. [Schema Changes](#3-schema-changes)
+4. [Implementation: Existing Code Changes (A1-A5)](#4-implementation-existing-code-changes-a1-a5)
+5. [Implementation: New Code (B1-B6)](#5-implementation-new-code-b1-b6)
+6. [Change Map](#6-change-map)
+7. [Testing Checklist](#7-testing-checklist)
 
 ---
 
 ## 1. Requirements Summary
 
-### Translation Layer (Pipeline)
+### Translation Layer
 
 | Setting | Value |
 |---------|-------|
-| Trigger | Automatic after LLM scoring, for configured scores |
-| Scores to translate | Configurable checkboxes: ☑3 ☑4 ☑5 |
-| Global enable/disable | Toggle in Settings UI |
+| Trigger | Automatic after LLM scoring, for articles matching configured scores |
+| Scores to translate | Configurable checkboxes: default [3, 4, 5] |
+| Global enable/disable | `posting_language` toggle: `"en"` (off) or `"ka"` (on) |
 | Input | `title` + `llm_summary` (English) |
 | Output | `title_ka` + `llm_summary_ka` (Georgian) |
-| Model | UI-selectable (Gemini default, swappable to Claude/OpenAI/DeepSeek/others when added) |
-| Instructions | Global textarea for style/tone (per-sector later) |
-| Backfill old articles | No, only new articles going forward |
+| Provider | Gemini (default) or OpenAI — switchable via UI, no heavy abstraction |
+| Model | Configurable via app_config (default: `gemini-2.0-flash`) |
+| Instructions | Global textarea for style/tone guidance |
+| Backfill old articles | No — `translation_enabled_since` timestamp prevents translating pre-existing articles |
 
 ### Posting Behavior
 
 | Setting | Value |
 |---------|-------|
-| Language toggle | Global ON/OFF in Site Rules |
+| Language toggle | `posting_language`: `"en"` or `"ka"` in app_config |
 | Scope | All platforms, all posts (auto + scheduled) |
-| Override per post | No |
-| Template vars when OFF | `{title}` → title, `{summary}` → llm_summary |
-| Template vars when ON | `{title}` → title_ka, `{summary}` → llm_summary_ka |
-| Missing translation | Block posting with error message |
+| When `"en"` | Uses `title` / `llm_summary` (current behavior, unchanged) |
+| When `"ka"` | Uses `title_ka` / `llm_summary_ka` |
+| Missing translation | Distribution rolls back to `approved`, logs warning, skips platform |
 
 ### Auto-Post Gating (Critical)
 
 | Mode | Behavior |
 |------|----------|
-| `posting_language = 'en'` | Auto-post immediately after scoring (current behavior, unchanged) |
-| `posting_language = 'ka'` | LLM brain skips auto-post → Translation worker translates → Translation worker queues distribution |
+| `posting_language = "en"` | LLM brain queues distribution immediately for auto-approved articles (current behavior) |
+| `posting_language = "ka"` | LLM brain SKIPS distribution queue. Translation worker translates, then queues distribution for `approved` articles |
 
 **Flow diagram:**
 ```
 English mode:
-  LLM Brain scores → queues distribution immediately → posts in English
+  LLM Brain → scores article → auto-approve (score 5) → queues distribution → posts in English
 
 Georgian mode:
-  LLM Brain scores → SKIPS distribution queue
+  LLM Brain → scores article → auto-approve (score 5) → SKIPS distribution
        ↓
-  Translation worker picks up scored articles
+  Translation Worker picks up (scored_at IS NOT NULL, translation_status IS NULL)
        ↓
-  Translates → stores title_ka, llm_summary_ka
+  Translates → stores title_ka, llm_summary_ka, translation_status = 'translated'
        ↓
-  Queues distribution → posts in Georgian
+  If pipeline_stage = 'approved': queues distribution → posts in Georgian
+  If pipeline_stage = 'scored': waits for manual approval (user schedules via UI)
 ```
 
-### Provider Modularity
+### Config Keys in app_config
 
-| Requirement | Implementation |
-|-------------|----------------|
-| Interface abstraction | `TranslationProvider` interface |
-| Factory pattern | `createTranslationProvider(config)` |
-| Config storage | `app_config` table (UI changeable, no restart) |
-| API keys | Environment variables (secure) |
-| Pricing/telemetry | Same pattern as LLM package |
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `posting_language` | string | `"en"` | `"en"` or `"ka"` — acts as master toggle |
+| `translation_scores` | number[] | `[3, 4, 5]` | Which scores to translate |
+| `translation_provider` | string | `"gemini"` | `"gemini"` or `"openai"` |
+| `translation_model` | string | `"gemini-2.0-flash"` | Model identifier (provider-specific) |
+| `translation_instructions` | string | _(default prompt)_ | Custom style/tone instructions |
+| `translation_enabled_since` | string (ISO) | _(set when switching to "ka")_ | Backfill guard timestamp |
+
+**Simplification:** No `translation_enabled` key (redundant with `posting_language`). No heavy abstraction — just two concrete functions with a switch.
 
 ---
 
-## 2. Architecture Analysis
+## 2. Architecture: Decoupled Translation Status
 
-### 2.1 Existing LLM Package Pattern (Template for Translation)
+### Why NOT New Pipeline Stages
+
+The old approach proposed adding `translating` / `translated` / `translation_failed` as new `pipeline_stage` values. This would break **every existing worker** because they all hardcode specific stages:
+
+| Worker | Hardcoded Stage | Would Break |
+|--------|----------------|-------------|
+| Distribution (`distribution.ts:128`) | `WHERE pipeline_stage = 'approved'` | Yes — `translated` articles never reach distribution |
+| Rescue (`maintenance.ts:234`) | `WHERE pipeline_stage = 'approved'` | Yes — would skip untranslated articles, or push them prematurely |
+| Zombie reset (`maintenance.ts:156-190`) | `embedding → ingested`, `scoring → embedded` | Would need new entries for each translation stage |
+| Scheduled posts (`maintenance.ts:426-437`) | Fetches article by ID, expects `approved` | Would need stage awareness |
+| Articles API (`articles.ts:395`) | `allowedStages = ["scored", "approved"]` | Would need `translated` added |
+| Frontend (`Articles.tsx:17-25`) | Hardcoded 7 stages | Would need UI changes |
+
+**Cascading breakage across 6+ files for a feature that should be orthogonal to the pipeline.**
+
+### The Solution: Separate `translation_status` Column
+
+Add a **decoupled** `translation_status` column to `articles`:
 
 ```
-packages/llm/src/
-├── index.ts          # Re-exports all public APIs
-├── types.ts          # ScoringRequest, ScoringResult, LLMProviderConfig
-├── provider.ts       # LLMProvider interface + createLLMProvider factory
-├── schemas.ts        # Zod schema for JSON response parsing
-├── prompts.ts        # Prompt templates with {title}, {content} placeholders
-├── pricing.ts        # Microdollar cost tracking per provider/model
-├── claude.ts         # Claude implementation
-├── openai.ts         # OpenAI implementation (reusable for compatible APIs)
-├── deepseek.ts       # DeepSeek (extends OpenAI with custom baseUrl)
-└── fallback.ts       # LLMProviderWithFallback wrapper
+translation_status: NULL | 'translating' | 'translated' | 'failed'
 ```
 
-**Key Interface:**
+**Key properties:**
+- `pipeline_stage` remains untouched — all existing workers keep working as-is
+- Translation worker queries by `importance_score` + `translation_status` + `scored_at`, NOT `pipeline_stage`
+- Distribution checks Georgian fields at format time, not at claim time
+- Zombie reset only resets `translation_status`, never touches `pipeline_stage`
+
+**State diagram:**
+```
+Article scored (score 3-4):  pipeline_stage = 'scored',  translation_status = NULL
+Article scored (score 5):    pipeline_stage = 'approved', translation_status = NULL
+                                    ↓
+Translation worker claims:   pipeline_stage = unchanged,  translation_status = 'translating'
+                                    ↓
+Translation success:         pipeline_stage = unchanged,  translation_status = 'translated'
+Translation failure:         pipeline_stage = unchanged,  translation_status = 'failed'
+```
+
+### How Distribution Handles Georgian Mode
+
+Distribution worker claims `approved` articles exactly as before (`distribution.ts:124-136`). At format time:
+
+1. Read `posting_language` from app_config
+2. If `"en"` → use English fields (unchanged)
+3. If `"ka"` AND `title_ka IS NOT NULL` → use Georgian fields
+4. If `"ka"` AND `title_ka IS NULL` → **roll back to `approved`**, skip this article (translation pending)
+
+This is safe because:
+- Distribution's atomic claim (`approved → posting`) is idempotent
+- Rolling back to `approved` means the rescue function or next distribution job will retry
+- Once translation completes, the article will have `title_ka` and proceed normally
+
+---
+
+## 3. Schema Changes
+
+### 3.1 Articles Table — New Columns
+
+Add to `packages/db/src/schema.ts` (inside articles table, after line 88):
+
 ```typescript
-interface LLMProvider {
-  readonly name: string;
-  readonly model: string;
-  score(request: ScoringRequest): Promise<ScoringResult>;
+// Georgian translation fields
+titleKa: text("title_ka"),
+llmSummaryKa: text("llm_summary_ka"),
+translationModel: text("translation_model"),
+translationStatus: text("translation_status"),  // NULL | 'translating' | 'translated' | 'failed'
+translatedAt: timestamp("translated_at", { withTimezone: true }),
+```
+
+### 3.2 Migration SQL
+
+```sql
+ALTER TABLE articles ADD COLUMN title_ka TEXT;
+ALTER TABLE articles ADD COLUMN llm_summary_ka TEXT;
+ALTER TABLE articles ADD COLUMN translation_model TEXT;
+ALTER TABLE articles ADD COLUMN translation_status TEXT;
+ALTER TABLE articles ADD COLUMN translated_at TIMESTAMPTZ;
+
+-- Index for translation worker claim query
+CREATE INDEX idx_articles_translation_pending
+  ON articles (importance_score, translation_status)
+  WHERE translation_status IS NULL AND scored_at IS NOT NULL;
+```
+
+### 3.3 App Config Seeds
+
+Add to `packages/db/seed.sql`:
+
+```sql
+-- Translation settings
+INSERT INTO app_config (key, value, updated_at) VALUES
+  ('posting_language', '"en"', NOW()),
+  ('translation_scores', '[3, 4, 5]', NOW()),
+  ('translation_provider', '"gemini"', NOW()),
+  ('translation_model', '"gemini-2.0-flash"', NOW()),
+  ('translation_instructions', '"Translate the following English news content into Georgian. Maintain a professional, news-appropriate tone. Keep proper nouns (company names, person names) in their original form. Technical terms like Bitcoin, blockchain, AI may remain in English if no widely-accepted Georgian equivalent exists. The translation should be natural and fluent, not word-for-word."', NOW())
+ON CONFLICT (key) DO NOTHING;
+```
+
+**Note:** Values are raw JSONB. Drizzle auto-parses on read: `'"en"'` → string `"en"`, `'[3,4,5]'` → array `[3,4,5]`.
+
+---
+
+## 4. Implementation: Existing Code Changes (A1-A5)
+
+### A1: LLM Brain — Skip Immediate Distribution in Georgian Mode
+
+**File:** `packages/worker/src/processors/llm-brain.ts`
+**Location:** Lines 379-401 (inside the `article:approved` event handler)
+
+The LLM brain currently queues distribution immediately for auto-approved articles (score >= threshold). In Georgian mode, we must skip this — the translation worker will queue distribution after translating.
+
+**Current code (lines 383-401):**
+```typescript
+if (distributionQueue) {
+  const telegramEnabled = await isTelegramAutoPostEnabled(db);
+  if (telegramEnabled) {
+    await distributionQueue.add(
+      JOB_DISTRIBUTION_IMMEDIATE,
+      { articleId: result.articleId },
+      { jobId: `immediate-${result.articleId}` },
+    );
+    logger.info(
+      { articleId: result.articleId, score: result.score },
+      "[llm-brain] queued for immediate Telegram distribution",
+    );
+  }
 }
 ```
 
-**Factory Pattern:**
+**Change:** Wrap with posting language check:
 ```typescript
-const createLLMProvider = (config: LLMProviderConfig): LLMProvider => {
-  switch (config.provider) {
-    case "claude": return new ClaudeLLMProvider(...);
-    case "openai": return new OpenAILLMProvider(...);
-    case "deepseek": return new DeepSeekLLMProvider(...);
+if (distributionQueue) {
+  // Check posting language — Georgian mode defers to translation worker
+  const [langRow] = await db
+    .select({ value: appConfig.value })
+    .from(appConfig)
+    .where(eq(appConfig.key, "posting_language"));
+  const postingLanguage = (langRow?.value as string) ?? "en";
+
+  if (postingLanguage === "ka") {
+    logger.debug(
+      { articleId: result.articleId, score: result.score },
+      "[llm-brain] Georgian mode — translation worker will handle distribution",
+    );
+  } else {
+    const telegramEnabled = await isTelegramAutoPostEnabled(db);
+    if (telegramEnabled) {
+      await distributionQueue.add(
+        JOB_DISTRIBUTION_IMMEDIATE,
+        { articleId: result.articleId },
+        { jobId: `immediate-${result.articleId}` },
+      );
+      logger.info(
+        { articleId: result.articleId, score: result.score },
+        "[llm-brain] queued for immediate Telegram distribution",
+      );
+    }
   }
+}
+```
+
+### A2: Distribution Worker — Georgian Field Selection + Rollback
+
+**File:** `packages/worker/src/processors/distribution.ts`
+
+**Change 1: Add Georgian fields to RETURNING clause (line 124-136)**
+
+Update the atomic claim query to also return `title_ka` and `llm_summary_ka`:
+
+```sql
+RETURNING
+  id,
+  title,
+  url,
+  llm_summary as "llmSummary",
+  importance_score as "importanceScore",
+  title_ka as "titleKa",
+  llm_summary_ka as "llmSummaryKa",
+  (SELECT name FROM sectors WHERE id = articles.sector_id) as "sectorName"
+```
+
+Update the `ArticleForDistribution` type (line 41-48):
+```typescript
+type ArticleForDistribution = {
+  id: string;
+  title: string;
+  url: string;
+  llmSummary: string | null;
+  importanceScore: number | null;
+  sectorName: string | null;
+  titleKa: string | null;       // ADD
+  llmSummaryKa: string | null;  // ADD
 };
 ```
 
-### 2.2 Existing Worker Pipeline
+**Change 2: Language-aware formatting (before line 227)**
 
-```
-[Ingest] → ingested
-    ↓
-[Semantic Dedup] → embedding → embedded (or duplicate)
-    ↓
-[LLM Brain] → scoring → scored/approved/rejected (or scoring_failed)
-    ↓                              ↓
-[Distribution] → posting      [Manual Review]
-    ↓
-posted (or posting_failed)
-```
+After the article is claimed and before the platform loop, read posting language and resolve content:
 
-**Actual Pipeline Stages (from codebase):**
-- `ingested` - Article fetched from RSS
-- `embedding` - Claimed for embedding (in-progress)
-- `embedded` - Embedding complete, ready for scoring
-- `duplicate` - Semantic duplicate detected
-- `scoring` - Claimed for LLM scoring (in-progress)
-- `scored` - Scoring complete (score 3-4, needs review)
-- `scoring_failed` - LLM API error
-- `approved` - Manually approved or auto-approved (score 5)
-- `rejected` - Manually rejected or auto-rejected (score 1-2)
-- `posting` - Claimed for distribution (in-progress)
-- `posted` - Successfully posted to social platforms
-- `posting_failed` - Social API error
-
-**Worker Bootstrap (`packages/worker/src/index.ts`):**
-- Creates 5 BullMQ queues with retry configs
-- Conditionally creates workers based on API key availability
-- Registers repeatable jobs (scheduler every 30s, cleanup daily)
-- Self-healing: `ensureRepeatableJobs()` called every 30s
-
-**LLM Brain Processor Pattern:**
-1. Atomic claim: `UPDATE articles SET pipeline_stage = 'scoring' WHERE pipeline_stage = 'embedded' LIMIT 10`
-2. Fetch sector rules from `scoring_rules` table
-3. Build prompts using `buildScoringPrompt(config, sectorName)`
-4. Call `llmProvider.score()` for each article
-5. Bulk update with `UNNEST` pattern
-6. Insert telemetry to `llm_telemetry`
-7. Queue distribution for auto-approved articles **⚠️ Telegram only, when `auto_post_telegram = true`**
-
-**Important:** Distribution worker updates `articles.pipeline_stage` only. The `post_deliveries` table is used by the maintenance worker for scheduled posts.
-
-### 2.3 Existing Scoring Rules Pattern
-
-**Database Table (`scoring_rules`):**
-```sql
-sector_id UUID (FK)
-prompt_template TEXT (legacy)
-score_criteria JSONB (structured ScoringConfig)
-auto_approve_threshold SMALLINT
-auto_reject_threshold SMALLINT
-model_preference TEXT
-```
-
-**API Routes (`packages/api/src/routes/scoring-rules.ts`):**
-- `GET /scoring-rules` - List all with sector info
-- `GET /scoring-rules/:sectorId` - Get with prompt preview
-- `PUT /scoring-rules/:sectorId` - Upsert config + thresholds
-- `DELETE /scoring-rules/:sectorId` - Reset to defaults
-- `POST /scoring-rules/preview` - Preview prompt without saving
-
-**Frontend (`packages/frontend/src/pages/ScoringRules.tsx`):**
-- Sector selector dropdown
-- Two-column: editor left, live preview right
-- Tag inputs for priorities/ignore lists
-- Score definition textareas (1-5)
-- Summary settings (tone, language, max chars)
-- Auto-approve/reject threshold sliders
-
-### 2.4 Existing App Config Pattern
-
-**Storage:** Key-value in `app_config` table
-```sql
-key TEXT PRIMARY KEY
-value JSONB
-updated_at TIMESTAMP
-```
-
-**API Routes (`packages/api/src/routes/config.ts`):**
-- Helper functions: `getConfigValue()`, `getBooleanConfig()`, `upsertConfig()`
-- GET/PATCH endpoints per config item
-- Constraint validation before save
-- **⚠️ Current helpers only handle numbers/booleans** - need new pattern for JSON arrays
-
-**JSONB Value Handling (Important):**
-- Drizzle returns JSONB as already-parsed JavaScript objects
-- Do NOT double-encode with `JSON.stringify()` when reading
-- When writing: store as raw value, Drizzle handles serialization
-- Example: `translation_scores` stored as `[3, 4, 5]` (array), not `"[3, 4, 5]"` (string)
-
-**Frontend (`packages/frontend/src/pages/SiteRules.tsx`):**
-- Tab-based interface (Domain Whitelist, Feed Limits, API Security, Emergency Controls)
-- Toggle switches for boolean configs
-- Input fields with validation
-
-### 2.5 Existing Post Template Pattern
-
-**Schema (`packages/shared/src/schemas/post-template.ts`):**
 ```typescript
-PostTemplateConfig = {
-  showBreakingLabel: boolean
-  showSectorTag: boolean
-  showTitle: boolean
-  showSummary: boolean
-  showUrl: boolean
-  showImage: boolean
-  breakingEmoji: string
-  breakingText: string
-  urlLinkText: string
+// Read posting language
+const [langRow] = await db
+  .select({ value: appConfig.value })
+  .from(appConfig)
+  .where(eq(appConfig.key, "posting_language"));
+const postingLanguage = (langRow?.value as string) ?? "en";
+
+// Georgian mode: check translation is available
+if (postingLanguage === "ka" && (!article.titleKa || !article.llmSummaryKa)) {
+  // Roll back to approved — translation worker hasn't finished yet
+  await db.execute(sql`
+    UPDATE articles SET pipeline_stage = 'approved' WHERE id = ${articleId}::uuid
+  `);
+  logger.warn(
+    { articleId },
+    "[distribution] Georgian mode but no translation — rolled back to approved",
+  );
+  return { skipped: true, reason: "awaiting_translation" };
 }
+
+// Resolve content based on language
+const postTitle = postingLanguage === "ka" && article.titleKa
+  ? article.titleKa : article.title;
+const postSummary = postingLanguage === "ka" && article.llmSummaryKa
+  ? article.llmSummaryKa : (article.llmSummary || article.title);
 ```
 
-**Social Provider Usage:**
+**Change 3: Use resolved content in formatPost (line 227-235)**
+
+Replace the hardcoded English fields:
 ```typescript
-provider.formatPost(
-  { title, summary, url, sector },
-  template
-) → string
+const text = provider!.formatPost(
+  {
+    title: postTitle,
+    summary: postSummary,
+    url: article.url,
+    sector: article.sectorName || "News",
+  },
+  template,
+);
 ```
 
-### 2.6 Existing Social Posting Flow
+### A3: Maintenance Worker — Scheduled Posts Language Awareness
 
-**Distribution Worker:**
-1. Check kill switch (`emergency_stop`)
-2. For each platform: check enabled, health, rate limit
-3. Get template from `social_accounts` or default
-4. Format post using `provider.formatPost(article, template)`
-5. Post via provider
-6. Update `post_deliveries` status
+**File:** `packages/worker/src/processors/maintenance.ts`
 
-**Scheduled Posts (Maintenance Worker):**
-- Same flow but claims from `post_deliveries` where `scheduled_at <= NOW()`
+**Change 1: Add Georgian fields to scheduled post article query (lines 426-437)**
+
+```sql
+SELECT
+  a.id,
+  a.title,
+  a.url,
+  a.llm_summary as "llmSummary",
+  a.importance_score as "importanceScore",
+  a.title_ka as "titleKa",
+  a.llm_summary_ka as "llmSummaryKa",
+  s.name as "sectorName"
+FROM articles a
+LEFT JOIN sectors s ON a.sector_id = s.id
+WHERE a.id = ${delivery.articleId}::uuid
+```
+
+Update the `ArticleForPost` type (lines 266-273):
+```typescript
+type ArticleForPost = {
+  id: string;
+  title: string;
+  url: string;
+  llmSummary: string | null;
+  importanceScore: number | null;
+  sectorName: string | null;
+  titleKa: string | null;       // ADD
+  llmSummaryKa: string | null;  // ADD
+};
+```
+
+**Change 2: Language-aware formatting in processScheduledPosts (lines 452-461)**
+
+Before formatPost, read language and resolve content (same pattern as distribution):
+
+```typescript
+// Read posting language
+const [langRow] = await db
+  .select({ value: appConfig.value })
+  .from(appConfig)
+  .where(eq(appConfig.key, "posting_language"));
+const postingLanguage = (langRow?.value as string) ?? "en";
+
+// Georgian mode: check translation is available
+if (postingLanguage === "ka" && (!article.titleKa || !article.llmSummaryKa)) {
+  logger.warn(
+    { deliveryId: delivery.id, articleId: delivery.articleId },
+    "[post-scheduler] Georgian mode but no translation — marking failed",
+  );
+  await db
+    .update(postDeliveries)
+    .set({ status: "failed", errorMessage: "No Georgian translation available" })
+    .where(eq(postDeliveries.id, delivery.id));
+  continue;
+}
+
+// Resolve content based on language
+const postTitle = postingLanguage === "ka" && article.titleKa
+  ? article.titleKa : article.title;
+const postSummary = postingLanguage === "ka" && article.llmSummaryKa
+  ? article.llmSummaryKa : (article.llmSummary || article.title);
+
+// Format and post using resolved content
+const text = provider.formatPost(
+  {
+    title: postTitle,
+    summary: postSummary,
+    url: article.url,
+    sector: article.sectorName || "News",
+  },
+  template,
+);
+```
+
+**Note:** Read `posting_language` once at the top of `processScheduledPosts()` to avoid N+1 queries.
+
+### A4: Rescue Function — Georgian Guard
+
+**File:** `packages/worker/src/processors/maintenance.ts`
+**Location:** Lines 228-264 (`rescueOrphanedApprovedArticles`)
+
+The rescue function finds `approved` articles older than 5 minutes and re-queues them to distribution. In Georgian mode, this would push untranslated articles into distribution repeatedly.
+
+**Change:** Add Georgian guard to the rescue query (line 234):
+
+```typescript
+const rescueOrphanedApprovedArticles = async (db: Database, distributionQueue?: Queue) => {
+  if (!distributionQueue) return 0;
+
+  // Check posting language once
+  const [langRow] = await db
+    .select({ value: appConfig.value })
+    .from(appConfig)
+    .where(eq(appConfig.key, "posting_language"));
+  const postingLanguage = (langRow?.value as string) ?? "en";
+
+  const staleThreshold = new Date(Date.now() - 5 * 60 * 1000);
+
+  // In Georgian mode, only rescue articles that have been translated
+  const orphanedResult = postingLanguage === "ka"
+    ? await db.execute(sql`
+        SELECT id FROM articles
+        WHERE pipeline_stage = 'approved'
+          AND approved_at IS NOT NULL
+          AND approved_at < ${staleThreshold}
+          AND title_ka IS NOT NULL
+        LIMIT 20
+      `)
+    : await db.execute(sql`
+        SELECT id FROM articles
+        WHERE pipeline_stage = 'approved'
+          AND approved_at IS NOT NULL
+          AND approved_at < ${staleThreshold}
+        LIMIT 20
+      `);
+
+  // ... rest unchanged
+};
+```
+
+### A5: Config Routes — Add Typed Config Helpers
+
+**File:** `packages/api/src/routes/config.ts`
+**Location:** After existing helpers (line 55)
+
+The existing `getConfigValue` wraps with `Number()` and `upsertConfig` wraps with `String()`. This breaks for arrays (`translation_scores`) and strings (`posting_language`). Add typed helpers that pass values through Drizzle's JSONB handling:
+
+```typescript
+/**
+ * Read a typed value from app_config. Drizzle auto-parses JSONB.
+ * Use for arrays, strings, and complex types that Number()/String() would break.
+ */
+const getTypedConfig = async <T>(deps: ApiDeps, key: string, fallback: T): Promise<T> => {
+  const [row] = await deps.db
+    .select({ value: appConfig.value })
+    .from(appConfig)
+    .where(eq(appConfig.key, key));
+  return row ? (row.value as T) : fallback;
+};
+
+/**
+ * Write a typed value to app_config. Drizzle handles JSONB serialization.
+ * Use for arrays, strings, and complex types.
+ */
+const upsertTypedConfig = async (deps: ApiDeps, key: string, value: unknown) => {
+  const [row] = await deps.db
+    .insert(appConfig)
+    .values({ key, value, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: appConfig.key,
+      set: { value, updatedAt: new Date() },
+    })
+    .returning();
+  return row;
+};
+```
+
+**Note:** Existing `getConfigValue`/`upsertConfig`/`getBooleanConfig`/`upsertBooleanConfig` remain unchanged. The new helpers are used only by translation config routes.
 
 ---
 
-## 3. Integration Strategy
+## 5. Implementation: New Code (B1-B6)
 
-### 3.1 New Package: `packages/translation`
+### B1: Translation Package (Gemini + OpenAI)
 
-Create new package following LLM package pattern:
+Create `packages/translation/` — two concrete provider functions with a shared type, no interface/factory abstraction.
 
+**Package structure:**
 ```
 packages/translation/
 ├── package.json
 ├── tsconfig.json
 └── src/
-    ├── index.ts              # Re-exports
-    ├── types.ts              # TranslationRequest, TranslationResult
-    ├── provider.ts           # TranslationProvider interface + factory
-    ├── prompts.ts            # Translation prompt template
-    ├── pricing.ts            # Cost tracking for translation models
-    └── providers/
-        ├── gemini.ts         # Google Gemini implementation
-        ├── claude.ts         # Claude implementation
-        └── openai.ts         # OpenAI implementation
+    ├── index.ts         # Re-exports
+    ├── types.ts         # TranslationResult type
+    ├── gemini.ts        # translateWithGemini function
+    ├── openai.ts        # translateWithOpenAI function
+    ├── prompts.ts       # buildTranslationPrompt + DEFAULT_INSTRUCTIONS
+    └── pricing.ts       # calculateTranslationCost (Gemini + OpenAI pricing)
 ```
 
-### 3.2 New Pipeline Stage
-
-Insert translation stage after LLM scoring:
-
-```
-[LLM Brain] → scored/approved/rejected
-                    ↓
-            [Translation] → translated (new stage)
-                    ↓
-            [Distribution]
-```
-
-**New Pipeline Stages:**
-- `translating` - Article claimed for translation
-- `translated` - Translation complete (or skipped if disabled/not qualifying)
-- `translation_failed` - Translation API error
-
-**Stage Flow:**
-```
-scored → translating → translated → (existing flow continues)
-                 ↓
-         translation_failed (manual retry needed)
-```
-
-### 3.3 New Queue & Job
-
-```typescript
-// packages/shared/src/queues.ts
-export const QUEUE_TRANSLATION = "pipeline-translation";
-export const JOB_TRANSLATION_BATCH = "translation-batch";
-```
-
-### 3.4 Config Keys in app_config
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `translation_enabled` | boolean | false | Master toggle |
-| `translation_scores` | number[] | [3,4,5] | Which scores to translate |
-| `translation_provider` | string | "gemini" | Provider name |
-| `translation_model` | string | "gemini-2.0-flash" | Model identifier |
-| `translation_instructions` | string | (default prompt) | Custom style/tone |
-| `posting_language` | string | "en" | Global: "en" or "ka" |
-
-### 3.5 Integration Points
-
-| Component | Change |
-|-----------|--------|
-| `packages/shared/queues.ts` | Add QUEUE_TRANSLATION, JOB_TRANSLATION_BATCH |
-| `packages/shared/schemas/` | Add translation-config.ts schema |
-| `packages/db/src/schema.ts` | Add title_ka, llm_summary_ka, translation_model to articles |
-| `packages/worker/src/index.ts` | Create translation queue & worker |
-| `packages/worker/src/processors/` | Add translation.ts processor |
-| `packages/worker/src/processors/llm-brain.ts` | Queue translation after scoring |
-| `packages/api/src/routes/config.ts` | Add translation config endpoints |
-| `packages/api/src/routes/site-rules.ts` | Add posting language toggle endpoint |
-| `packages/social/src/providers/*.ts` | Update formatPost to use language-aware fields |
-| `packages/frontend/src/pages/SiteRules.tsx` | Add Translation Settings tab |
-| `packages/frontend/src/api.ts` | Add translation API functions |
-
----
-
-## 4. Schema Changes
-
-### 4.1 Database Migration
-
-```sql
--- Add Georgian translation columns to articles
-ALTER TABLE articles ADD COLUMN title_ka TEXT;
-ALTER TABLE articles ADD COLUMN llm_summary_ka TEXT;
-ALTER TABLE articles ADD COLUMN translation_model TEXT;
-
--- Update pipeline_stage check constraint (if exists) or document new stages:
--- Valid stages: ingested, embedded, scored, translating, translated,
---               translation_failed, approved, rejected, posting, posted,
---               posting_failed, duplicate
-```
-
-### 4.2 App Config Seeds
-
-```sql
--- Translation settings (seeded with defaults)
-INSERT INTO app_config (key, value, updated_at) VALUES
-  ('translation_enabled', 'false', NOW()),
-  ('translation_scores', '[3, 4, 5]', NOW()),
-  ('translation_provider', '"gemini"', NOW()),
-  ('translation_model', '"gemini-2.0-flash"', NOW()),
-  ('translation_instructions', '"Translate the following English news summary into Georgian. Maintain a professional, news-appropriate tone. Keep proper nouns (company names, person names) in their original form. Technical terms like Bitcoin, blockchain, AI may remain in English if no widely-accepted Georgian equivalent exists. The translation should be natural and fluent, not word-for-word."', NOW()),
-  ('posting_language', '"en"', NOW())
-ON CONFLICT (key) DO NOTHING;
-```
-
----
-
-## 5. Implementation Steps
-
-### Phase 1: Translation Package (Foundation)
-
-#### Step 1.1: Create package structure
-```bash
-mkdir -p packages/translation/src/providers
-```
-
-Create `packages/translation/package.json`:
+#### `packages/translation/package.json`
 ```json
 {
   "name": "@watch-tower/translation",
@@ -389,7 +526,6 @@ Create `packages/translation/package.json`:
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
-    "@anthropic-ai/sdk": "^0.30.1",
     "openai": "^4.73.0",
     "@watch-tower/shared": "*"
   },
@@ -399,7 +535,7 @@ Create `packages/translation/package.json`:
 }
 ```
 
-Create `packages/translation/tsconfig.json`:
+#### `packages/translation/tsconfig.json`
 ```json
 {
   "extends": "../../tsconfig.base.json",
@@ -411,89 +547,35 @@ Create `packages/translation/tsconfig.json`:
 }
 ```
 
-#### Step 1.2: Create types.ts
+#### `packages/translation/src/types.ts`
 ```typescript
-// packages/translation/src/types.ts
-
-export type TranslationProviderType = "gemini" | "claude" | "openai";
-
-export type TranslationRequest = {
-  articleId: string;
-  title: string;
-  summary: string;
-  targetLanguage: string;        // 'ka' for Georgian
-  instructions?: string;         // Custom style/tone instructions
-};
-
 export type TranslationResult = {
-  articleId: string;
-  titleTranslated: string | null;
-  summaryTranslated: string | null;
-  error?: string;
-
-  // Telemetry
+  titleKa: string | null;
+  summaryKa: string | null;
   usage?: {
     inputTokens: number;
     outputTokens: number;
     totalTokens: number;
   };
-  latencyMs?: number;
-};
-
-export type TranslationProviderConfig = {
-  provider: TranslationProviderType;
-  apiKey: string;
-  model?: string;
-};
-
-export const DEFAULT_TRANSLATION_MODELS: Record<TranslationProviderType, string> = {
-  gemini: "gemini-2.0-flash",
-  claude: "claude-3-haiku-20240307",
-  openai: "gpt-4o-mini",
+  latencyMs: number;
+  error?: string;
 };
 ```
 
-#### Step 1.3: Create provider.ts (interface + factory)
+#### `packages/translation/src/prompts.ts`
 ```typescript
-// packages/translation/src/provider.ts
-
-import type { TranslationRequest, TranslationResult, TranslationProviderConfig } from "./types.js";
-import { GeminiTranslationProvider } from "./providers/gemini.js";
-import { ClaudeTranslationProvider } from "./providers/claude.js";
-import { OpenAITranslationProvider } from "./providers/openai.js";
-
-export interface TranslationProvider {
-  readonly name: string;
-  readonly model: string;
-  translate(request: TranslationRequest): Promise<TranslationResult>;
-}
-
-export const createTranslationProvider = (
-  config: TranslationProviderConfig
-): TranslationProvider => {
-  switch (config.provider) {
-    case "gemini":
-      return new GeminiTranslationProvider(config.apiKey, config.model);
-    case "claude":
-      return new ClaudeTranslationProvider(config.apiKey, config.model);
-    case "openai":
-      return new OpenAITranslationProvider(config.apiKey, config.model);
-    default:
-      throw new Error(`Unknown translation provider: ${config.provider}`);
-  }
-};
-```
-
-#### Step 1.4: Create prompts.ts
-```typescript
-// packages/translation/src/prompts.ts
-
-export const DEFAULT_TRANSLATION_INSTRUCTIONS = `Translate the following English news summary into Georgian. Maintain a professional, news-appropriate tone. Keep proper nouns (company names, person names) in their original form. Technical terms like Bitcoin, blockchain, AI may remain in English if no widely-accepted Georgian equivalent exists. The translation should be natural and fluent, not word-for-word.`;
+export const DEFAULT_TRANSLATION_INSTRUCTIONS =
+  "Translate the following English news content into Georgian. " +
+  "Maintain a professional, news-appropriate tone. " +
+  "Keep proper nouns (company names, person names) in their original form. " +
+  "Technical terms like Bitcoin, blockchain, AI may remain in English " +
+  "if no widely-accepted Georgian equivalent exists. " +
+  "The translation should be natural and fluent, not word-for-word.";
 
 export const buildTranslationPrompt = (
   title: string,
   summary: string,
-  instructions: string
+  instructions: string,
 ): string => {
   return `${instructions}
 
@@ -512,421 +594,223 @@ Respond with ONLY valid JSON in this exact format:
 };
 ```
 
-#### Step 1.5: Create pricing.ts
+#### `packages/translation/src/pricing.ts`
 ```typescript
-// packages/translation/src/pricing.ts
-
-export const TRANSLATION_PRICING: Record<string, Record<string, { input: number; output: number }>> = {
-  gemini: {
-    "gemini-2.0-flash": { input: 75_000, output: 300_000 },      // $0.075/$0.30 per 1M
-    "gemini-2.0-pro": { input: 1_250_000, output: 5_000_000 },   // $1.25/$5.00 per 1M
-    "gemini-1.5-flash": { input: 75_000, output: 300_000 },
-    "gemini-1.5-pro": { input: 1_250_000, output: 5_000_000 },
-  },
-  claude: {
-    "claude-3-haiku-20240307": { input: 250_000, output: 1_250_000 },
-    "claude-3-5-sonnet-20241022": { input: 3_000_000, output: 15_000_000 },
-  },
-  openai: {
-    "gpt-4o-mini": { input: 150_000, output: 600_000 },
-    "gpt-4o": { input: 2_500_000, output: 10_000_000 },
-  },
+// Pricing in microdollars per 1M tokens
+const PRICING: Record<string, { input: number; output: number }> = {
+  // Gemini
+  "gemini-2.0-flash": { input: 75_000, output: 300_000 },
+  "gemini-2.0-pro": { input: 1_250_000, output: 5_000_000 },
+  "gemini-1.5-flash": { input: 75_000, output: 300_000 },
+  "gemini-1.5-pro": { input: 1_250_000, output: 5_000_000 },
+  // OpenAI
+  "gpt-4o-mini": { input: 150_000, output: 600_000 },
+  "gpt-4o": { input: 2_500_000, output: 10_000_000 },
+  "gpt-4.1-mini": { input: 400_000, output: 1_600_000 },
+  "gpt-4.1-nano": { input: 100_000, output: 400_000 },
 };
 
 export const calculateTranslationCost = (
-  provider: string,
   model: string,
   inputTokens: number,
-  outputTokens: number
+  outputTokens: number,
 ): number => {
-  const pricing = TRANSLATION_PRICING[provider]?.[model];
+  const pricing = PRICING[model];
   if (!pricing) return 0;
-
   const inputCost = (inputTokens / 1_000_000) * pricing.input;
   const outputCost = (outputTokens / 1_000_000) * pricing.output;
   return Math.round(inputCost + outputCost);
 };
 ```
 
-#### Step 1.6: Create Gemini provider
+#### `packages/translation/src/gemini.ts`
 ```typescript
-// packages/translation/src/providers/gemini.ts
-
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import type { TranslationProvider } from "../provider.js";
-import type { TranslationRequest, TranslationResult } from "../types.js";
-import { DEFAULT_TRANSLATION_MODELS } from "../types.js";
-import { buildTranslationPrompt, DEFAULT_TRANSLATION_INSTRUCTIONS } from "../prompts.js";
+import type { TranslationResult } from "./types.js";
+import { buildTranslationPrompt, DEFAULT_TRANSLATION_INSTRUCTIONS } from "./prompts.js";
 import { logger } from "@watch-tower/shared";
 
-export class GeminiTranslationProvider implements TranslationProvider {
-  private client: GoogleGenerativeAI;
-  readonly name = "gemini";
-  readonly model: string;
+export const translateWithGemini = async (
+  apiKey: string,
+  model: string,
+  title: string,
+  summary: string,
+  instructions?: string,
+): Promise<TranslationResult> => {
+  const prompt = buildTranslationPrompt(
+    title,
+    summary,
+    instructions || DEFAULT_TRANSLATION_INSTRUCTIONS,
+  );
 
-  constructor(apiKey: string, model?: string) {
-    this.client = new GoogleGenerativeAI(apiKey);
-    this.model = model ?? DEFAULT_TRANSLATION_MODELS.gemini;
-  }
+  const startTime = Date.now();
 
-  async translate(request: TranslationRequest): Promise<TranslationResult> {
-    const prompt = buildTranslationPrompt(
-      request.title,
-      request.summary,
-      request.instructions ?? DEFAULT_TRANSLATION_INSTRUCTIONS
-    );
+  try {
+    const client = new GoogleGenerativeAI(apiKey);
+    const genModel = client.getGenerativeModel({
+      model,
+      generationConfig: {
+        responseMimeType: "application/json",
+        maxOutputTokens: 1024,
+      },
+    });
 
-    const startTime = Date.now();
+    const result = await genModel.generateContent(prompt);
+    const response = result.response;
+    const text = response.text();
+    const latencyMs = Date.now() - startTime;
 
+    // Parse JSON response
+    let parsed: { title_ka?: string; summary_ka?: string };
     try {
-      const model = this.client.getGenerativeModel({
-        model: this.model,
-        generationConfig: {
-          responseMimeType: "application/json",
-          maxOutputTokens: 1024,
+      parsed = JSON.parse(text);
+    } catch {
+      logger.warn(`[translation] JSON parse failed: ${text.slice(0, 200)}`);
+      return {
+        titleKa: null,
+        summaryKa: null,
+        error: "Failed to parse translation response",
+        latencyMs,
+      };
+    }
+
+    // Extract usage metadata
+    const usageMetadata = response.usageMetadata;
+    const usage = usageMetadata
+      ? {
+          inputTokens: usageMetadata.promptTokenCount ?? 0,
+          outputTokens: usageMetadata.candidatesTokenCount ?? 0,
+          totalTokens: usageMetadata.totalTokenCount ?? 0,
         }
-      });
+      : undefined;
 
-      const result = await model.generateContent(prompt);
-      const response = result.response;
-      const text = response.text();
-      const latencyMs = Date.now() - startTime;
-
-      // Parse JSON response
-      let parsed: { title_ka?: string; summary_ka?: string };
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        logger.warn(`[gemini-translation] JSON parse failed for ${request.articleId}: ${text.slice(0, 200)}`);
-        return {
-          articleId: request.articleId,
-          titleTranslated: null,
-          summaryTranslated: null,
-          error: "Failed to parse translation response",
-          latencyMs,
-        };
-      }
-
-      // Extract usage metadata
-      const usageMetadata = response.usageMetadata;
-      const usage = usageMetadata ? {
-        inputTokens: usageMetadata.promptTokenCount ?? 0,
-        outputTokens: usageMetadata.candidatesTokenCount ?? 0,
-        totalTokens: usageMetadata.totalTokenCount ?? 0,
-      } : undefined;
-
-      return {
-        articleId: request.articleId,
-        titleTranslated: parsed.title_ka ?? null,
-        summaryTranslated: parsed.summary_ka ?? null,
-        usage,
-        latencyMs,
-      };
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Unknown error";
-      logger.error(`[gemini-translation] API error for ${request.articleId}: ${errorMsg}`);
-      return {
-        articleId: request.articleId,
-        titleTranslated: null,
-        summaryTranslated: null,
-        error: errorMsg,
-        latencyMs: Date.now() - startTime,
-      };
-    }
+    return {
+      titleKa: parsed.title_ka ?? null,
+      summaryKa: parsed.summary_ka ?? null,
+      usage,
+      latencyMs,
+    };
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : "Unknown error";
+    logger.error(`[translation] Gemini API error: ${errorMsg}`);
+    return {
+      titleKa: null,
+      summaryKa: null,
+      error: errorMsg,
+      latencyMs: Date.now() - startTime,
+    };
   }
-}
+};
 ```
 
-#### Step 1.7: Create Claude provider
+#### `packages/translation/src/openai.ts`
 ```typescript
-// packages/translation/src/providers/claude.ts
-
-import Anthropic from "@anthropic-ai/sdk";
-import type { TranslationProvider } from "../provider.js";
-import type { TranslationRequest, TranslationResult } from "../types.js";
-import { DEFAULT_TRANSLATION_MODELS } from "../types.js";
-import { buildTranslationPrompt, DEFAULT_TRANSLATION_INSTRUCTIONS } from "../prompts.js";
-import { logger } from "@watch-tower/shared";
-
-export class ClaudeTranslationProvider implements TranslationProvider {
-  private client: Anthropic;
-  readonly name = "claude";
-  readonly model: string;
-
-  constructor(apiKey: string, model?: string) {
-    this.client = new Anthropic({ apiKey });
-    this.model = model ?? DEFAULT_TRANSLATION_MODELS.claude;
-  }
-
-  async translate(request: TranslationRequest): Promise<TranslationResult> {
-    const prompt = buildTranslationPrompt(
-      request.title,
-      request.summary,
-      request.instructions ?? DEFAULT_TRANSLATION_INSTRUCTIONS
-    );
-
-    const startTime = Date.now();
-
-    try {
-      const response = await this.client.messages.create({
-        model: this.model,
-        max_tokens: 1024,
-        messages: [{ role: "user", content: prompt }],
-      });
-
-      const latencyMs = Date.now() - startTime;
-      const textBlock = response.content.find((b) => b.type === "text");
-      const text = textBlock?.type === "text" ? textBlock.text : "";
-
-      // Parse JSON response
-      let parsed: { title_ka?: string; summary_ka?: string };
-      try {
-        // Strip markdown code fences if present
-        const cleaned = text.replace(/```json\n?|\n?```/g, "").trim();
-        parsed = JSON.parse(cleaned);
-      } catch {
-        logger.warn(`[claude-translation] JSON parse failed for ${request.articleId}: ${text.slice(0, 200)}`);
-        return {
-          articleId: request.articleId,
-          titleTranslated: null,
-          summaryTranslated: null,
-          error: "Failed to parse translation response",
-          latencyMs,
-        };
-      }
-
-      const usage = {
-        inputTokens: response.usage.input_tokens,
-        outputTokens: response.usage.output_tokens,
-        totalTokens: response.usage.input_tokens + response.usage.output_tokens,
-      };
-
-      return {
-        articleId: request.articleId,
-        titleTranslated: parsed.title_ka ?? null,
-        summaryTranslated: parsed.summary_ka ?? null,
-        usage,
-        latencyMs,
-      };
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Unknown error";
-      logger.error(`[claude-translation] API error for ${request.articleId}: ${errorMsg}`);
-      return {
-        articleId: request.articleId,
-        titleTranslated: null,
-        summaryTranslated: null,
-        error: errorMsg,
-        latencyMs: Date.now() - startTime,
-      };
-    }
-  }
-}
-```
-
-#### Step 1.8: Create OpenAI provider
-```typescript
-// packages/translation/src/providers/openai.ts
-
 import OpenAI from "openai";
-import type { TranslationProvider } from "../provider.js";
-import type { TranslationRequest, TranslationResult } from "../types.js";
-import { DEFAULT_TRANSLATION_MODELS } from "../types.js";
-import { buildTranslationPrompt, DEFAULT_TRANSLATION_INSTRUCTIONS } from "../prompts.js";
+import type { TranslationResult } from "./types.js";
+import { buildTranslationPrompt, DEFAULT_TRANSLATION_INSTRUCTIONS } from "./prompts.js";
 import { logger } from "@watch-tower/shared";
 
-export class OpenAITranslationProvider implements TranslationProvider {
-  private client: OpenAI;
-  readonly name = "openai";
-  readonly model: string;
+export const translateWithOpenAI = async (
+  apiKey: string,
+  model: string,
+  title: string,
+  summary: string,
+  instructions?: string,
+): Promise<TranslationResult> => {
+  const prompt = buildTranslationPrompt(
+    title,
+    summary,
+    instructions || DEFAULT_TRANSLATION_INSTRUCTIONS,
+  );
 
-  constructor(apiKey: string, model?: string) {
-    this.client = new OpenAI({ apiKey });
-    this.model = model ?? DEFAULT_TRANSLATION_MODELS.openai;
-  }
+  const startTime = Date.now();
 
-  async translate(request: TranslationRequest): Promise<TranslationResult> {
-    const prompt = buildTranslationPrompt(
-      request.title,
-      request.summary,
-      request.instructions ?? DEFAULT_TRANSLATION_INSTRUCTIONS
-    );
+  try {
+    const client = new OpenAI({ apiKey });
+    const response = await client.chat.completions.create({
+      model,
+      max_tokens: 1024,
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" },
+    });
 
-    const startTime = Date.now();
+    const latencyMs = Date.now() - startTime;
+    const text = response.choices[0]?.message?.content ?? "";
 
+    // Parse JSON response
+    let parsed: { title_ka?: string; summary_ka?: string };
     try {
-      const response = await this.client.chat.completions.create({
-        model: this.model,
-        max_tokens: 1024,
-        messages: [{ role: "user", content: prompt }],
-        response_format: { type: "json_object" },
-      });
-
-      const latencyMs = Date.now() - startTime;
-      const text = response.choices[0]?.message?.content ?? "";
-
-      // Parse JSON response
-      let parsed: { title_ka?: string; summary_ka?: string };
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        logger.warn(`[openai-translation] JSON parse failed for ${request.articleId}: ${text.slice(0, 200)}`);
-        return {
-          articleId: request.articleId,
-          titleTranslated: null,
-          summaryTranslated: null,
-          error: "Failed to parse translation response",
-          latencyMs,
-        };
-      }
-
-      const usage = response.usage ? {
-        inputTokens: response.usage.prompt_tokens,
-        outputTokens: response.usage.completion_tokens,
-        totalTokens: response.usage.total_tokens,
-      } : undefined;
-
+      parsed = JSON.parse(text);
+    } catch {
+      logger.warn(`[translation] OpenAI JSON parse failed: ${text.slice(0, 200)}`);
       return {
-        articleId: request.articleId,
-        titleTranslated: parsed.title_ka ?? null,
-        summaryTranslated: parsed.summary_ka ?? null,
-        usage,
+        titleKa: null,
+        summaryKa: null,
+        error: "Failed to parse translation response",
         latencyMs,
       };
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : "Unknown error";
-      logger.error(`[openai-translation] API error for ${request.articleId}: ${errorMsg}`);
-      return {
-        articleId: request.articleId,
-        titleTranslated: null,
-        summaryTranslated: null,
-        error: errorMsg,
-        latencyMs: Date.now() - startTime,
-      };
     }
+
+    const usage = response.usage
+      ? {
+          inputTokens: response.usage.prompt_tokens,
+          outputTokens: response.usage.completion_tokens,
+          totalTokens: response.usage.total_tokens,
+        }
+      : undefined;
+
+    return {
+      titleKa: parsed.title_ka ?? null,
+      summaryKa: parsed.summary_ka ?? null,
+      usage,
+      latencyMs,
+    };
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : "Unknown error";
+    logger.error(`[translation] OpenAI API error: ${errorMsg}`);
+    return {
+      titleKa: null,
+      summaryKa: null,
+      error: errorMsg,
+      latencyMs: Date.now() - startTime,
+    };
   }
-}
+};
 ```
 
-#### Step 1.9: Create index.ts
+#### `packages/translation/src/index.ts`
 ```typescript
-// packages/translation/src/index.ts
-
-export type {
-  TranslationRequest,
-  TranslationResult,
-  TranslationProviderConfig,
-  TranslationProviderType,
-} from "./types.js";
-export { DEFAULT_TRANSLATION_MODELS } from "./types.js";
-export type { TranslationProvider } from "./provider.js";
-export { createTranslationProvider } from "./provider.js";
-export { GeminiTranslationProvider } from "./providers/gemini.js";
-export { ClaudeTranslationProvider } from "./providers/claude.js";
-export { OpenAITranslationProvider } from "./providers/openai.js";
-export {
-  DEFAULT_TRANSLATION_INSTRUCTIONS,
-  buildTranslationPrompt,
-} from "./prompts.js";
-export {
-  TRANSLATION_PRICING,
-  calculateTranslationCost,
-} from "./pricing.js";
+export type { TranslationResult } from "./types.js";
+export { translateWithGemini } from "./gemini.js";
+export { translateWithOpenAI } from "./openai.js";
+export { buildTranslationPrompt, DEFAULT_TRANSLATION_INSTRUCTIONS } from "./prompts.js";
+export { calculateTranslationCost } from "./pricing.js";
 ```
 
----
+### B2: Shared Package — Queue Constants + Env Schema
 
-### Phase 2: Shared Package Updates
+#### Add queue constants (`packages/shared/src/queues.ts`)
 
-#### Step 2.1: Add queue constants
 ```typescript
-// packages/shared/src/queues.ts - ADD:
-
+// ADD after existing constants:
 export const QUEUE_TRANSLATION = "pipeline-translation";
 export const JOB_TRANSLATION_BATCH = "translation-batch";
 ```
 
-#### Step 2.2: Add translation config schema
+#### Add translation API keys to env schema (`packages/shared/src/schemas/env.ts`)
+
+Add to `baseEnvSchema` (OPENAI_API_KEY already exists for embeddings):
 ```typescript
-// packages/shared/src/schemas/translation-config.ts (NEW FILE)
-
-import { z } from "zod";
-
-export const translationConfigSchema = z.object({
-  enabled: z.boolean().default(false),
-  scores: z.array(z.number().min(1).max(5)).default([3, 4, 5]),
-  provider: z.enum(["gemini", "claude", "openai"]).default("gemini"),
-  model: z.string().default("gemini-2.0-flash"),
-  instructions: z.string().max(2000).default(""),
-});
-
-export type TranslationConfig = z.infer<typeof translationConfigSchema>;
-
-export const defaultTranslationConfig: TranslationConfig = translationConfigSchema.parse({});
-```
-
-#### Step 2.3: Add env schema for Gemini
-```typescript
-// packages/shared/src/schemas/env.ts - ADD to baseEnvSchema (around line 21-91):
-
-// Translation provider keys
+// Translation (Gemini)
 GOOGLE_AI_API_KEY: z.string().optional().transform((v) => v || undefined),
+// Note: OPENAI_API_KEY already defined above for embeddings — reused for translation
 ```
 
-**Note:** The env schema is in `baseEnvSchema`, not `coreEnvSchema`. Also add to `.env.example`:
-```env
-# Translation (Gemini)
-GOOGLE_AI_API_KEY=your-gemini-api-key
-```
+### B3: Translation Worker
 
-#### Step 2.4: Export new schema
+**File:** `packages/worker/src/processors/translation.ts` (NEW)
+
 ```typescript
-// packages/shared/src/index.ts - ADD:
-
-export * from "./schemas/translation-config.js";
-```
-
----
-
-### Phase 3: Database Schema Updates
-
-#### Step 3.1: Update articles table
-```typescript
-// packages/db/src/schema.ts - ADD to articles table:
-
-// Georgian translation fields
-titleKa: text("title_ka"),
-llmSummaryKa: text("llm_summary_ka"),
-translationModel: text("translation_model"),
-```
-
-#### Step 3.2: Create migration
-```bash
-npm run db:generate
-```
-
-#### Step 3.3: Seed translation config defaults
-```sql
--- packages/db/seed.sql - ADD:
-
--- Translation settings
-INSERT INTO app_config (key, value, updated_at) VALUES
-  ('translation_enabled', 'false', NOW()),
-  ('translation_scores', '[3, 4, 5]', NOW()),
-  ('translation_provider', '"gemini"', NOW()),
-  ('translation_model', '"gemini-2.0-flash"', NOW()),
-  ('translation_instructions', '"Translate the following English news summary into Georgian. Maintain a professional, news-appropriate tone. Keep proper nouns in their original form. Technical terms may remain in English if no Georgian equivalent exists."', NOW()),
-  ('posting_language', '"en"', NOW())
-ON CONFLICT (key) DO NOTHING;
-```
-
----
-
-### Phase 4: Worker Implementation
-
-#### Step 4.1: Create translation processor
-```typescript
-// packages/worker/src/processors/translation.ts (NEW FILE)
-
 import { Worker, Queue } from "bullmq";
 import { eq, inArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
@@ -937,35 +821,39 @@ import {
   logger,
 } from "@watch-tower/shared";
 import type { Database } from "@watch-tower/db";
-import { articles, appConfig, llmTelemetry } from "@watch-tower/db";
+import { appConfig, llmTelemetry } from "@watch-tower/db";
 import {
-  createTranslationProvider,
+  translateWithGemini,
+  translateWithOpenAI,
   calculateTranslationCost,
-  type TranslationProviderType,
 } from "@watch-tower/translation";
 
 type TranslationDeps = {
   connection: { host: string; port: number };
   db: Database;
-  distributionQueue: Queue; // For auto-posting in Georgian mode
+  distributionQueue?: Queue;
 };
 
-type TranslationConfigFromDb = {
-  enabled: boolean;
+type TranslationConfig = {
+  postingLanguage: string;
   scores: number[];
-  provider: TranslationProviderType;
+  provider: string; // "gemini" | "openai"
   model: string;
   instructions: string;
+  enabledSince: string | null; // ISO timestamp
 };
 
-// Helper: Get translation config from app_config
-async function getTranslationConfig(db: Database): Promise<TranslationConfigFromDb> {
+/**
+ * Read all translation config from app_config in one query.
+ */
+async function getTranslationConfig(db: Database): Promise<TranslationConfig> {
   const keys = [
-    "translation_enabled",
+    "posting_language",
     "translation_scores",
     "translation_provider",
     "translation_model",
     "translation_instructions",
+    "translation_enabled_since",
   ];
 
   const rows = await db
@@ -973,90 +861,109 @@ async function getTranslationConfig(db: Database): Promise<TranslationConfigFrom
     .from(appConfig)
     .where(inArray(appConfig.key, keys));
 
-  const configMap = new Map(rows.map((r) => [r.key, r.value]));
+  const m = new Map(rows.map((r) => [r.key, r.value]));
 
   return {
-    enabled: configMap.get("translation_enabled") === true || configMap.get("translation_enabled") === "true",
-    scores: (configMap.get("translation_scores") as number[]) ?? [3, 4, 5],
-    provider: (configMap.get("translation_provider") as TranslationProviderType) ?? "gemini",
-    model: (configMap.get("translation_model") as string) ?? "gemini-2.0-flash",
-    instructions: (configMap.get("translation_instructions") as string) ?? "",
+    postingLanguage: (m.get("posting_language") as string) ?? "en",
+    scores: (m.get("translation_scores") as number[]) ?? [3, 4, 5],
+    provider: (m.get("translation_provider") as string) ?? "gemini",
+    model: (m.get("translation_model") as string) ?? "gemini-2.0-flash",
+    instructions: (m.get("translation_instructions") as string) ?? "",
+    enabledSince: (m.get("translation_enabled_since") as string) ?? null,
   };
 }
 
-// Helper: Get API key for provider
-function getApiKey(provider: TranslationProviderType): string {
+/**
+ * Resolve API key for the configured provider.
+ */
+function getTranslationApiKey(provider: string): string | undefined {
   switch (provider) {
     case "gemini":
-      return process.env.GOOGLE_AI_API_KEY ?? "";
-    case "claude":
-      return process.env.ANTHROPIC_API_KEY ?? "";
+      return process.env.GOOGLE_AI_API_KEY;
     case "openai":
-      return process.env.OPENAI_API_KEY ?? "";
+      return process.env.OPENAI_API_KEY;
+    default:
+      return undefined;
   }
 }
+
+type ClaimedArticle = {
+  id: string;
+  title: string;
+  llmSummary: string;
+  importanceScore: number;
+  pipelineStage: string;
+};
 
 export const createTranslationWorker = ({ connection, db, distributionQueue }: TranslationDeps) => {
   return new Worker(
     QUEUE_TRANSLATION,
     async (job) => {
       if (job.name !== JOB_TRANSLATION_BATCH) {
-        logger.warn({ jobName: job.name }, "[translation] unknown job type");
         return { skipped: true, reason: "unknown_job_type" };
       }
 
-      // 1. Check if translation is enabled
+      // 1. Read config
       const config = await getTranslationConfig(db);
-      if (!config.enabled) {
-        logger.debug("[translation] disabled, skipping batch");
-        return { skipped: true, reason: "disabled" };
+
+      // Only run if Georgian mode is active
+      if (config.postingLanguage !== "ka") {
+        return { skipped: true, reason: "english_mode" };
       }
 
-      // 2. Check API key availability
-      const apiKey = getApiKey(config.provider);
+      // Check API key for configured provider
+      const apiKey = getTranslationApiKey(config.provider);
       if (!apiKey) {
         logger.warn(`[translation] no API key for provider: ${config.provider}`);
         return { skipped: true, reason: "no_api_key" };
       }
 
-      // 3. ATOMIC CLAIM: Get scored articles that need translation
+      // 2. ATOMIC CLAIM: Get articles needing translation
+      // Queries by importance_score + translation_status (NOT pipeline_stage)
+      // This catches both 'scored' (3-4) and 'approved' (5) articles
       const scoreList = config.scores.length > 0 ? config.scores : [3, 4, 5];
+
+      // Backfill guard: only translate articles created after translation was enabled
+      const enabledSince = config.enabledSince
+        ? new Date(config.enabledSince)
+        : new Date(); // If no timestamp, only process from now
+
       const claimResult = await db.execute(sql`
         UPDATE articles
-        SET pipeline_stage = 'translating'
+        SET translation_status = 'translating'
         WHERE id IN (
           SELECT id FROM articles
-          WHERE pipeline_stage = 'scored'
-            AND importance_score = ANY(${scoreList}::smallint[])
+          WHERE importance_score = ANY(${`{${scoreList.join(",")}}`}::smallint[])
+            AND translation_status IS NULL
             AND llm_summary IS NOT NULL
-            AND llm_summary_ka IS NULL
-          ORDER BY created_at
+            AND title_ka IS NULL
+            AND scored_at IS NOT NULL
+            AND created_at > ${enabledSince}
+          ORDER BY created_at ASC
           LIMIT 10
           FOR UPDATE SKIP LOCKED
         )
-        RETURNING id, title, llm_summary as "llmSummary"
+        RETURNING
+          id,
+          title,
+          llm_summary as "llmSummary",
+          importance_score as "importanceScore",
+          pipeline_stage as "pipelineStage"
       `);
 
-      const claimed = claimResult.rows as { id: string; title: string; llmSummary: string }[];
+      const claimed = claimResult.rows as ClaimedArticle[];
 
       if (claimed.length === 0) {
         return { processed: 0 };
       }
 
-      logger.info(`[translation] claimed ${claimed.length} articles for translation`);
+      logger.info(`[translation] claimed ${claimed.length} articles`);
 
-      // 4. Create provider
-      const provider = createTranslationProvider({
-        provider: config.provider,
-        apiKey,
-        model: config.model,
-      });
-
-      // 5. Translate each article
-      const results: { id: string; success: boolean; error?: string }[] = [];
+      // 3. Translate each article
+      let translated = 0;
+      let failed = 0;
       const telemetryRows: {
         articleId: string;
-        provider: string;
         model: string;
         inputTokens: number;
         outputTokens: number;
@@ -1066,95 +973,92 @@ export const createTranslationWorker = ({ connection, db, distributionQueue }: T
       }[] = [];
 
       for (const article of claimed) {
-        const result = await provider.translate({
-          articleId: article.id,
-          title: article.title,
-          summary: article.llmSummary,
-          targetLanguage: "ka",
-          instructions: config.instructions || undefined,
-        });
+        // Call the configured provider
+        const translate = config.provider === "openai" ? translateWithOpenAI : translateWithGemini;
+        const result = await translate(
+          apiKey,
+          config.model,
+          article.title,
+          article.llmSummary,
+          config.instructions || undefined,
+        );
 
-        if (result.error || !result.titleTranslated || !result.summaryTranslated) {
-          // Mark as translation_failed
-          await db
-            .update(articles)
-            .set({ pipelineStage: "translation_failed" })
-            .where(eq(articles.id, article.id));
-
-          results.push({ id: article.id, success: false, error: result.error });
+        if (result.error || !result.titleKa || !result.summaryKa) {
+          // Mark as failed (translation_status only, pipeline_stage untouched)
+          await db.execute(sql`
+            UPDATE articles
+            SET translation_status = 'failed'
+            WHERE id = ${article.id}::uuid
+          `);
+          failed++;
           logger.warn({ articleId: article.id, error: result.error }, "[translation] failed");
         } else {
           // Save translation
-          await db
-            .update(articles)
-            .set({
-              titleKa: result.titleTranslated,
-              llmSummaryKa: result.summaryTranslated,
-              translationModel: config.model,
-              pipelineStage: "translated",
-            })
-            .where(eq(articles.id, article.id));
-
-          results.push({ id: article.id, success: true });
+          await db.execute(sql`
+            UPDATE articles
+            SET
+              title_ka = ${result.titleKa},
+              llm_summary_ka = ${result.summaryKa},
+              translation_model = ${config.model},
+              translation_status = 'translated',
+              translated_at = NOW()
+            WHERE id = ${article.id}::uuid
+          `);
+          translated++;
+          logger.info({ articleId: article.id }, "[translation] completed");
 
           // Collect telemetry
           if (result.usage) {
             telemetryRows.push({
               articleId: article.id,
-              provider: config.provider,
               model: config.model,
               inputTokens: result.usage.inputTokens,
               outputTokens: result.usage.outputTokens,
               totalTokens: result.usage.totalTokens,
               costMicrodollars: calculateTranslationCost(
-                config.provider,
                 config.model,
                 result.usage.inputTokens,
-                result.usage.outputTokens
+                result.usage.outputTokens,
               ),
-              latencyMs: result.latencyMs ?? 0,
+              latencyMs: result.latencyMs,
             });
           }
 
-          logger.info({ articleId: article.id }, "[translation] completed");
+          // 4. Auto-post: If article is already 'approved' (score 5 auto-approve),
+          // queue it for distribution now that translation is ready
+          if (article.pipelineStage === "approved" && distributionQueue) {
+            // Check if auto-post is enabled for any platform
+            const [autoPostRow] = await db
+              .select({ value: appConfig.value })
+              .from(appConfig)
+              .where(eq(appConfig.key, "auto_post_telegram"));
+            const autoPostEnabled =
+              autoPostRow?.value === true || autoPostRow?.value === "true";
 
-          // 7. Auto-post in Georgian mode (if enabled)
-          // Check if auto-posting is enabled and article qualifies
-          const [autoPostRow] = await db
-            .select({ value: appConfig.value })
-            .from(appConfig)
-            .where(eq(appConfig.key, "auto_post_telegram"));
-
-          const autoPostEnabled = autoPostRow?.value === true || autoPostRow?.value === "true";
-
-          // Get the article's score to check against auto-post threshold
-          const [articleRow] = await db
-            .select({ score: articles.importanceScore })
-            .from(articles)
-            .where(eq(articles.id, article.id));
-
-          const articleScore = articleRow?.score ?? 0;
-
-          // Auto-post threshold is typically 5 (score 5 = auto-approve)
-          if (autoPostEnabled && articleScore >= 5) {
-            await distributionQueue.add(
-              JOB_DISTRIBUTION_IMMEDIATE,
-              { articleId: article.id },
-              { jobId: `dist-ka-${article.id}` }
-            );
-            logger.info({ articleId: article.id }, "[translation] queued for auto-post (Georgian)");
+            if (autoPostEnabled) {
+              await distributionQueue.add(
+                JOB_DISTRIBUTION_IMMEDIATE,
+                { articleId: article.id },
+                { jobId: `dist-ka-${article.id}` },
+              );
+              logger.info(
+                { articleId: article.id },
+                "[translation] queued approved article for distribution",
+              );
+            }
           }
+          // If pipeline_stage is 'scored' (3-4), do nothing — user will schedule manually
         }
       }
 
-      // 8. Batch insert telemetry
+      // 5. Batch insert telemetry
       if (telemetryRows.length > 0) {
         try {
           await db.insert(llmTelemetry).values(
             telemetryRows.map((t) => ({
               articleId: t.articleId,
-              operation: "translate",
-              provider: t.provider,
+              operation: "translate" as const,
+              provider: config.provider,
               model: t.model,
               isFallback: false,
               inputTokens: t.inputTokens,
@@ -1162,324 +1066,301 @@ export const createTranslationWorker = ({ connection, db, distributionQueue }: T
               totalTokens: t.totalTokens,
               costMicrodollars: t.costMicrodollars,
               latencyMs: t.latencyMs,
-            }))
+            })),
           );
         } catch (err) {
           logger.error("[translation] telemetry insert failed", err);
         }
       }
 
-      const successCount = results.filter((r) => r.success).length;
-      const failCount = results.filter((r) => !r.success).length;
-
-      logger.info(`[translation] batch complete: ${successCount} translated, ${failCount} failed`);
-
-      return { processed: claimed.length, success: successCount, failed: failCount };
+      logger.info(`[translation] batch: ${translated} translated, ${failed} failed`);
+      return { processed: claimed.length, translated, failed };
     },
-    { connection, concurrency: 1 }
+    { connection, concurrency: 1 },
   );
 };
 ```
 
-#### Step 4.2: Update worker index.ts
-```typescript
-// packages/worker/src/index.ts - ADD:
+### B4: Worker Bootstrap — Translation Queue + Worker
 
+**File:** `packages/worker/src/index.ts`
+
+**Imports (add after existing imports):**
+```typescript
 import { QUEUE_TRANSLATION, JOB_TRANSLATION_BATCH } from "@watch-tower/shared";
 import { createTranslationWorker } from "./processors/translation.js";
+```
 
-// After other queue creations:
-const translationQueue = new Queue(QUEUE_TRANSLATION, { connection: redisConnection });
+**Queue creation (after distributionQueue, around line 132):**
+```typescript
+// Translation queue
+const translationQueue = new Queue(QUEUE_TRANSLATION, {
+  connection,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: "exponential", delay: 10000 },
+    removeOnComplete: 100,
+    removeOnFail: 50,
+  },
+});
+```
 
-// After other worker creations (conditional on GOOGLE_AI_API_KEY or other provider keys):
-const hasTranslationKey = !!(env.GOOGLE_AI_API_KEY || env.ANTHROPIC_API_KEY || env.OPENAI_API_KEY);
-let translationWorker: Worker | null = null;
+**Worker creation (after distributionWorker, around line 279):**
+```typescript
+// Translation worker (needs at least one translation provider key)
+const hasTranslationKey = !!(env.GOOGLE_AI_API_KEY || env.OPENAI_API_KEY);
+const translationWorker = hasTranslationKey
+  ? createTranslationWorker({
+      connection,
+      db,
+      distributionQueue: hasAnyPlatform ? distributionQueue : undefined,
+    })
+  : null;
+```
 
-if (hasTranslationKey) {
-  translationWorker = createTranslationWorker({
-    connection: redisConnection,
-    db,
-    distributionQueue, // Pass existing distribution queue for auto-posting
+**Error handlers (after distribution error handlers, around line 336):**
+```typescript
+if (translationWorker) {
+  translationWorker.on("failed", (job, err) => {
+    logger.error(`[translation] job ${job?.id ?? "unknown"} failed`, err.message);
   });
-  logger.info("[worker] translation worker started");
+  translationWorker.on("error", (err) => {
+    logger.error("[translation] worker error", err.message);
+  });
+  translationWorker.on("stalled", (jobId) => {
+    logger.warn(`[translation] job ${jobId} stalled - will be retried`);
+  });
 }
+```
 
-// Add repeatable job in job registry:
-// In ensureRepeatableJobs or startup:
-await translationQueue.add(
-  JOB_TRANSLATION_BATCH,
-  {},
-  { repeat: { every: 15_000 }, jobId: "translation-batch-repeat" }
-);
+**Clean failed jobs (add to the block around line 339-344):**
+```typescript
+await translationQueue.clean(0, 0, "failed");
+```
 
-// Add to graceful shutdown:
-if (translationWorker) await translationWorker.close();
+**Recurring job (after LLM brain recurring job setup, around line 404):**
+```typescript
+// Translation recurring job (every 15 seconds)
+if (translationWorker) {
+  await translationQueue.add(
+    JOB_TRANSLATION_BATCH,
+    {},
+    { repeat: { every: 15_000 }, jobId: "translation-batch-repeat" },
+  );
+  logger.info("[worker] translation enabled (gemini/openai)");
+} else {
+  logger.info("[worker] translation disabled (no GOOGLE_AI_API_KEY or OPENAI_API_KEY)");
+}
+```
+
+**Graceful shutdown (add to shutdown function, around line 449-458):**
+```typescript
+await translationWorker?.close();
 await translationQueue.close();
 ```
 
-#### Step 4.3: Update LLM brain with auto-post gating
+### B5: Translation Zombie Reset
+
+**File:** `packages/worker/src/processors/maintenance.ts`
+
+Add a new function after `resetZombieScoringArticles` (after line 190):
+
 ```typescript
-// packages/worker/src/processors/llm-brain.ts
-// Around line 379-401 where immediate distribution is queued
+/**
+ * Reset articles stuck in 'translating' state (translation_status only).
+ * Does NOT touch pipeline_stage — translation is decoupled.
+ * Uses 10 min threshold for stuck translations.
+ */
+const resetZombieTranslations = async (db: Database) => {
+  const staleThreshold = new Date(Date.now() - 10 * 60 * 1000);
 
-// BEFORE queueing immediate distribution, check posting language:
-const [langRow] = await db
-  .select({ value: appConfig.value })
-  .from(appConfig)
-  .where(eq(appConfig.key, "posting_language"));
-
-const postingLanguage = (langRow?.value as string) ?? "en";
-
-// Only auto-post immediately if in English mode
-// Georgian mode: translation worker will handle auto-posting after translation
-if (postingLanguage === "ka") {
-  logger.debug("[llm-brain] Georgian mode, skipping immediate distribution (translation worker will handle)");
-  // Skip queueing distribution - translation worker will do it after translating
-} else {
-  // English mode: queue immediate distribution as usual
-  if (autoPostTelegram && articleScore >= 5) {
-    await distributionQueue.add(
-      JOB_DISTRIBUTION_IMMEDIATE,
-      { articleId },
-      { jobId: `dist-${articleId}` }
+  // Reset stuck 'translating' → NULL (allows re-claim)
+  const translatingResult = await db.execute(sql`
+    UPDATE articles
+    SET translation_status = NULL
+    WHERE translation_status = 'translating'
+      AND created_at < ${staleThreshold}
+    RETURNING id
+  `);
+  if (translatingResult.rows.length > 0) {
+    logger.warn(
+      `[maintenance] reset ${translatingResult.rows.length} zombie translating articles`,
     );
   }
-}
+
+  // Reset 'failed' → NULL after 1 hour (allows retry)
+  const failedThreshold = new Date(Date.now() - 60 * 60 * 1000);
+  const failedResult = await db.execute(sql`
+    UPDATE articles
+    SET translation_status = NULL
+    WHERE translation_status = 'failed'
+      AND created_at < ${failedThreshold}
+    RETURNING id
+  `);
+  if (failedResult.rows.length > 0) {
+    logger.warn(
+      `[maintenance] reset ${failedResult.rows.length} failed translations for retry`,
+    );
+  }
+};
 ```
 
-**Key change:** When `posting_language = 'ka'`, LLM brain does NOT queue immediate distribution. The translation worker will pick up scored articles, translate them, then queue distribution.
-
----
-
-### Phase 5: API Routes
-
-#### Step 5.0: Update /articles endpoint to include translation fields
+Call it from `resetZombieArticles` (line 195-198):
 ```typescript
-// packages/api/src/routes/articles.ts - UPDATE the select queries
-
-// In GET /articles (list) around line 103-121, add to select:
-titleKa: articles.titleKa,
-llmSummaryKa: articles.llmSummaryKa,
-translationModel: articles.translationModel,
-
-// In GET /articles/:id (single) around line 154-173, add same fields
-
-// This ensures frontend can display both English and Georgian content
+const resetZombieArticles = async (db: Database) => {
+  await resetZombieEmbeddingArticles(db);
+  await resetZombieScoringArticles(db);
+  await resetZombieTranslations(db);  // ADD
+};
 ```
 
-#### Step 5.1: Add translation config endpoints
+### B6: API Routes — Translation Config Endpoints
+
+**File:** `packages/api/src/routes/config.ts`
+
+Add after the emergency stop routes (after line 286):
+
 ```typescript
-// packages/api/src/routes/config.ts - ADD:
+// ─────────────────────────────────────────────────────────────────────────────
+// Translation Settings
+// Controls Georgian translation and posting language.
+// ─────────────────────────────────────────────────────────────────────────────
 
 // GET /config/translation
-app.get<{ Reply: TranslationConfig }>(
-  "/config/translation",
-  { preHandler: deps.requireApiKey },
-  async (_, reply) => {
-    const keys = [
-      "translation_enabled",
-      "translation_scores",
-      "translation_provider",
-      "translation_model",
-      "translation_instructions",
-    ];
+app.get("/config/translation", { preHandler: deps.requireApiKey }, async () => {
+  const keys = [
+    "posting_language",
+    "translation_scores",
+    "translation_provider",
+    "translation_model",
+    "translation_instructions",
+  ];
 
-    const rows = await deps.db
-      .select({ key: appConfig.key, value: appConfig.value })
-      .from(appConfig)
-      .where(inArray(appConfig.key, keys));
+  const rows = await deps.db
+    .select({ key: appConfig.key, value: appConfig.value })
+    .from(appConfig)
+    .where(inArray(appConfig.key, keys));
 
-    const configMap = new Map(rows.map((r) => [r.key, r.value]));
+  const m = new Map(rows.map((r) => [r.key, r.value]));
 
-    return reply.send({
-      enabled: configMap.get("translation_enabled") === true || configMap.get("translation_enabled") === "true",
-      scores: (configMap.get("translation_scores") as number[]) ?? [3, 4, 5],
-      provider: (configMap.get("translation_provider") as string) ?? "gemini",
-      model: (configMap.get("translation_model") as string) ?? "gemini-2.0-flash",
-      instructions: (configMap.get("translation_instructions") as string) ?? "",
-    });
-  }
-);
+  return {
+    posting_language: (m.get("posting_language") as string) ?? "en",
+    scores: (m.get("translation_scores") as number[]) ?? [3, 4, 5],
+    provider: (m.get("translation_provider") as string) ?? "gemini",
+    model: (m.get("translation_model") as string) ?? "gemini-2.0-flash",
+    instructions: (m.get("translation_instructions") as string) ?? "",
+  };
+});
 
 // PATCH /config/translation
-app.patch<{ Body: Partial<TranslationConfig> }>(
-  "/config/translation",
-  { preHandler: deps.requireApiKey },
-  async (request, reply) => {
-    const { enabled, scores, provider, model, instructions } = request.body;
+app.patch<{
+  Body: {
+    posting_language?: "en" | "ka";
+    scores?: number[];
+    provider?: "gemini" | "openai";
+    model?: string;
+    instructions?: string;
+  };
+}>("/config/translation", { preHandler: deps.requireApiKey }, async (request, reply) => {
+  const { posting_language, scores, provider, model, instructions } = request.body ?? {};
 
-    const updates: { key: string; value: unknown }[] = [];
-
-    if (enabled !== undefined) updates.push({ key: "translation_enabled", value: enabled });
-    if (scores !== undefined) updates.push({ key: "translation_scores", value: scores });
-    if (provider !== undefined) updates.push({ key: "translation_provider", value: provider });
-    if (model !== undefined) updates.push({ key: "translation_model", value: model });
-    if (instructions !== undefined) updates.push({ key: "translation_instructions", value: instructions });
-
-    for (const { key, value } of updates) {
-      await deps.db
-        .insert(appConfig)
-        .values({ key, value: JSON.stringify(value), updatedAt: new Date() })
-        .onConflictDoUpdate({
-          target: appConfig.key,
-          set: { value: JSON.stringify(value), updatedAt: new Date() },
-        });
-    }
-
-    logger.info(`[config] translation settings updated`);
-    return reply.send({ success: true });
+  // Validate posting_language
+  if (posting_language !== undefined && !["en", "ka"].includes(posting_language)) {
+    return reply.code(400).send({ error: "posting_language must be 'en' or 'ka'" });
   }
-);
 
-// GET /config/posting-language
-app.get(
-  "/config/posting-language",
-  { preHandler: deps.requireApiKey },
-  async (_, reply) => {
-    const [row] = await deps.db
-      .select({ value: appConfig.value })
-      .from(appConfig)
-      .where(eq(appConfig.key, "posting_language"));
-
-    return reply.send({ language: (row?.value as string) ?? "en" });
-  }
-);
-
-// PATCH /config/posting-language
-app.patch<{ Body: { language: "en" | "ka" } }>(
-  "/config/posting-language",
-  { preHandler: deps.requireApiKey },
-  async (request, reply) => {
-    const { language } = request.body;
-
-    if (!["en", "ka"].includes(language)) {
-      return reply.code(400).send({ error: "Language must be 'en' or 'ka'" });
+  // Validate scores
+  if (scores !== undefined) {
+    if (!Array.isArray(scores) || scores.some((s) => s < 1 || s > 5)) {
+      return reply.code(400).send({ error: "scores must be an array of numbers 1-5" });
     }
+  }
 
-    await deps.db
-      .insert(appConfig)
-      .values({ key: "posting_language", value: JSON.stringify(language), updatedAt: new Date() })
-      .onConflictDoUpdate({
-        target: appConfig.key,
-        set: { value: JSON.stringify(language), updatedAt: new Date() },
+  // Validate provider
+  if (provider !== undefined && !["gemini", "openai"].includes(provider)) {
+    return reply.code(400).send({ error: "provider must be 'gemini' or 'openai'" });
+  }
+
+  const updates: { key: string; value: unknown }[] = [];
+
+  if (posting_language !== undefined) {
+    updates.push({ key: "posting_language", value: posting_language });
+
+    // Backfill guard: when switching to Georgian, record when it was enabled
+    if (posting_language === "ka") {
+      updates.push({
+        key: "translation_enabled_since",
+        value: new Date().toISOString(),
       });
-
-    logger.info(`[config] posting language set to: ${language}`);
-    return reply.send({ language });
+    }
   }
-);
+  if (scores !== undefined) updates.push({ key: "translation_scores", value: scores });
+  if (provider !== undefined) updates.push({ key: "translation_provider", value: provider });
+  if (model !== undefined) updates.push({ key: "translation_model", value: model });
+  if (instructions !== undefined) {
+    updates.push({ key: "translation_instructions", value: instructions });
+  }
+
+  for (const { key, value } of updates) {
+    await upsertTypedConfig(deps, key, value);
+  }
+
+  logger.info("[config] translation settings updated");
+  return { success: true };
+});
 ```
 
----
+**Note:** Add `inArray` to the drizzle-orm import at the top of the file.
 
-### Phase 6: Social Provider Updates
+### B7: Articles API — Add Translation Fields
 
-#### Step 6.1: Update formatPost to accept language-aware article
+**File:** `packages/api/src/routes/articles.ts`
+
+**Change 1: GET /articles list query (lines 103-121)**
+
+Add to the `.select()`:
 ```typescript
-// packages/social/src/types.ts - UPDATE ArticleForPost:
+title_ka: articles.titleKa,
+llm_summary_ka: articles.llmSummaryKa,
+translation_status: articles.translationStatus,
+```
 
-export type ArticleForPost = {
-  title: string;
-  titleKa?: string | null;      // ADD
-  summary: string;
-  summaryKa?: string | null;    // ADD
-  url: string;
-  sector: string;
+**Change 2: GET /articles/:id detail query (lines 154-173)**
+
+Add to the `.select()`:
+```typescript
+title_ka: articles.titleKa,
+llm_summary_ka: articles.llmSummaryKa,
+translation_status: articles.translationStatus,
+translation_model: articles.translationModel,
+translated_at: articles.translatedAt,
+```
+
+### B8: Frontend — API Types + Translation Settings Tab
+
+#### Update Article type (`packages/frontend/src/api.ts`, after line 501)
+
+```typescript
+export type Article = {
+  // ... existing fields ...
+  title_ka: string | null;              // ADD
+  llm_summary_ka: string | null;        // ADD
+  translation_status: string | null;    // ADD
 };
 ```
 
-#### Step 6.2: Update distribution worker to use posting language
+#### Add translation config API functions (`packages/frontend/src/api.ts`)
+
 ```typescript
-// packages/worker/src/processors/distribution.ts - UPDATE:
-
-// At the top of job processing, after kill switch check:
-const [langRow] = await db
-  .select({ value: appConfig.value })
-  .from(appConfig)
-  .where(eq(appConfig.key, "posting_language"));
-
-const postingLanguage = (langRow?.value as string) ?? "en";
-
-// When formatting post:
-const articleForPost = {
-  title: postingLanguage === "ka" && article.titleKa ? article.titleKa : article.title,
-  summary: postingLanguage === "ka" && article.llmSummaryKa ? article.llmSummaryKa : (article.llmSummary || article.title),
-  url: article.url,
-  sector: article.sectorName || "News",
-};
-
-// BLOCKING: If Georgian mode but no translation available
-if (postingLanguage === "ka" && (!article.titleKa || !article.llmSummaryKa)) {
-  logger.warn({ articleId }, "[distribution] Georgian mode but no translation available");
-  results.push({
-    platform: name,
-    success: false,
-    error: "No Georgian translation available",
-  });
-  continue;
-}
-
-const text = provider!.formatPost(articleForPost, template);
-```
-
-#### Step 6.3: Same update for maintenance.ts scheduled posts
-```typescript
-// packages/worker/src/processors/maintenance.ts - UPDATE processScheduledPosts():
-
-// Same pattern as distribution.ts - check posting_language config
-// Use titleKa/llmSummaryKa when language is 'ka'
-// Block with error if Georgian mode but no translation
-```
-
-#### Step 6.4: Add zombie reset for translation stages
-```typescript
-// packages/worker/src/processors/maintenance.ts - ADD to resetZombieArticles():
-
-// Reset zombie translating articles (stuck for >10 min)
-const translatingResetResult = await db.execute(sql`
-  UPDATE articles
-  SET pipeline_stage = 'scored'
-  WHERE pipeline_stage = 'translating'
-    AND updated_at < NOW() - INTERVAL '10 minutes'
-  RETURNING id
-`);
-
-if (translatingResetResult.rows.length > 0) {
-  logger.warn(`[maintenance] reset ${translatingResetResult.rows.length} zombie translating articles`);
-}
-
-// Reset translation_failed articles (retry after 1 hour)
-const translationFailedResetResult = await db.execute(sql`
-  UPDATE articles
-  SET pipeline_stage = 'scored'
-  WHERE pipeline_stage = 'translation_failed'
-    AND updated_at < NOW() - INTERVAL '1 hour'
-  RETURNING id
-`);
-
-if (translationFailedResetResult.rows.length > 0) {
-  logger.warn(`[maintenance] reset ${translationFailedResetResult.rows.length} translation_failed articles for retry`);
-}
-```
-
----
-
-### Phase 7: Frontend Implementation
-
-#### Step 7.1: Add API functions
-```typescript
-// packages/frontend/src/api.ts - ADD:
-
-// Translation config types
+// Translation config
 export type TranslationConfig = {
-  enabled: boolean;
+  posting_language: "en" | "ka";
   scores: number[];
-  provider: string;
+  provider: "gemini" | "openai";
   model: string;
   instructions: string;
 };
 
-// Get translation config
 export const getTranslationConfig = async (): Promise<TranslationConfig> => {
   const res = await fetch(`${API_URL}/config/translation`, {
     headers: authHeaders,
@@ -1488,9 +1369,8 @@ export const getTranslationConfig = async (): Promise<TranslationConfig> => {
   return res.json();
 };
 
-// Update translation config
 export const updateTranslationConfig = async (
-  config: Partial<TranslationConfig>
+  config: Partial<TranslationConfig>,
 ): Promise<void> => {
   const res = await fetch(`${API_URL}/config/translation`, {
     method: "PATCH",
@@ -1499,72 +1379,65 @@ export const updateTranslationConfig = async (
   });
   if (!res.ok) throw new Error("Failed to update translation config");
 };
-
-// Get posting language
-export const getPostingLanguage = async (): Promise<"en" | "ka"> => {
-  const res = await fetch(`${API_URL}/config/posting-language`, {
-    headers: authHeaders,
-  });
-  if (!res.ok) throw new Error("Failed to get posting language");
-  const data = await res.json();
-  return data.language;
-};
-
-// Set posting language
-export const setPostingLanguage = async (language: "en" | "ka"): Promise<void> => {
-  const res = await fetch(`${API_URL}/config/posting-language`, {
-    method: "PATCH",
-    headers: { ...authHeaders, "Content-Type": "application/json" },
-    body: JSON.stringify({ language }),
-  });
-  if (!res.ok) throw new Error("Failed to set posting language");
-};
 ```
 
-#### Step 7.2: Add Translation Settings tab to SiteRules.tsx
+#### Add Translation tab to SiteRules.tsx
+
+Add a "Translation" tab to the existing tab navigation in `packages/frontend/src/pages/SiteRules.tsx`:
+
 ```tsx
-// packages/frontend/src/pages/SiteRules.tsx - ADD new tab:
+// Tab: { id: "translation", label: "Translation" }
 
-// In tab navigation, add:
-{ id: "translation", label: "Translation" }
-
-// Add state:
+// State:
 const [translationConfig, setTranslationConfig] = useState<TranslationConfig | null>(null);
-const [postingLanguage, setPostingLanguageState] = useState<"en" | "ka">("en");
 
-// Add load effect:
+// Load on mount:
 useEffect(() => {
   getTranslationConfig().then(setTranslationConfig);
-  getPostingLanguage().then(setPostingLanguageState);
 }, []);
 
-// Add Translation tab content:
+// Tab content:
 {activeTab === "translation" && (
   <div className="space-y-6">
-    {/* Enable/Disable Toggle */}
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+    {/* Posting Language Toggle */}
+    <div className="rounded-2xl border border-amber-800/50 bg-amber-950/20 p-6">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-lg font-medium">Georgian Translation</h3>
-          <p className="text-sm text-slate-400">
-            Automatically translate scored articles to Georgian
+          <h3 className="text-lg font-medium text-amber-200">Posting Language</h3>
+          <p className="text-sm text-amber-200/70">
+            All posts will use this language. Georgian requires translation to be configured.
           </p>
         </div>
-        <button
-          onClick={() => {
-            const newEnabled = !translationConfig?.enabled;
-            updateTranslationConfig({ enabled: newEnabled });
-            setTranslationConfig((prev) => prev ? { ...prev, enabled: newEnabled } : null);
-            toast.success(newEnabled ? "Translation enabled" : "Translation disabled");
-          }}
-          className={`rounded-full px-4 py-2 text-sm font-medium ${
-            translationConfig?.enabled
-              ? "bg-emerald-500/20 text-emerald-200"
-              : "bg-slate-700 text-slate-300"
-          }`}
-        >
-          {translationConfig?.enabled ? "Enabled" : "Disabled"}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => {
+              updateTranslationConfig({ posting_language: "en" });
+              setTranslationConfig((prev) => prev ? { ...prev, posting_language: "en" } : null);
+              toast.success("Posting language set to English");
+            }}
+            className={`rounded-full px-4 py-2 text-sm font-medium ${
+              translationConfig?.posting_language === "en"
+                ? "bg-emerald-500/20 text-emerald-200"
+                : "bg-slate-700 text-slate-300"
+            }`}
+          >
+            English
+          </button>
+          <button
+            onClick={() => {
+              updateTranslationConfig({ posting_language: "ka" });
+              setTranslationConfig((prev) => prev ? { ...prev, posting_language: "ka" } : null);
+              toast.success("Posting language set to Georgian");
+            }}
+            className={`rounded-full px-4 py-2 text-sm font-medium ${
+              translationConfig?.posting_language === "ka"
+                ? "bg-emerald-500/20 text-emerald-200"
+                : "bg-slate-700 text-slate-300"
+            }`}
+          >
+            Georgian
+          </button>
+        </div>
       </div>
     </div>
 
@@ -1586,28 +1459,32 @@ useEffect(() => {
               }}
               className="rounded border-slate-600"
             />
-            <span>Score {score}</span>
+            <span className="text-sm text-slate-200">Score {score}</span>
           </label>
         ))}
       </div>
     </div>
 
-    {/* Provider & Model Selection */}
+    {/* Translation Provider & Model */}
     <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-      <h3 className="text-lg font-medium mb-4">Translation Provider</h3>
+      <h3 className="text-lg font-medium mb-4">Translation Provider & Model</h3>
       <div className="grid gap-4 md:grid-cols-2">
         <div>
           <label className="block text-sm text-slate-400 mb-2">Provider</label>
           <select
             value={translationConfig?.provider ?? "gemini"}
             onChange={(e) => {
-              updateTranslationConfig({ provider: e.target.value });
-              setTranslationConfig((prev) => prev ? { ...prev, provider: e.target.value } : null);
+              const provider = e.target.value as "gemini" | "openai";
+              // Auto-switch to default model for new provider
+              const defaultModel = provider === "openai" ? "gpt-4o-mini" : "gemini-2.0-flash";
+              updateTranslationConfig({ provider, model: defaultModel });
+              setTranslationConfig((prev) =>
+                prev ? { ...prev, provider, model: defaultModel } : null,
+              );
             }}
-            className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2"
+            className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm"
           >
             <option value="gemini">Gemini (Google)</option>
-            <option value="claude">Claude (Anthropic)</option>
             <option value="openai">OpenAI</option>
           </select>
         </div>
@@ -1619,18 +1496,23 @@ useEffect(() => {
               updateTranslationConfig({ model: e.target.value });
               setTranslationConfig((prev) => prev ? { ...prev, model: e.target.value } : null);
             }}
-            className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2"
+            className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm"
           >
-            {/* Gemini models */}
-            <option value="gemini-2.0-flash">gemini-2.0-flash</option>
-            <option value="gemini-2.0-pro">gemini-2.0-pro</option>
-            <option value="gemini-1.5-flash">gemini-1.5-flash</option>
-            {/* Claude models */}
-            <option value="claude-3-haiku-20240307">claude-3-haiku</option>
-            <option value="claude-3-5-sonnet-20241022">claude-3.5-sonnet</option>
-            {/* OpenAI models */}
-            <option value="gpt-4o-mini">gpt-4o-mini</option>
-            <option value="gpt-4o">gpt-4o</option>
+            {translationConfig?.provider === "openai" ? (
+              <>
+                <option value="gpt-4o-mini">gpt-4o-mini (fast, cheap)</option>
+                <option value="gpt-4o">gpt-4o (quality)</option>
+                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                <option value="gpt-4.1-nano">gpt-4.1-nano</option>
+              </>
+            ) : (
+              <>
+                <option value="gemini-2.0-flash">gemini-2.0-flash (fast, cheap)</option>
+                <option value="gemini-2.0-pro">gemini-2.0-pro (quality)</option>
+                <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+                <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+              </>
+            )}
           </select>
         </div>
       </div>
@@ -1645,7 +1527,9 @@ useEffect(() => {
       <textarea
         value={translationConfig?.instructions ?? ""}
         onChange={(e) => {
-          setTranslationConfig((prev) => prev ? { ...prev, instructions: e.target.value } : null);
+          setTranslationConfig((prev) =>
+            prev ? { ...prev, instructions: e.target.value } : null,
+          );
         }}
         onBlur={() => {
           if (translationConfig) {
@@ -1658,148 +1542,211 @@ useEffect(() => {
         placeholder="Translate the following English news summary into Georgian..."
       />
     </div>
-
-    {/* Posting Language Toggle */}
-    <div className="rounded-2xl border border-amber-800/50 bg-amber-950/20 p-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-lg font-medium text-amber-200">Global Posting Language</h3>
-          <p className="text-sm text-amber-200/70">
-            All posts will use this language (requires translation to be enabled for Georgian)
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => {
-              setPostingLanguage("en");
-              setPostingLanguageState("en");
-              toast.success("Posting language set to English");
-            }}
-            className={`rounded-full px-4 py-2 text-sm font-medium ${
-              postingLanguage === "en"
-                ? "bg-emerald-500/20 text-emerald-200"
-                : "bg-slate-700 text-slate-300"
-            }`}
-          >
-            English
-          </button>
-          <button
-            onClick={() => {
-              if (!translationConfig?.enabled) {
-                toast.error("Enable translation first");
-                return;
-              }
-              setPostingLanguage("ka");
-              setPostingLanguageState("ka");
-              toast.success("Posting language set to Georgian");
-            }}
-            className={`rounded-full px-4 py-2 text-sm font-medium ${
-              postingLanguage === "ka"
-                ? "bg-emerald-500/20 text-emerald-200"
-                : "bg-slate-700 text-slate-300"
-            }`}
-          >
-            Georgian (ქართული)
-          </button>
-        </div>
-      </div>
-    </div>
   </div>
 )}
 ```
 
-#### Step 7.3: Update Article cards to show both summaries
-```tsx
-// packages/frontend/src/pages/Articles.tsx - UPDATE article display:
+#### Show Georgian translation badge in Articles.tsx
 
-// In article list, show both summaries if available:
-<div className="text-sm text-slate-400 line-clamp-2">
-  {article.llm_summary}
-</div>
-{article.llm_summary_ka && (
-  <div className="text-sm text-slate-500 line-clamp-2 mt-1 border-l-2 border-slate-700 pl-2">
-    🇬🇪 {article.llm_summary_ka}
-  </div>
+In `packages/frontend/src/pages/Articles.tsx`, after the LLM summary display (around line 340-344), add a translation indicator:
+
+```tsx
+{article.llm_summary && (
+  <p className="text-xs text-slate-400 mt-1 line-clamp-2">
+    {article.llm_summary}
+  </p>
+)}
+{article.translation_status === "translated" && article.llm_summary_ka && (
+  <p className="text-xs text-slate-500 mt-1 line-clamp-2 border-l-2 border-emerald-700 pl-2">
+    KA: {article.llm_summary_ka}
+  </p>
+)}
+{article.translation_status === "translating" && (
+  <span className="text-xs text-amber-400 mt-1">Translating...</span>
+)}
+{article.translation_status === "failed" && (
+  <span className="text-xs text-red-400 mt-1">Translation failed</span>
 )}
 ```
 
 ---
 
-## 6. Testing Checklist
+## 6. Change Map
 
-### Unit Tests
-- [ ] Translation provider factory creates correct provider
-- [ ] Gemini provider parses JSON response correctly
-- [ ] Claude provider parses JSON response correctly
-- [ ] OpenAI provider parses JSON response correctly
-- [ ] Pricing calculation returns correct microdollars
-- [ ] Prompt builder includes custom instructions
+| # | File | Change | Scope |
+|---|------|--------|-------|
+| A1 | `packages/worker/src/processors/llm-brain.ts` | Wrap immediate distribution with posting_language check | ~15 lines |
+| A2 | `packages/worker/src/processors/distribution.ts` | Add Georgian fields to RETURNING, language-aware formatting + rollback | ~30 lines |
+| A3 | `packages/worker/src/processors/maintenance.ts` | Add Georgian fields to scheduled posts query + language formatting | ~25 lines |
+| A4 | `packages/worker/src/processors/maintenance.ts` | Georgian guard in rescue function | ~15 lines |
+| A5 | `packages/api/src/routes/config.ts` | Add `getTypedConfig`/`upsertTypedConfig` helpers | ~20 lines |
+| B1 | `packages/translation/` (NEW) | Translation package: Gemini + OpenAI (types, gemini, openai, prompts, pricing) | ~280 lines |
+| B2 | `packages/shared/src/queues.ts` | Add QUEUE_TRANSLATION, JOB_TRANSLATION_BATCH | 2 lines |
+| B2 | `packages/shared/src/schemas/env.ts` | Add GOOGLE_AI_API_KEY | 1 line |
+| B3 | `packages/worker/src/processors/translation.ts` (NEW) | Translation worker processor | ~200 lines |
+| B4 | `packages/worker/src/index.ts` | Translation queue + worker creation + shutdown | ~40 lines |
+| B5 | `packages/worker/src/processors/maintenance.ts` | Zombie reset for translation_status | ~30 lines |
+| B6 | `packages/api/src/routes/config.ts` | Translation config GET/PATCH endpoints | ~70 lines |
+| B7 | `packages/api/src/routes/articles.ts` | Add title_ka, llm_summary_ka, translation_status to queries | ~10 lines |
+| B8 | `packages/frontend/src/api.ts` | Article type update + translation config API functions | ~30 lines |
+| B8 | `packages/frontend/src/pages/SiteRules.tsx` | Translation settings tab | ~100 lines |
+| B8 | `packages/frontend/src/pages/Articles.tsx` | Translation status badges | ~15 lines |
+| DB | `packages/db/src/schema.ts` | 5 new columns on articles | 5 lines |
+| DB | `packages/db/seed.sql` | Translation config seeds | 6 lines |
 
-### Integration Tests
-- [ ] Translation worker claims articles with correct scores
-- [ ] Translation worker skips when disabled
-- [ ] Translation worker saves title_ka and llm_summary_ka
-- [ ] Translation worker inserts telemetry
-- [ ] **Translation worker queues distribution for auto-post (Georgian mode)**
-- [ ] API returns correct translation config
-- [ ] API updates translation config correctly
-- [ ] API returns/sets posting language
-- [ ] **API /articles returns title_ka, llm_summary_ka fields**
+**Total new files:** 2 (translation package, translation worker)
+**Total modified files:** ~12
+**Estimated total code:** ~900 lines
 
-### Auto-Post Gating Tests (Critical)
-- [ ] **English mode + score 5**: LLM brain queues immediate distribution
-- [ ] **Georgian mode + score 5**: LLM brain SKIPS distribution queue
-- [ ] **Georgian mode + translation complete**: Translation worker queues distribution
-- [ ] **Georgian mode + translation failed**: Article stays in translation_failed, no post
-- [ ] **Maintenance resets zombie translating articles after 10 min**
-- [ ] **Maintenance resets translation_failed articles after 1 hour**
+---
 
-### E2E Tests
-- [ ] Enable translation via UI
-- [ ] Select scores to translate via UI
-- [ ] Change provider/model via UI
-- [ ] Update instructions via UI
-- [ ] Toggle posting language via UI
-- [ ] Verify article shows Georgian translation
-- [ ] Verify post uses correct language based on toggle
-- [ ] Verify posting blocked when Georgian mode but no translation
+## 7. Testing Checklist
 
-### Manual Verification
+### Translation Worker
+- [ ] Skips when `posting_language = "en"`
+- [ ] Claims articles with matching scores AND `translation_status IS NULL` AND `scored_at IS NOT NULL`
+- [ ] Catches both `scored` (3-4) and `approved` (5) articles (queries by importance_score, not pipeline_stage)
+- [ ] Respects `translation_enabled_since` backfill guard
+- [ ] Sets `translation_status = 'translating'` during claim (atomic, FOR UPDATE SKIP LOCKED)
+- [ ] On success: stores `title_ka`, `llm_summary_ka`, `translation_model`, `translation_status = 'translated'`, `translated_at`
+- [ ] On failure: sets `translation_status = 'failed'` (does NOT touch pipeline_stage)
+- [ ] Queues distribution for `approved` articles after successful translation
+- [ ] Does NOT queue distribution for `scored` articles (manual approval needed)
+- [ ] Inserts telemetry to `llm_telemetry` with `operation = 'translate'`
+
+### Auto-Post Gating (Critical)
+- [ ] English mode + score 5: LLM brain queues immediate distribution (unchanged)
+- [ ] Georgian mode + score 5: LLM brain SKIPS distribution queue
+- [ ] Georgian mode + translation complete + approved: Translation worker queues distribution
+- [ ] Georgian mode + translation failed: Article stays in pipeline_stage unchanged, `translation_status = 'failed'`
+
+### Distribution Worker
+- [ ] Claims `approved` articles as before (unchanged WHERE clause)
+- [ ] In English mode: uses `title` / `llm_summary` (unchanged)
+- [ ] In Georgian mode + translation ready: uses `title_ka` / `llm_summary_ka`
+- [ ] In Georgian mode + translation missing: rolls back to `approved`, returns `awaiting_translation`
+- [ ] formatPost receives correct language content (social providers are language-agnostic)
+
+### Maintenance Worker
+- [ ] Scheduled posts use correct language fields based on `posting_language`
+- [ ] Scheduled posts fail gracefully if Georgian mode but no translation
+- [ ] Rescue function skips untranslated articles in Georgian mode
+- [ ] Zombie reset: `translation_status = 'translating'` → `NULL` after 10 min
+- [ ] Zombie reset: `translation_status = 'failed'` → `NULL` after 1 hour
+
+### API & Config
+- [ ] GET /config/translation returns all translation settings
+- [ ] PATCH /config/translation updates settings correctly
+- [ ] Switching to Georgian sets `translation_enabled_since` timestamp
+- [ ] `getTypedConfig` reads arrays and strings without Number()/String() wrapping
+- [ ] `upsertTypedConfig` writes arrays and strings as proper JSONB
+- [ ] GET /articles returns `title_ka`, `llm_summary_ka`, `translation_status`
+- [ ] GET /articles/:id returns full translation fields
+
+### Frontend
+- [ ] Translation tab in SiteRules shows language toggle, score checkboxes, model select, instructions
+- [ ] Language toggle switches between English and Georgian
+- [ ] Score checkboxes update `translation_scores` in real-time
+- [ ] Articles page shows translation status badges (translated, translating, failed)
+- [ ] Articles page shows Georgian summary when available
+
+### Edge Cases
+- [ ] Switch from English → Georgian mid-pipeline: only new articles get translated (backfill guard)
+- [ ] Switch from Georgian → English mid-pipeline: distribution immediately uses English fields
+- [ ] No GOOGLE_AI_API_KEY and no OPENAI_API_KEY: translation worker doesn't start, English mode works normally
+- [ ] Gemini API error: article gets `translation_status = 'failed'`, zombie reset retries after 1 hour
+- [ ] OpenAI API error: same behavior as Gemini failure path
+- [ ] Switch provider Gemini → OpenAI mid-pipeline: next batch uses OpenAI, existing translations kept
+- [ ] Provider set to "openai" but no OPENAI_API_KEY: worker logs warning, skips batch
 - [ ] Georgian text displays correctly (Unicode)
-- [ ] Translation quality is acceptable
-- [ ] Telemetry shows translation costs
-- [ ] Error handling shows user-friendly messages
-- [ ] **Switch from English to Georgian mode mid-pipeline works correctly**
+
+---
+
+## 8. Final Implementation Checkups
+
+After all code is implemented, run through these verification gates before considering the task done.
+
+### 8.1 SQL Schema & Migrations
+
+- [ ] **Drizzle schema matches DB** — Run `npm run db:generate` and verify no unexpected diff. The 5 new columns (`title_ka`, `llm_summary_ka`, `translation_model`, `translation_status`, `translated_at`) must appear in the migration
+- [ ] **Migration runs cleanly** — `npm run db:migrate` completes without errors on a fresh DB and on an existing DB with data
+- [ ] **Index created** — `idx_articles_translation_pending` partial index exists for the translation worker claim query
+- [ ] **Seed SQL valid** — `npm run db:seed` inserts all 5 translation config keys (`posting_language`, `translation_scores`, `translation_provider`, `translation_model`, `translation_instructions`) without conflict errors
+- [ ] **Column types correct** — `translation_status` is `TEXT` (not enum), allowing flexible values without migration on change
+- [ ] **No orphaned references** — New columns have no FK constraints (they're flat text/timestamp columns)
+
+### 8.2 Environment Configuration
+
+- [ ] **`GOOGLE_AI_API_KEY`** — Added to `baseEnvSchema` in `packages/shared/src/schemas/env.ts` as optional
+- [ ] **`OPENAI_API_KEY`** — Already exists in env schema (used for embeddings), confirm it's still present and optional
+- [ ] **`.env.example` updated** — Both keys documented with comments:
+  ```env
+  # Translation (at least one required for Georgian mode)
+  GOOGLE_AI_API_KEY=your-gemini-api-key
+  # OPENAI_API_KEY already used for embeddings, also used for translation
+  ```
+- [ ] **Worker starts without translation keys** — If neither `GOOGLE_AI_API_KEY` nor `OPENAI_API_KEY` is set, worker logs info and skips translation worker creation (no crash)
+- [ ] **Worker starts with only one key** — If only Gemini OR only OpenAI key is set, translation worker starts successfully. Switching provider to one without a key logs warning and skips batch gracefully
+- [ ] **No env vars leaked to frontend** — API keys are only in worker/API packages, never in `VITE_*` prefixed vars
+
+### 8.3 UI Wiring Verification
+
+- [ ] **Translation tab appears** — SiteRules page shows "Translation" tab alongside existing tabs (Domain Whitelist, Feed Limits, etc.)
+- [ ] **Language toggle works** — Switching English ↔ Georgian calls `PATCH /config/translation` and persists across page reload
+- [ ] **Score checkboxes persist** — Checking/unchecking scores saves immediately to backend, reflects on reload
+- [ ] **Provider dropdown works** — Switching Gemini ↔ OpenAI auto-updates model dropdown options and saves both `provider` + `model`
+- [ ] **Model dropdown shows correct options** — Gemini models when Gemini selected, OpenAI models when OpenAI selected
+- [ ] **Instructions textarea saves on blur** — Not on every keystroke; saved value matches what backend returns
+- [ ] **Articles page shows translation badges** — `translation_status` displayed as colored badge (translating = amber, translated = emerald, failed = red)
+- [ ] **Articles page shows Georgian summary** — When `translation_status = 'translated'`, Georgian summary visible with "KA:" prefix
+- [ ] **Article type includes new fields** — Frontend `Article` type has `title_ka`, `llm_summary_ka`, `translation_status` — TypeScript build passes
+
+### 8.4 API Wiring Verification
+
+- [ ] **GET /config/translation** — Returns all 5 fields (posting_language, scores, provider, model, instructions)
+- [ ] **PATCH /config/translation** — Accepts partial updates, validates posting_language/scores/provider
+- [ ] **Backfill guard set** — When switching posting_language to "ka", `translation_enabled_since` is set in app_config
+- [ ] **GET /articles includes translation fields** — Both list and detail endpoints return `title_ka`, `llm_summary_ka`, `translation_status`
+- [ ] **JSONB values stored correctly** — `translation_scores` stored as JSON array `[3,4,5]` not string `"[3,4,5]"`; `posting_language` stored as JSON string `"ka"` not double-encoded `"\"ka\""`
+- [ ] **`inArray` import added** — `config.ts` imports `inArray` from drizzle-orm for the translation config query
+
+### 8.5 Worker Wiring Verification
+
+- [ ] **Translation queue created** — `QUEUE_TRANSLATION` queue exists in worker bootstrap with proper retry config
+- [ ] **Repeatable job registered** — `JOB_TRANSLATION_BATCH` fires every 15 seconds
+- [ ] **Graceful shutdown includes translation** — Both `translationWorker?.close()` and `translationQueue.close()` in shutdown handler
+- [ ] **Error handlers registered** — `failed`, `error`, `stalled` handlers on translation worker
+- [ ] **Failed jobs cleaned** — `translationQueue.clean(0, 0, "failed")` in startup cleanup
+- [ ] **Queue constants exported** — `QUEUE_TRANSLATION` and `JOB_TRANSLATION_BATCH` exported from `@watch-tower/shared`
+- [ ] **Translation package in workspace** — `packages/translation` listed in root `package.json` workspaces, `npm install` resolves `@watch-tower/translation`
+- [ ] **Build succeeds** — `npm run build` passes for all packages including new `@watch-tower/translation`
 
 ---
 
 ## Summary
 
-This task adds a complete Georgian translation layer to Watch Tower:
+This task adds Georgian translation to Watch Tower using a **decoupled `translation_status` column** that avoids breaking any existing pipeline logic:
 
-1. **New `@watch-tower/translation` package** - Modular provider architecture (Gemini, Claude, OpenAI)
-2. **Database columns** - `title_ka`, `llm_summary_ka`, `translation_model`
-3. **Translation worker** - Processes scored articles based on config, queues distribution for auto-post
-4. **Auto-post gating** - English mode: immediate post; Georgian mode: post after translation
-5. **API endpoints** - Translation config + posting language + articles with new fields
-6. **Maintenance updates** - Zombie reset for `translating` and `translation_failed` stages
-7. **Frontend UI** - Translation settings tab in Site Rules
-8. **Social posting** - Uses correct language based on global toggle, blocks if translation missing
+1. **No new pipeline stages** — `pipeline_stage` values remain unchanged, all existing workers untouched
+2. **Independent `translation_status`** — `NULL → translating → translated/failed`, operates orthogonally to pipeline
+3. **Gemini + OpenAI** — two concrete functions, no heavy abstraction, switchable via UI
+4. **Backfill guard** — `translation_enabled_since` prevents translating old articles
+5. **Language-aware distribution** — reads `posting_language` at format time, rolls back if translation missing
+6. **Auto-post gating** — Georgian mode defers distribution until translation completes
 
-### Key Architecture Decision: Auto-Post Gating
+### Architecture Guarantee
 
 ```
-English mode (posting_language = 'en'):
-  LLM Brain → scores article → queues distribution → posts immediately
+Existing pipeline (UNCHANGED):
+  ingested → embedding → embedded → scoring → scored/approved/rejected → posting → posted
 
-Georgian mode (posting_language = 'ka'):
-  LLM Brain → scores article → SKIPS distribution queue
-       ↓
-  Translation Worker → translates → stores title_ka, llm_summary_ka
-       ↓
-  Translation Worker → queues distribution → posts in Georgian
+Translation layer (ORTHOGONAL):
+  translation_status: NULL → translating → translated/failed
+  Queries by: importance_score + translation_status + scored_at
+  Never touches: pipeline_stage
+
+Distribution (EXTENDED):
+  Still claims: pipeline_stage = 'approved' (unchanged)
+  New: reads posting_language, uses title_ka/llm_summary_ka when "ka"
+  New: rolls back to 'approved' if Georgian but untranslated
 ```
-
-This ensures zero latency for English auto-posts while guaranteeing Georgian posts wait for translation.
-
-The architecture is fully modular - providers can be swapped via UI without code changes or restarts.
