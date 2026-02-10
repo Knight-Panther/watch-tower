@@ -708,7 +708,10 @@ export const scheduleArticle = async (
   payload: {
     platforms: string[];
     scheduled_at?: string;
+    title?: string;
+    title_ka?: string;
     llm_summary?: string;
+    llm_summary_ka?: string;
   },
 ): Promise<{
   deliveries: Array<{

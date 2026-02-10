@@ -154,14 +154,19 @@ export default function Articles() {
   const handleSchedule = async (data: {
     platforms: string[];
     scheduledAt: Date;
+    title?: string;
     summary?: string;
   }) => {
     if (!schedulingArticle) return;
     try {
+      const isKa =
+        postingLanguage === "ka" && schedulingArticle.translation_status === "translated";
       await scheduleArticle(schedulingArticle.id, {
         platforms: data.platforms,
         scheduled_at: data.scheduledAt.toISOString(),
-        llm_summary: data.summary,
+        ...(isKa
+          ? { title_ka: data.title, llm_summary_ka: data.summary }
+          : { title: data.title, llm_summary: data.summary }),
       });
       const platformList = data.platforms.join(", ");
       toast.success(`Article scheduled for ${platformList}`);
@@ -561,6 +566,7 @@ export default function Articles() {
       {schedulingArticle && (
         <ScheduleModal
           article={schedulingArticle}
+          postingLanguage={postingLanguage}
           onClose={() => setSchedulingArticle(null)}
           onSchedule={handleSchedule}
         />

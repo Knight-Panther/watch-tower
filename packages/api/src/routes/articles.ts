@@ -392,11 +392,14 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     Body: {
       platforms: string[]; // Array of platforms
       scheduled_at?: string; // ISO string, null = immediate
+      title?: string;
+      title_ka?: string;
       llm_summary?: string;
+      llm_summary_ka?: string;
     };
   }>("/articles/:id/schedule", { preHandler: deps.requireApiKey }, async (request, reply) => {
     const { id } = request.params;
-    const { platforms, scheduled_at, llm_summary } = request.body ?? {};
+    const { platforms, scheduled_at, title: reqTitle, title_ka, llm_summary, llm_summary_ka } = request.body ?? {};
 
     if (!platforms || !Array.isArray(platforms) || platforms.length === 0) {
       return reply.code(400).send({ error: "platforms array is required and must not be empty" });
@@ -458,8 +461,17 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       pipelineStage: "approved",
       approvedAt: new Date(),
     };
+    if (reqTitle !== undefined) {
+      articleUpdates.title = reqTitle;
+    }
+    if (title_ka !== undefined) {
+      articleUpdates.titleKa = title_ka;
+    }
     if (llm_summary !== undefined) {
       articleUpdates.llmSummary = llm_summary;
+    }
+    if (llm_summary_ka !== undefined) {
+      articleUpdates.llmSummaryKa = llm_summary_ka;
     }
 
     await deps.db.update(articles).set(articleUpdates).where(eq(articles.id, id));

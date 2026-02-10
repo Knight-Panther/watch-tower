@@ -5,8 +5,9 @@ import TimePicker from "./TimePicker";
 
 type ScheduleModalProps = {
   article: Article;
+  postingLanguage: "en" | "ka";
   onClose: () => void;
-  onSchedule: (data: { platforms: string[]; scheduledAt: Date; summary?: string }) => Promise<void>;
+  onSchedule: (data: { platforms: string[]; scheduledAt: Date; title?: string; summary?: string }) => Promise<void>;
 };
 
 const PLATFORMS = [
@@ -29,8 +30,13 @@ const formatLocalTime = (d: Date) => {
   return `${pad(hrs % 24)}:${pad(mins)}`;
 };
 
-export default function ScheduleModal({ article, onClose, onSchedule }: ScheduleModalProps) {
-  const [summary, setSummary] = useState(article.llm_summary || "");
+export default function ScheduleModal({ article, postingLanguage, onClose, onSchedule }: ScheduleModalProps) {
+  const isKa = postingLanguage === "ka" && article.translation_status === "translated";
+  const displayTitle = isKa && article.title_ka ? article.title_ka : article.title;
+  const baseTitle = displayTitle;
+  const baseSummary = isKa && article.llm_summary_ka ? article.llm_summary_ka : (article.llm_summary || "");
+  const [title, setTitle] = useState(baseTitle);
+  const [summary, setSummary] = useState(baseSummary);
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(["telegram"]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -67,7 +73,8 @@ export default function ScheduleModal({ article, onClose, onSchedule }: Schedule
       await onSchedule({
         platforms: selectedPlatforms,
         scheduledAt,
-        summary: summary !== article.llm_summary ? summary : undefined,
+        title: title !== baseTitle ? title : undefined,
+        summary: summary !== baseSummary ? summary : undefined,
       });
     } finally {
       setIsSubmitting(false);
@@ -83,7 +90,8 @@ export default function ScheduleModal({ article, onClose, onSchedule }: Schedule
       await onSchedule({
         platforms: selectedPlatforms,
         scheduledAt: new Date(), // Immediate
-        summary: summary !== article.llm_summary ? summary : undefined,
+        title: title !== baseTitle ? title : undefined,
+        summary: summary !== baseSummary ? summary : undefined,
       });
     } finally {
       setIsSubmitting(false);
@@ -110,8 +118,13 @@ export default function ScheduleModal({ article, onClose, onSchedule }: Schedule
 
         {/* Article title */}
         <div className="mt-4">
-          <label className="block text-sm font-medium text-slate-400 mb-1">Article</label>
-          <p className="text-slate-200 line-clamp-2">{article.title}</p>
+          <label className="block text-sm font-medium text-slate-400 mb-1">Title</label>
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            className="w-full rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
+          />
         </div>
 
         {/* Summary edit */}
