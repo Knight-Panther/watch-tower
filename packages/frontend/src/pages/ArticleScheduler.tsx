@@ -26,7 +26,7 @@ export default function ArticleScheduler() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 border-b border-slate-800">
+      <div className="sticky top-[65px] z-30 flex gap-1 border-b border-slate-800 bg-slate-950/95 backdrop-blur -mx-6 px-6 py-1">
         {[
           { id: "articles", label: "Articles" },
           { id: "scheduled", label: "Scheduled" },
