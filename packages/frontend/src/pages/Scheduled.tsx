@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import Spinner from "../components/Spinner";
+import DatePicker from "../components/DatePicker";
+import TimePicker from "../components/TimePicker";
 import { useLocalStorageFilters } from "../hooks/useLocalStorageFilters";
 import {
   getScheduledDeliveries,
@@ -27,6 +29,34 @@ const PLATFORM_OPTIONS = [
   { value: "linkedin", label: "LinkedIn" },
 ];
 
+const TIME_BLOCKS = [
+  { start: 9, end: 12, label: "09:00 – 12:00" },
+  { start: 12, end: 15, label: "12:00 – 15:00" },
+  { start: 15, end: 18, label: "15:00 – 18:00" },
+  { start: 18, end: 21, label: "18:00 – 21:00" },
+  { start: 21, end: 24, label: "21:00 – 00:00" },
+  { start: 0, end: 3, label: "00:00 – 03:00" },
+  { start: 3, end: 6, label: "03:00 – 06:00" },
+  { start: 6, end: 9, label: "06:00 – 09:00" },
+];
+
+const pad = (n: number) => String(n).padStart(2, "0");
+
+const getDeliveryHour = (delivery: ScheduledDelivery): number => {
+  if (!delivery.scheduled_at) return 0;
+  return new Date(delivery.scheduled_at).getHours();
+};
+
+const isInBlock = (hour: number, start: number, end: number): boolean => {
+  if (start < end) return hour >= start && hour < end;
+  // Wraps midnight (e.g., 21-24)
+  return hour >= start || hour < end;
+};
+
+const formatLocalDate = (d: Date) => {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
 export default function Scheduled() {
   const [deliveries, setDeliveries] = useState<ScheduledDelivery[]>([]);
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, total_pages: 0 });
@@ -47,6 +77,9 @@ export default function Scheduled() {
   const [rescheduleItem, setRescheduleItem] = useState<ScheduledDelivery | null>(null);
   const [newDate, setNewDate] = useState("");
   const [newTime, setNewTime] = useState("");
+
+  // Collapsible block state: track which blocks are explicitly toggled
+  const [collapsedBlocks, setCollapsedBlocks] = useState<Set<string>>(new Set());
 
   const loadDeliveries = useCallback(async () => {
     setIsLoading(true);
@@ -105,7 +138,7 @@ export default function Scheduled() {
   const openReschedule = (delivery: ScheduledDelivery) => {
     const scheduled = delivery.scheduled_at ? new Date(delivery.scheduled_at) : new Date();
     setRescheduleItem(delivery);
-    setNewDate(scheduled.toISOString().split("T")[0]);
+    setNewDate(formatLocalDate(scheduled));
     setNewTime(scheduled.toTimeString().slice(0, 5));
   };
 
@@ -123,14 +156,16 @@ export default function Scheduled() {
     }
   };
 
-  const formatDate = (dateStr: string | null) => {
+  const formatTime24 = (dateStr: string | null) => {
     if (!dateStr) return "-";
-    return new Date(dateStr).toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    const d = new Date(dateStr);
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const formatDateShort = (dateStr: string | null) => {
+    if (!dateStr) return "";
+    const d = new Date(dateStr);
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   };
 
   const getStatusBadgeClass = (status: string) => {
@@ -161,6 +196,34 @@ export default function Scheduled() {
       default:
         return "bg-slate-700/40 text-slate-300";
     }
+  };
+
+  // Group deliveries by time block
+  const groupedBlocks = TIME_BLOCKS.map((block) => {
+    const items = deliveries.filter((d) => {
+      const hour = getDeliveryHour(d);
+      return isInBlock(hour, block.start, block.end);
+    });
+    return { ...block, items };
+  });
+
+  const toggleBlock = (label: string) => {
+    setCollapsedBlocks((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) {
+        next.delete(label);
+      } else {
+        next.add(label);
+      }
+      return next;
+    });
+  };
+
+  const isBlockExpanded = (label: string, count: number): boolean => {
+    // If user explicitly toggled, respect that
+    if (collapsedBlocks.has(label)) return false;
+    // Default: expanded if has items
+    return count > 0;
   };
 
   return (
@@ -257,112 +320,195 @@ export default function Scheduled() {
         </div>
       )}
 
-      {/* Table */}
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-800/50">
-              <tr>
-                <th className="px-4 py-3 text-left font-medium text-slate-300">Scheduled</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-300">Platform</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-300">Source</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-300 max-w-md">Article</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-300">Score</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-300">Status</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-300">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800">
-              {deliveries.map((delivery) => (
-                <tr key={delivery.id} className="hover:bg-slate-800/30">
-                  <td className="px-4 py-3 text-slate-400 whitespace-nowrap">
-                    {formatDate(delivery.scheduled_at)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`px-2 py-1 rounded text-xs ${getPlatformBadgeClass(delivery.platform)}`}
-                    >
-                      {delivery.platform}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="max-w-[120px]">
-                      <p className="text-slate-200 truncate">{delivery.source_name || "Unknown"}</p>
-                      <p className="text-xs text-slate-500 truncate">
-                        {delivery.sector_name || "-"}
-                      </p>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 max-w-md">
-                    <a
-                      href={delivery.article_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-slate-200 hover:text-white hover:underline font-medium line-clamp-1"
-                    >
-                      {delivery.article_title}
-                    </a>
-                    {delivery.article_summary && (
-                      <p className="text-xs text-slate-400 mt-1 line-clamp-1">
-                        {delivery.article_summary}
-                      </p>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="px-2 py-1 rounded text-xs font-bold bg-slate-700/40 text-slate-300">
-                      {delivery.article_score ?? "-"}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`px-2 py-1 rounded text-xs ${getStatusBadgeClass(delivery.status)}`}
-                    >
-                      {delivery.status}
-                    </span>
-                    {delivery.error_message && (
-                      <p
-                        className="text-xs text-red-400 mt-1 truncate max-w-[150px]"
-                        title={delivery.error_message}
-                      >
-                        {delivery.error_message}
-                      </p>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {delivery.status === "scheduled" && (
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => openReschedule(delivery)}
-                          className="px-2 py-1 bg-blue-500/20 text-blue-200 rounded text-xs hover:bg-blue-500/30"
-                        >
-                          Reschedule
-                        </button>
-                        <button
-                          onClick={() => handleCancel(delivery)}
-                          className="px-2 py-1 bg-red-500/20 text-red-200 rounded text-xs hover:bg-red-500/30"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {!isLoading && deliveries.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
-                    No scheduled posts found
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+      {/* Time Block Groups */}
+      <section className="space-y-2">
+        {groupedBlocks.map((block) => {
+          const expanded = isBlockExpanded(block.label, block.items.length);
+          const hasItems = block.items.length > 0;
 
-        {/* Pagination */}
-        <div className="flex items-center justify-between px-4 py-3 border-t border-slate-800 bg-slate-800/30">
+          return (
+            <div
+              key={block.label}
+              className="rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden"
+            >
+              {/* Block header */}
+              <button
+                onClick={() => {
+                  if (hasItems) {
+                    toggleBlock(block.label);
+                  }
+                }}
+                className={`w-full flex items-center justify-between px-5 py-3 text-left transition ${
+                  hasItems
+                    ? "hover:bg-slate-800/50 cursor-pointer"
+                    : "cursor-default opacity-60"
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  {/* Chevron */}
+                  <svg
+                    className={`w-4 h-4 text-slate-500 transition-transform ${
+                      expanded ? "rotate-90" : ""
+                    }`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 5l7 7-7 7"
+                    />
+                  </svg>
+
+                  <span className="text-sm font-medium text-slate-200 font-mono">
+                    {block.label}
+                  </span>
+                </div>
+
+                {/* Count badge */}
+                <span
+                  className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                    hasItems
+                      ? "bg-emerald-500/20 text-emerald-300"
+                      : "bg-slate-700/40 text-slate-500"
+                  }`}
+                >
+                  {block.items.length}
+                </span>
+              </button>
+
+              {/* Block content — table of deliveries */}
+              {expanded && hasItems && (
+                <div className="border-t border-slate-800 overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-800/30">
+                      <tr>
+                        <th className="px-4 py-2 text-left font-medium text-slate-400 text-xs">
+                          Time
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium text-slate-400 text-xs">
+                          Platform
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium text-slate-400 text-xs">
+                          Source
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium text-slate-400 text-xs max-w-md">
+                          Article
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium text-slate-400 text-xs">
+                          Score
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium text-slate-400 text-xs">
+                          Status
+                        </th>
+                        <th className="px-4 py-2 text-left font-medium text-slate-400 text-xs">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/50">
+                      {block.items.map((delivery) => (
+                        <tr key={delivery.id} className="hover:bg-slate-800/20">
+                          <td className="px-4 py-2.5 text-slate-300 whitespace-nowrap font-mono text-xs">
+                            <span className="text-slate-500">
+                              {formatDateShort(delivery.scheduled_at)}
+                            </span>{" "}
+                            {formatTime24(delivery.scheduled_at)}
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <span
+                              className={`px-2 py-0.5 rounded text-xs ${getPlatformBadgeClass(delivery.platform)}`}
+                            >
+                              {delivery.platform}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <div className="max-w-[120px]">
+                              <p className="text-slate-200 truncate text-xs">
+                                {delivery.source_name || "Unknown"}
+                              </p>
+                              <p className="text-xs text-slate-500 truncate">
+                                {delivery.sector_name || "-"}
+                              </p>
+                            </div>
+                          </td>
+                          <td className="px-4 py-2.5 max-w-md">
+                            <a
+                              href={delivery.article_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-slate-200 hover:text-white hover:underline font-medium line-clamp-1 text-xs"
+                            >
+                              {delivery.article_title}
+                            </a>
+                            {delivery.article_summary && (
+                              <p className="text-xs text-slate-400 mt-0.5 line-clamp-1">
+                                {delivery.article_summary}
+                              </p>
+                            )}
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <span className="px-2 py-0.5 rounded text-xs font-bold bg-slate-700/40 text-slate-300">
+                              {delivery.article_score ?? "-"}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <span
+                              className={`px-2 py-0.5 rounded text-xs ${getStatusBadgeClass(delivery.status)}`}
+                            >
+                              {delivery.status}
+                            </span>
+                            {delivery.error_message && (
+                              <p
+                                className="text-xs text-red-400 mt-0.5 truncate max-w-[150px]"
+                                title={delivery.error_message}
+                              >
+                                {delivery.error_message}
+                              </p>
+                            )}
+                          </td>
+                          <td className="px-4 py-2.5">
+                            {delivery.status === "scheduled" && (
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => openReschedule(delivery)}
+                                  className="px-2 py-0.5 bg-blue-500/20 text-blue-200 rounded text-xs hover:bg-blue-500/30"
+                                >
+                                  Reschedule
+                                </button>
+                                <button
+                                  onClick={() => handleCancel(delivery)}
+                                  className="px-2 py-0.5 bg-red-500/20 text-red-200 rounded text-xs hover:bg-red-500/30"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {!isLoading && deliveries.length === 0 && (
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 px-6 py-8 text-center text-slate-400">
+            No scheduled posts found
+          </div>
+        )}
+      </section>
+
+      {/* Pagination */}
+      {pagination.total > 0 && (
+        <section className="flex items-center justify-between rounded-2xl border border-slate-800 bg-slate-900/40 px-6 py-3">
           <p className="text-sm text-slate-400">
-            Showing {(pagination.page - 1) * pagination.limit + 1} -{" "}
+            Showing {(pagination.page - 1) * pagination.limit + 1} –{" "}
             {Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total}
           </p>
           <div className="flex gap-2">
@@ -384,8 +530,8 @@ export default function Scheduled() {
               Next
             </button>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* Reschedule Modal */}
       {rescheduleItem && (
@@ -401,21 +547,11 @@ export default function Scheduled() {
             <div className="mt-4 grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-slate-400 mb-1">Date</label>
-                <input
-                  type="date"
-                  value={newDate}
-                  onChange={(e) => setNewDate(e.target.value)}
-                  className="w-full rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
-                />
+                <DatePicker value={newDate} onChange={setNewDate} />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-400 mb-1">Time</label>
-                <input
-                  type="time"
-                  value={newTime}
-                  onChange={(e) => setNewTime(e.target.value)}
-                  className="w-full rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
-                />
+                <TimePicker value={newTime} onChange={setNewTime} />
               </div>
             </div>
 

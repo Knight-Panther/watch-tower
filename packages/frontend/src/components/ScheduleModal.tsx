@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { Article } from "../api";
+import DatePicker from "./DatePicker";
+import TimePicker from "./TimePicker";
 
 type ScheduleModalProps = {
   article: Article;
@@ -13,37 +15,45 @@ const PLATFORMS = [
   { id: "linkedin", label: "LinkedIn", icon: "💼" },
 ];
 
+const pad = (n: number) => String(n).padStart(2, "0");
+
+const formatLocalDate = (d: Date) => {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+const formatLocalTime = (d: Date) => {
+  const m = d.getMinutes();
+  const snapped = Math.ceil(m / 15) * 15;
+  const mins = snapped === 60 ? 0 : snapped;
+  const hrs = snapped === 60 ? d.getHours() + 1 : d.getHours();
+  return `${pad(hrs % 24)}:${pad(mins)}`;
+};
+
 export default function ScheduleModal({ article, onClose, onSchedule }: ScheduleModalProps) {
   const [summary, setSummary] = useState(article.llm_summary || "");
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(["telegram"]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Default to now + 1 hour, rounded to next 15 min
-  const getDefaultDateTime = () => {
-    const now = new Date();
-    now.setHours(now.getHours() + 1);
-    now.setMinutes(Math.ceil(now.getMinutes() / 15) * 15, 0, 0);
-    return now;
-  };
+  const now = new Date();
+  const [date, setDate] = useState(formatLocalDate(now));
+  const [time, setTime] = useState(formatLocalTime(now));
 
-  const defaultDate = getDefaultDateTime();
-  // Use local date format (YYYY-MM-DD) to avoid UTC date shift
-  const formatLocalDate = (d: Date) => {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  };
-  const [date, setDate] = useState(formatLocalDate(defaultDate));
-  const [time, setTime] = useState(
-    defaultDate.toTimeString().slice(0, 5), // HH:MM
-  );
+  // ESC closes modal (only if no picker dropdown consumed it first)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", handler); // bubble phase (pickers use capture)
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
 
   const togglePlatform = (platformId: string) => {
     setSelectedPlatforms((prev) =>
       prev.includes(platformId)
         ? prev.filter((p) => p !== platformId)
-        : [...prev, platformId]
+        : [...prev, platformId],
     );
   };
 
@@ -80,6 +90,19 @@ export default function ScheduleModal({ article, onClose, onSchedule }: Schedule
     }
   };
 
+  // Preview in local 24h format
+  const previewDate = new Date(`${date}T${time}`);
+  const previewStr = isNaN(previewDate.getTime())
+    ? "Invalid date"
+    : previewDate.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+      }) +
+      ", " +
+      pad(previewDate.getHours()) +
+      ":" +
+      pad(previewDate.getMinutes());
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
       <div className="w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-100 shadow-xl">
@@ -107,40 +130,20 @@ export default function ScheduleModal({ article, onClose, onSchedule }: Schedule
         <div className="mt-4 grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-slate-400 mb-1">Date</label>
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="w-full rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
-            />
+            <DatePicker value={date} onChange={setDate} />
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-400 mb-1">Time</label>
-            <input
-              type="time"
-              value={time}
-              onChange={(e) => setTime(e.target.value)}
-              className="w-full rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
-            />
+            <TimePicker value={time} onChange={setTime} />
           </div>
         </div>
 
-        {/* UTC Time Preview */}
+        {/* Local Time Preview */}
         <div className="mt-3 flex items-center gap-2 text-sm text-slate-400">
           <span>⏰</span>
           <span>
             Will post at:{" "}
-            <span className="text-slate-200 font-medium">
-              {new Date(`${date}T${time}`).toLocaleString("en-US", {
-                timeZone: "UTC",
-                month: "short",
-                day: "numeric",
-                hour: "numeric",
-                minute: "2-digit",
-                hour12: true,
-              })}{" "}
-              UTC
-            </span>
+            <span className="text-slate-200 font-medium">{previewStr}</span>
           </span>
         </div>
 
