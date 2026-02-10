@@ -22,7 +22,7 @@ export const translateWithGemini = async (
       systemInstruction: systemPrompt,
       generationConfig: {
         responseMimeType: "application/json",
-        maxOutputTokens: 1024,
+        maxOutputTokens: 2048,
       },
     });
 

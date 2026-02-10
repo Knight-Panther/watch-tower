@@ -1,10 +1,11 @@
 // Pricing in microdollars per 1M tokens
 const PRICING: Record<string, { input: number; output: number }> = {
   // Gemini
-  "gemini-2.0-flash": { input: 75_000, output: 300_000 },
-  "gemini-2.0-pro": { input: 1_250_000, output: 5_000_000 },
-  "gemini-1.5-flash": { input: 75_000, output: 300_000 },
-  "gemini-1.5-pro": { input: 1_250_000, output: 5_000_000 },
+  "gemini-2.5-flash": { input: 150_000, output: 600_000 },
+  "gemini-2.5-flash-lite": { input: 100_000, output: 400_000 },
+  "gemini-2.5-pro": { input: 1_250_000, output: 10_000_000 },
+  "gemini-3-flash-preview": { input: 500_000, output: 3_000_000 },
+  "gemini-3-pro-preview": { input: 2_000_000, output: 12_000_000 },
   // OpenAI
   "gpt-4o-mini": { input: 150_000, output: 600_000 },
   "gpt-4o": { input: 2_500_000, output: 10_000_000 },

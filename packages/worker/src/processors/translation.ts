@@ -54,7 +54,7 @@ async function getTranslationConfig(db: Database): Promise<TranslationConfig> {
     postingLanguage: (m.get("posting_language") as string) ?? "en",
     scores: (m.get("translation_scores") as number[]) ?? [3, 4, 5],
     provider: (m.get("translation_provider") as string) ?? "gemini",
-    model: (m.get("translation_model") as string) ?? "gemini-2.0-flash",
+    model: (m.get("translation_model") as string) ?? "gemini-2.5-flash",
     instructions: (m.get("translation_instructions") as string) ?? "",
     enabledSince: (m.get("translation_enabled_since") as string) ?? null,
   };

@@ -485,7 +485,7 @@ API_RATE_LIMIT_PER_MINUTE=200`}
                   value={translationConfig?.provider ?? "gemini"}
                   onChange={(e) => {
                     const provider = e.target.value as "gemini" | "openai";
-                    const defaultModel = provider === "openai" ? "gpt-4o-mini" : "gemini-2.0-flash";
+                    const defaultModel = provider === "openai" ? "gpt-4o-mini" : "gemini-2.5-flash";
                     updateTranslationConfig({ provider, model: defaultModel })
                       .then(() => toast.success(`Provider set to ${provider}`))
                       .catch(() => toast.error("Failed to update provider"));
@@ -502,7 +502,7 @@ API_RATE_LIMIT_PER_MINUTE=200`}
               <div>
                 <label className="block text-sm text-slate-400 mb-2">Model</label>
                 <select
-                  value={translationConfig?.model ?? "gemini-2.0-flash"}
+                  value={translationConfig?.model ?? "gemini-2.5-flash"}
                   onChange={(e) => {
                     updateTranslationConfig({ model: e.target.value })
                       .then(() => toast.success(`Model set to ${e.target.value}`))
@@ -520,10 +520,11 @@ API_RATE_LIMIT_PER_MINUTE=200`}
                     </>
                   ) : (
                     <>
-                      <option value="gemini-2.0-flash">gemini-2.0-flash (fast, cheap)</option>
-                      <option value="gemini-2.0-pro">gemini-2.0-pro (quality)</option>
-                      <option value="gemini-1.5-flash">gemini-1.5-flash</option>
-                      <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+                      <option value="gemini-2.5-flash">Gemini 2.5 Flash (balanced)</option>
+                      <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite (budget)</option>
+                      <option value="gemini-2.5-pro">Gemini 2.5 Pro (deep reasoning)</option>
+                      <option value="gemini-3-flash-preview">Gemini 3 Flash (high performance)</option>
+                      <option value="gemini-3-pro-preview">Gemini 3 Pro (flagship)</option>
                     </>
                   )}
                 </select>
