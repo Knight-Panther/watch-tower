@@ -11,20 +11,24 @@ import {
   setEmergencyStop,
   getTranslationConfig,
   updateTranslationConfig,
+  getAutoApproveThreshold,
+  setAutoApproveThreshold as setAutoApproveThresholdApi,
+  getAutoRejectThreshold,
+  setAutoRejectThreshold as setAutoRejectThresholdApi,
   type AllowedDomain,
   type SecurityConfig,
   type TranslationConfig,
 } from "../api";
 import Spinner from "../components/Spinner";
 
-type TabId = "domains" | "limits" | "api" | "emergency" | "translation";
+type TabId = "domains" | "limits" | "api" | "emergency" | "thresholds" | "translation";
 
 export default function SiteRules() {
   // URL-based tab state
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
   const activeTab: TabId =
-    tabParam === "limits" || tabParam === "api" || tabParam === "emergency" || tabParam === "translation"
+    tabParam === "limits" || tabParam === "api" || tabParam === "emergency" || tabParam === "thresholds" || tabParam === "translation"
       ? tabParam
       : "domains";
 
@@ -51,6 +55,12 @@ export default function SiteRules() {
 
   // Translation config state
   const [translationConfig, setTranslationConfig] = useState<TranslationConfig | null>(null);
+
+  // Score threshold state
+  const [approveThreshold, setApproveThreshold] = useState(5);
+  const [rejectThreshold, setRejectThreshold] = useState(2);
+  const [isApproveLoading, setIsApproveLoading] = useState(false);
+  const [isRejectLoading, setIsRejectLoading] = useState(false);
 
   // Load domains
   const loadDomains = useCallback(async () => {
@@ -102,13 +112,28 @@ export default function SiteRules() {
     }
   }, []);
 
+  // Load score thresholds
+  const loadThresholds = useCallback(async () => {
+    try {
+      const [approveVal, rejectVal] = await Promise.all([
+        getAutoApproveThreshold(),
+        getAutoRejectThreshold(),
+      ]);
+      setApproveThreshold(approveVal);
+      setRejectThreshold(rejectVal);
+    } catch {
+      // Non-critical, defaults are fine
+    }
+  }, []);
+
   // Initial load
   useEffect(() => {
     loadDomains();
     loadSecurityConfig();
     loadKillSwitch();
     loadTranslationConfig();
-  }, [loadDomains, loadSecurityConfig, loadKillSwitch, loadTranslationConfig]);
+    loadThresholds();
+  }, [loadDomains, loadSecurityConfig, loadKillSwitch, loadTranslationConfig, loadThresholds]);
 
   // Add domain
   const handleAddDomain = async () => {
@@ -165,6 +190,34 @@ export default function SiteRules() {
     }
   };
 
+  const handleApproveChange = useCallback(async (newValue: number) => {
+    setIsApproveLoading(true);
+    try {
+      await setAutoApproveThresholdApi(newValue);
+      setApproveThreshold(newValue);
+      toast.success(`Auto-approve threshold set to ${newValue}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update threshold";
+      toast.error(message);
+    } finally {
+      setIsApproveLoading(false);
+    }
+  }, []);
+
+  const handleRejectChange = useCallback(async (newValue: number) => {
+    setIsRejectLoading(true);
+    try {
+      await setAutoRejectThresholdApi(newValue);
+      setRejectThreshold(newValue);
+      toast.success(`Auto-reject threshold set to ${newValue}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update threshold";
+      toast.error(message);
+    } finally {
+      setIsRejectLoading(false);
+    }
+  }, []);
+
   return (
     <div className="grid gap-6">
       {/* Header */}
@@ -182,6 +235,7 @@ export default function SiteRules() {
           { id: "limits", label: "Feed Limits" },
           { id: "api", label: "API Security" },
           { id: "emergency", label: "Emergency Controls" },
+          { id: "thresholds", label: "Score Thresholds" },
           { id: "translation", label: "Translation" },
         ].map((tab) => (
           <button
@@ -399,6 +453,70 @@ MAX_ARTICLES_PER_SOURCE_DAILY=500`}
 API_RATE_LIMIT_PER_MINUTE=200`}
             </pre>
           </div>
+        </section>
+      )}
+
+      {/* Score Thresholds Tab */}
+      {activeTab === "thresholds" && (
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+          <h2 className="text-lg font-semibold">Global Score Thresholds</h2>
+          <p className="mt-1 text-sm text-slate-400">
+            Default thresholds for auto-approve, manual review, and auto-reject. Per-sector rules override these when configured.
+          </p>
+
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Auto-Approve */}
+            <div className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-slate-200">Auto-Approve</p>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    Articles scoring &ge; this are auto-approved
+                  </p>
+                </div>
+                <select
+                  value={approveThreshold}
+                  onChange={(e) => handleApproveChange(Number(e.target.value))}
+                  disabled={isApproveLoading}
+                  className={`w-16 rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-sm text-slate-200 outline-none focus:border-slate-500 ${isApproveLoading ? "opacity-50" : ""}`}
+                >
+                  {[2, 3, 4, 5].map((v) => (
+                    <option key={v} value={v} disabled={v <= rejectThreshold}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Auto-Reject */}
+            <div className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-slate-200">Auto-Reject</p>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    Articles scoring &le; this are auto-rejected
+                  </p>
+                </div>
+                <select
+                  value={rejectThreshold}
+                  onChange={(e) => handleRejectChange(Number(e.target.value))}
+                  disabled={isRejectLoading}
+                  className={`w-16 rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-sm text-slate-200 outline-none focus:border-slate-500 ${isRejectLoading ? "opacity-50" : ""}`}
+                >
+                  {[1, 2, 3, 4].map((v) => (
+                    <option key={v} value={v} disabled={v >= approveThreshold}>
+                      {v}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <p className="mt-4 text-xs text-slate-500">
+            Scores between thresholds go to manual review. Changes take effect on the next scoring batch.
+          </p>
         </section>
       )}
 
