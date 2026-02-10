@@ -423,10 +423,10 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       return reply.code(404).send({ error: "Article not found" });
     }
 
-    const allowedStages = ["scored", "approved"];
+    const allowedStages = ["scored", "approved", "posted"];
     if (!allowedStages.includes(article.pipelineStage)) {
       return reply.code(400).send({
-        error: `Article must be in 'scored' or 'approved' stage to schedule (current: ${article.pipelineStage})`,
+        error: `Article must be in 'scored', 'approved', or 'posted' stage to schedule (current: ${article.pipelineStage})`,
       });
     }
 
@@ -456,11 +456,12 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     // Parse scheduled_at or default to now for immediate
     const scheduledAt = scheduled_at ? new Date(scheduled_at) : new Date();
 
-    // Update article to approved (if not already)
-    const articleUpdates: Record<string, unknown> = {
-      pipelineStage: "approved",
-      approvedAt: new Date(),
-    };
+    // Update article — skip stage change for repost (already posted)
+    const articleUpdates: Record<string, unknown> = {};
+    if (article.pipelineStage !== "posted") {
+      articleUpdates.pipelineStage = "approved";
+      articleUpdates.approvedAt = new Date();
+    }
     if (reqTitle !== undefined) {
       articleUpdates.title = reqTitle;
     }
@@ -474,7 +475,9 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       articleUpdates.llmSummaryKa = llm_summary_ka;
     }
 
-    await deps.db.update(articles).set(articleUpdates).where(eq(articles.id, id));
+    if (Object.keys(articleUpdates).length > 0) {
+      await deps.db.update(articles).set(articleUpdates).where(eq(articles.id, id));
+    }
 
     // Create delivery records for all requested platforms
     const deliveryValues = platforms.map((platform) => ({

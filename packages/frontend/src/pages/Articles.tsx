@@ -520,6 +520,14 @@ export default function Articles() {
                           </button>
                         </div>
                       )}
+                    {article.pipeline_stage === "posted" && (
+                      <button
+                        onClick={() => openScheduleModal(article)}
+                        className="px-2 py-1 bg-blue-500/20 text-blue-200 rounded text-xs hover:bg-blue-500/30"
+                      >
+                        Repost
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
