@@ -1011,6 +1011,61 @@ export const setAutoPostLinkedin = async (enabled: boolean): Promise<boolean> =>
   return data.enabled ?? enabled;
 };
 
+// ─── Score Thresholds ────────────────────────────────────────────────────────
+// Controls which scores trigger auto-approve, auto-reject, or manual review.
+
+export const getAutoApproveThreshold = async (): Promise<number> => {
+  const res = await fetch(`${API_URL}/config/auto-approve-threshold`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load auto-approve threshold");
+  }
+  const data = await res.json();
+  return data.value ?? 5;
+};
+
+export const setAutoApproveThreshold = async (value: number): Promise<number> => {
+  const res = await fetch(`${API_URL}/config/auto-approve-threshold`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify({ value }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to update auto-approve threshold");
+  }
+  const data = await res.json();
+  return data.value ?? value;
+};
+
+export const getAutoRejectThreshold = async (): Promise<number> => {
+  const res = await fetch(`${API_URL}/config/auto-reject-threshold`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load auto-reject threshold");
+  }
+  const data = await res.json();
+  return data.value ?? 2;
+};
+
+export const setAutoRejectThreshold = async (value: number): Promise<number> => {
+  const res = await fetch(`${API_URL}/config/auto-reject-threshold`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify({ value }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to update auto-reject threshold");
+  }
+  const data = await res.json();
+  return data.value ?? value;
+};
+
 // ─── Reset Data ──────────────────────────────────────────────────────────────
 
 export type ResetResult = {

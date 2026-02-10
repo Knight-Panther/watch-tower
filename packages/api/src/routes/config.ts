@@ -275,6 +275,64 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
   );
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // Score Thresholds (Auto-Approve / Auto-Reject)
+  // Controls which scores trigger auto-approve, auto-reject, or manual review.
+  // DB values override environment variable defaults.
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  app.get("/config/auto-approve-threshold", { preHandler: deps.requireApiKey }, async () => {
+    const value = await getConfigValue(deps, "auto_approve_threshold", 5);
+    return { value };
+  });
+
+  app.patch<{ Body: { value: number } }>(
+    "/config/auto-approve-threshold",
+    { preHandler: deps.requireApiKey },
+    async (request, reply) => {
+      const { value } = request.body ?? {};
+      if (!Number.isFinite(value) || value < 1 || value > 5) {
+        return reply.code(400).send({ error: "value must be a number between 1 and 5" });
+      }
+      // Validate: approve must be > reject
+      const rejectThreshold = await getConfigValue(deps, "auto_reject_threshold", 2);
+      if (value <= rejectThreshold) {
+        return reply.code(400).send({
+          error: `Auto-approve threshold (${value}) must be greater than auto-reject threshold (${rejectThreshold})`,
+        });
+      }
+      await upsertConfig(deps, "auto_approve_threshold", value);
+      logger.info(`[config] auto-approve threshold updated to ${value}`);
+      return { value };
+    },
+  );
+
+  app.get("/config/auto-reject-threshold", { preHandler: deps.requireApiKey }, async () => {
+    const value = await getConfigValue(deps, "auto_reject_threshold", 2);
+    return { value };
+  });
+
+  app.patch<{ Body: { value: number } }>(
+    "/config/auto-reject-threshold",
+    { preHandler: deps.requireApiKey },
+    async (request, reply) => {
+      const { value } = request.body ?? {};
+      if (!Number.isFinite(value) || value < 1 || value > 5) {
+        return reply.code(400).send({ error: "value must be a number between 1 and 5" });
+      }
+      // Validate: reject must be < approve
+      const approveThreshold = await getConfigValue(deps, "auto_approve_threshold", 5);
+      if (value >= approveThreshold) {
+        return reply.code(400).send({
+          error: `Auto-reject threshold (${value}) must be less than auto-approve threshold (${approveThreshold})`,
+        });
+      }
+      await upsertConfig(deps, "auto_reject_threshold", value);
+      logger.info(`[config] auto-reject threshold updated to ${value}`);
+      return { value };
+    },
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // Layer 8: Kill Switch (Emergency Stop)
   // When enabled, ALL social posting is halted across all platforms.
   // Pipeline continues (fetch, embed, score) but no posts go out.

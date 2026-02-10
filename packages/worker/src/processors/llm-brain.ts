@@ -233,13 +233,34 @@ export const createLLMBrainWorker = ({
         }
       }
 
-      // Helper to get thresholds for an article (sector-specific or default)
+      // Read global thresholds from DB (overrides env defaults)
+      let globalApprove = autoApproveThreshold;
+      let globalReject = autoRejectThreshold;
+      try {
+        const thresholdRows = await db
+          .select({ key: appConfig.key, value: appConfig.value })
+          .from(appConfig)
+          .where(
+            inArray(appConfig.key, ["auto_approve_threshold", "auto_reject_threshold"]),
+          );
+        for (const row of thresholdRows) {
+          const num = Number(row.value);
+          if (!Number.isNaN(num) && num >= 1 && num <= 5) {
+            if (row.key === "auto_approve_threshold") globalApprove = num;
+            if (row.key === "auto_reject_threshold") globalReject = num;
+          }
+        }
+      } catch {
+        // Fall back to env defaults on DB error
+      }
+
+      // Helper to get thresholds for an article (sector-specific or global)
       const getThresholds = (articleId: string) => {
         const article = articles.find((a) => a.id === articleId)!;
         const rules = article.sectorId ? sectorRules.get(article.sectorId) : undefined;
         return {
-          approve: rules?.autoApprove ?? autoApproveThreshold,
-          reject: rules?.autoReject ?? autoRejectThreshold,
+          approve: rules?.autoApprove ?? globalApprove,
+          reject: rules?.autoReject ?? globalReject,
         };
       };
 

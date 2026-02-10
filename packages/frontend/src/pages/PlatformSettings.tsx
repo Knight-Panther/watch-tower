@@ -13,6 +13,10 @@ import {
   setAutoPostLinkedin as setAutoPostLinkedinApi,
   getPlatformHealth,
   refreshPlatformHealth,
+  getAutoApproveThreshold,
+  setAutoApproveThreshold as setAutoApproveThresholdApi,
+  getAutoRejectThreshold,
+  setAutoRejectThreshold as setAutoRejectThresholdApi,
   type SocialAccount,
   type PlatformUsage,
   type PlatformHealth,
@@ -64,6 +68,12 @@ export default function PlatformSettings() {
   const [autoPostLinkedin, setAutoPostLinkedin] = useState(false);
   const [isAutoPostLinkedinLoading, setIsAutoPostLinkedinLoading] = useState(false);
 
+  // Score threshold states
+  const [approveThreshold, setApproveThreshold] = useState(5);
+  const [rejectThreshold, setRejectThreshold] = useState(2);
+  const [isApproveLoading, setIsApproveLoading] = useState(false);
+  const [isRejectLoading, setIsRejectLoading] = useState(false);
+
   // Rate limit draft values (for editing)
   const [rateLimitDrafts, setRateLimitDrafts] = useState<Record<string, string>>({});
   const [savingRateLimit, setSavingRateLimit] = useState<string | null>(null);
@@ -77,14 +87,23 @@ export default function PlatformSettings() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [accountsData, usageData, telegramEnabled, facebookEnabled, linkedinEnabled] =
-          await Promise.all([
-            listSocialAccounts(),
-            getSocialAccountsUsage(),
-            getAutoPostTelegram(),
-            getAutoPostFacebook(),
-            getAutoPostLinkedin(),
-          ]);
+        const [
+          accountsData,
+          usageData,
+          telegramEnabled,
+          facebookEnabled,
+          linkedinEnabled,
+          approveVal,
+          rejectVal,
+        ] = await Promise.all([
+          listSocialAccounts(),
+          getSocialAccountsUsage(),
+          getAutoPostTelegram(),
+          getAutoPostFacebook(),
+          getAutoPostLinkedin(),
+          getAutoApproveThreshold(),
+          getAutoRejectThreshold(),
+        ]);
 
         setAccounts(accountsData);
         const byPlatform = Object.fromEntries(usageData.usage.map((u) => [u.platform, u]));
@@ -92,6 +111,8 @@ export default function PlatformSettings() {
         setAutoPostTelegram(telegramEnabled);
         setAutoPostFacebook(facebookEnabled);
         setAutoPostLinkedin(linkedinEnabled);
+        setApproveThreshold(approveVal);
+        setRejectThreshold(rejectVal);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to load platform settings";
         toast.error(message);
@@ -171,6 +192,40 @@ export default function PlatformSettings() {
       setIsAutoPostLinkedinLoading(false);
     }
   }, [autoPostLinkedin]);
+
+  const handleApproveChange = useCallback(
+    async (newValue: number) => {
+      setIsApproveLoading(true);
+      try {
+        await setAutoApproveThresholdApi(newValue);
+        setApproveThreshold(newValue);
+        toast.success(`Auto-approve threshold set to ${newValue}`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to update threshold";
+        toast.error(message);
+      } finally {
+        setIsApproveLoading(false);
+      }
+    },
+    [],
+  );
+
+  const handleRejectChange = useCallback(
+    async (newValue: number) => {
+      setIsRejectLoading(true);
+      try {
+        await setAutoRejectThresholdApi(newValue);
+        setRejectThreshold(newValue);
+        toast.success(`Auto-reject threshold set to ${newValue}`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to update threshold";
+        toast.error(message);
+      } finally {
+        setIsRejectLoading(false);
+      }
+    },
+    [],
+  );
 
   const handleRefreshHealth = useCallback(async () => {
     setIsRefreshing(true);
@@ -501,6 +556,68 @@ export default function PlatformSettings() {
             );
           })}
         </div>
+      </section>
+
+      {/* Score Thresholds */}
+      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+        <h2 className="text-lg font-semibold">Score Thresholds</h2>
+        <p className="mt-1 text-sm text-slate-400">
+          Control which scores trigger auto-approve, manual review, or auto-reject.
+        </p>
+
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Auto-Approve */}
+          <div className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium text-slate-200">Auto-Approve</p>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  Articles scoring &ge; this are auto-approved
+                </p>
+              </div>
+              <select
+                value={approveThreshold}
+                onChange={(e) => handleApproveChange(Number(e.target.value))}
+                disabled={isApproveLoading}
+                className={`w-16 rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-sm text-slate-200 outline-none focus:border-slate-500 ${isApproveLoading ? "opacity-50" : ""}`}
+              >
+                {[2, 3, 4, 5].map((v) => (
+                  <option key={v} value={v} disabled={v <= rejectThreshold}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Auto-Reject */}
+          <div className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium text-slate-200">Auto-Reject</p>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  Articles scoring &le; this are auto-rejected
+                </p>
+              </div>
+              <select
+                value={rejectThreshold}
+                onChange={(e) => handleRejectChange(Number(e.target.value))}
+                disabled={isRejectLoading}
+                className={`w-16 rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-sm text-slate-200 outline-none focus:border-slate-500 ${isRejectLoading ? "opacity-50" : ""}`}
+              >
+                {[1, 2, 3, 4].map((v) => (
+                  <option key={v} value={v} disabled={v >= approveThreshold}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <p className="mt-4 text-xs text-slate-500">
+          Scores between thresholds go to manual review. Changes take effect on the next scoring batch.
+        </p>
       </section>
     </div>
   );
