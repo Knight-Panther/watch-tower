@@ -3,6 +3,8 @@ import { toast } from "sonner";
 import Spinner from "../components/Spinner";
 import ScheduleModal from "../components/ScheduleModal";
 import { useLocalStorageFilters } from "../hooks/useLocalStorageFilters";
+import { useServerEventsContext } from "../contexts/ServerEventsContext";
+import { useDebouncedCallback } from "../hooks/useDebouncedCallback";
 import {
   getArticles,
   getArticleFilterOptions,
@@ -90,6 +92,20 @@ export default function Articles() {
   useEffect(() => {
     loadFilterOptions();
   }, [loadFilterOptions]);
+
+  // SSE: auto-refresh when articles change pipeline stage
+  const { subscribe } = useServerEventsContext();
+  const debouncedRefresh = useDebouncedCallback(() => {
+    loadArticles();
+  }, 2000);
+
+  useEffect(() => {
+    const unsubscribe = subscribe(
+      ["article:scored", "article:approved", "article:rejected", "article:posted", "source:fetched"],
+      debouncedRefresh,
+    );
+    return unsubscribe;
+  }, [subscribe, debouncedRefresh]);
 
   // Fetch posting language from translation config
   useEffect(() => {

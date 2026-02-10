@@ -4,6 +4,8 @@ import Spinner from "../components/Spinner";
 import DatePicker from "../components/DatePicker";
 import TimePicker from "../components/TimePicker";
 import { useLocalStorageFilters } from "../hooks/useLocalStorageFilters";
+import { useServerEventsContext } from "../contexts/ServerEventsContext";
+import { useDebouncedCallback } from "../hooks/useDebouncedCallback";
 import {
   getScheduledDeliveries,
   rescheduleDelivery,
@@ -114,6 +116,18 @@ export default function Scheduled() {
     loadStats();
   }, [loadStats]);
 
+  // SSE: auto-refresh when a delivery gets posted
+  const { subscribe } = useServerEventsContext();
+  const debouncedRefresh = useDebouncedCallback(() => {
+    loadDeliveries();
+    loadStats();
+  }, 2000);
+
+  useEffect(() => {
+    const unsubscribe = subscribe(["article:posted"], debouncedRefresh);
+    return unsubscribe;
+  }, [subscribe, debouncedRefresh]);
+
   const handleFilterChange = (key: keyof ScheduledFilters, value: string | number | undefined) => {
     setFilter(key, value);
   };
@@ -150,6 +164,7 @@ export default function Scheduled() {
       toast.success("Post rescheduled");
       setRescheduleItem(null);
       loadDeliveries();
+      loadStats();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to reschedule";
       toast.error(message);

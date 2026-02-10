@@ -8,10 +8,7 @@ type MonitoringProps = {
   sources: StatsSource[];
   isLoading: boolean;
   error: string | null;
-  lastUpdated: string | null;
   onRefresh: () => void;
-  autoRefreshEnabled: boolean;
-  onToggleAutoRefresh: () => void;
 };
 
 type StatusFilter = "all" | "stale" | "error" | "ok";
@@ -58,10 +55,7 @@ export default function Monitoring({
   sources,
   isLoading,
   error,
-  lastUpdated,
   onRefresh,
-  autoRefreshEnabled,
-  onToggleAutoRefresh,
 }: MonitoringProps) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [activeOnly, setActiveOnly] = useState(true);
@@ -136,19 +130,6 @@ export default function Monitoring({
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-xs text-slate-500">
-              {lastUpdated ? `Updated ${lastUpdated}` : "Not updated yet"}
-            </span>
-            <button
-              onClick={onToggleAutoRefresh}
-              className={`rounded-full border px-3 py-1 text-xs transition ${
-                autoRefreshEnabled
-                  ? "border-emerald-500/40 text-emerald-200"
-                  : "border-slate-700 text-slate-300"
-              }`}
-            >
-              {autoRefreshEnabled ? "Auto-refresh on" : "Auto-refresh off"}
-            </button>
             <button
               onClick={onRefresh}
               className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:border-slate-500"

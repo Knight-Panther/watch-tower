@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Route, Routes } from "react-router-dom";
 import { Toaster, toast } from "sonner";
 import {
@@ -51,6 +51,38 @@ import ArticleScheduler from "./pages/ArticleScheduler";
 import ScoringRules from "./pages/ScoringRules";
 import MediaChannelControl from "./pages/MediaChannelControl";
 import SiteRules from "./pages/SiteRules";
+import {
+  ServerEventsProvider,
+  useServerEventsContext,
+} from "./contexts/ServerEventsContext";
+import { useDebouncedCallback } from "./hooks/useDebouncedCallback";
+
+/**
+ * Inner shell that lives inside ServerEventsProvider.
+ * Provides SSE connection status to Layout and replaces 30s monitoring polling
+ * with event-driven refetch.
+ */
+function AppShell({
+  children,
+  onRefreshStats,
+}: {
+  children: React.ReactNode;
+  onRefreshStats: () => void;
+}) {
+  const { status, subscribe } = useServerEventsContext();
+
+  const debouncedRefreshStats = useDebouncedCallback(onRefreshStats, 2000);
+
+  useEffect(() => {
+    const unsubscribe = subscribe(
+      ["source:fetched", "article:scored", "article:approved", "article:rejected", "article:posted"],
+      debouncedRefreshStats,
+    );
+    return unsubscribe;
+  }, [subscribe, debouncedRefreshStats]);
+
+  return <Layout connectionStatus={status}>{children}</Layout>;
+}
 
 const emptySourceForm = {
   url: "",
@@ -108,9 +140,6 @@ export default function App() {
   const [statsSources, setStatsSources] = useState<StatsSource[]>([]);
   const [statsError, setStatsError] = useState<string | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
-  const [statsUpdatedAt, setStatsUpdatedAt] = useState<string | null>(null);
-  const [statsAutoRefresh, setStatsAutoRefresh] = useState(true);
-
   // Telemetry state
   const [telemetrySummary, setTelemetrySummary] = useState<TelemetrySummary | null>(null);
   const [telemetryByProvider, setTelemetryByProvider] = useState<TelemetryByProvider | null>(null);
@@ -194,49 +223,6 @@ export default function App() {
   useEffect(() => {
     refreshTelemetry();
   }, []);
-
-  useEffect(() => {
-    if (!statsAutoRefresh) {
-      return;
-    }
-
-    let intervalId: ReturnType<typeof setInterval> | null = null;
-
-    const startPolling = () => {
-      if (intervalId) return;
-      intervalId = setInterval(() => {
-        refreshStats();
-      }, 30_000);
-    };
-
-    const stopPolling = () => {
-      if (intervalId) {
-        clearInterval(intervalId);
-        intervalId = null;
-      }
-    };
-
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        stopPolling();
-      } else {
-        refreshStats(); // Immediate refresh when tab becomes visible
-        startPolling();
-      }
-    };
-
-    // Start polling if tab is visible
-    if (!document.hidden) {
-      startPolling();
-    }
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      stopPolling();
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [statsAutoRefresh]);
 
   const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -747,21 +733,20 @@ export default function App() {
     setConfirmSectorDelete(sector);
   };
 
-  const refreshStats = async () => {
+  const refreshStats = useCallback(async () => {
     setStatsLoading(true);
     setStatsError(null);
     try {
       const [overview, sourcesData] = await Promise.all([getStatsOverview(), getStatsSources()]);
       setStatsOverview(overview);
       setStatsSources(sourcesData);
-      setStatsUpdatedAt(new Date().toLocaleTimeString());
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load monitoring stats";
       setStatsError(message);
     } finally {
       setStatsLoading(false);
     }
-  };
+  }, []);
 
   const refreshTelemetry = async () => {
     setTelemetryLoading(true);
@@ -823,9 +808,10 @@ export default function App() {
   };
 
   return (
-    <Layout>
-      <Toaster richColors position="top-right" />
-      <Routes>
+    <ServerEventsProvider>
+      <AppShell onRefreshStats={refreshStats}>
+        <Toaster richColors position="top-right" />
+        <Routes>
         <Route
           path="/"
           element={
@@ -883,10 +869,7 @@ export default function App() {
               sources={statsSources}
               isLoading={statsLoading}
               error={statsError}
-              lastUpdated={statsUpdatedAt}
               onRefresh={refreshStats}
-              autoRefreshEnabled={statsAutoRefresh}
-              onToggleAutoRefresh={() => setStatsAutoRefresh((prev) => !prev)}
             />
           }
         />
@@ -1015,6 +998,7 @@ export default function App() {
           </div>
         </div>
       ) : null}
-    </Layout>
+      </AppShell>
+    </ServerEventsProvider>
   );
 }

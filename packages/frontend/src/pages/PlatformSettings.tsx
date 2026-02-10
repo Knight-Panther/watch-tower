@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import Spinner from "../components/Spinner";
+import { useServerEventsContext } from "../contexts/ServerEventsContext";
 import {
   listSocialAccounts,
   getSocialAccountsUsage,
@@ -136,20 +137,23 @@ export default function PlatformSettings() {
     loadHealth();
   }, []);
 
-  // Refresh usage periodically
-  useEffect(() => {
-    const loadUsage = async () => {
-      try {
-        const { usage } = await getSocialAccountsUsage();
-        const byPlatform = Object.fromEntries(usage.map((u) => [u.platform, u]));
-        setPlatformUsage(byPlatform);
-      } catch {
-        // Silent fail
-      }
-    };
-    const interval = setInterval(loadUsage, 30000);
-    return () => clearInterval(interval);
+  // SSE: refresh usage when a post goes out (usage counters change)
+  const { subscribe } = useServerEventsContext();
+
+  const loadUsage = useCallback(async () => {
+    try {
+      const { usage } = await getSocialAccountsUsage();
+      const byPlatform = Object.fromEntries(usage.map((u) => [u.platform, u]));
+      setPlatformUsage(byPlatform);
+    } catch {
+      // Silent fail
+    }
   }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribe(["article:posted"], loadUsage);
+    return unsubscribe;
+  }, [subscribe, loadUsage]);
 
   const handleTelegramToggle = useCallback(async () => {
     setIsAutoPostTelegramLoading(true);

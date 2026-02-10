@@ -131,6 +131,7 @@ export const useServerEvents = (options: UseServerEventsOptions = {}): UseServer
       "article:scored",
       "article:approved",
       "article:rejected",
+      "article:posted",
       "source:fetched",
       "stats:updated",
     ];

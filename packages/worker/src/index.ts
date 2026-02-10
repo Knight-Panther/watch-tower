@@ -221,6 +221,7 @@ const main = async () => {
     semanticDedupQueue: env.OPENAI_API_KEY ? semanticDedupQueue : undefined,
     llmQueue: primaryApiKey ? llmQueue : undefined,
     rateLimiter,
+    eventPublisher,
   });
 
   // Semantic dedup worker (only if embeddings enabled)

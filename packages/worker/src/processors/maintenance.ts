@@ -35,6 +35,7 @@ import {
 import type { Queue } from "bullmq";
 import { ensureRepeatableJobs } from "../job-registry.js";
 import type { RateLimiter } from "../utils/rate-limiter.js";
+import type { EventPublisher } from "../events.js";
 import {
   hashToken,
   upsertPlatformHealth,
@@ -55,6 +56,7 @@ type MaintenanceDeps = {
   semanticDedupQueue?: Queue;
   llmQueue?: Queue;
   rateLimiter: RateLimiter;
+  eventPublisher?: EventPublisher;
 };
 
 const getConfigNumber = async (db: Database, key: string, fallback: number) => {
@@ -381,6 +383,7 @@ const processScheduledPosts = async (
   db: Database,
   providers: PlatformProviders,
   rateLimiter: RateLimiter,
+  eventPublisher?: EventPublisher,
 ) => {
   // Layer 8: Kill switch check - stop all posting if emergency_stop is true
   const [emergencyStop] = await db
@@ -581,6 +584,16 @@ const processScheduledPosts = async (
       // Update platform health lastPostAt (successful post proves platform works)
       await updateLastPostAt(db, delivery.platform);
 
+      // Publish SSE event for real-time UI updates
+      await eventPublisher?.publish({
+        type: "article:posted",
+        data: {
+          id: delivery.articleId,
+          platform: delivery.platform,
+          postId: postResult.postId,
+        },
+      });
+
       logger.info(
         {
           deliveryId: delivery.id,
@@ -613,6 +626,7 @@ export const createMaintenanceWorker = ({
   semanticDedupQueue,
   llmQueue,
   rateLimiter,
+  eventPublisher,
 }: MaintenanceDeps) => {
   // Create providers at startup (only for configured platforms)
   const providers: PlatformProviders = {
@@ -722,7 +736,7 @@ export const createMaintenanceWorker = ({
         await rescueOrphanedApprovedArticles(db, distributionQueue);
         await runScheduledIngests(db, ingestQueue);
         // Process any scheduled posts that are due
-        await processScheduledPosts(db, providers, rateLimiter);
+        await processScheduledPosts(db, providers, rateLimiter, eventPublisher);
         return;
       }
 
