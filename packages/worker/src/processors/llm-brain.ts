@@ -355,6 +355,8 @@ export const createLLMBrainWorker = ({
                 r.usage!.outputTokens,
               ),
               latencyMs: r.latencyMs,
+              status: r.error ? ("error" as const) : ("success" as const),
+              errorMessage: r.error ?? null,
             };
           });
 

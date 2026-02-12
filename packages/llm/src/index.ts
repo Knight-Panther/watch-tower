@@ -27,6 +27,10 @@ export {
   microdollarsToNumber,
 } from "./pricing.js";
 
+// Health checks
+export type { ProviderHealthResult, HealthCheckConfig } from "./health.js";
+export { checkAllProviders } from "./health.js";
+
 // Balance/credits API
 export type { ProviderBalance, BalanceFetcher, BalanceRegistryEntry } from "./balance/index.js";
 export {

@@ -22,7 +22,9 @@ import {
 } from "@watch-tower/shared";
 import { createDb } from "@watch-tower/db";
 import { createEmbeddingProvider } from "@watch-tower/embeddings";
-import { createLLMProviderWithFallback } from "@watch-tower/llm";
+import { createLLMProviderWithFallback, checkAllProviders } from "@watch-tower/llm";
+import { appConfig } from "@watch-tower/db";
+import { eq, inArray } from "drizzle-orm";
 import { createIngestWorker } from "./processors/feed.js";
 import { createMaintenanceWorker } from "./processors/maintenance.js";
 import { createSemanticDedupWorker } from "./processors/semantic-dedup.js";
@@ -302,6 +304,46 @@ const main = async () => {
         distributionQueue: hasAnyPlatform ? distributionQueue : undefined,
       })
     : null;
+
+  // ─── Startup Provider Health Check ──────────────────────────────────────────
+  try {
+    const tConfigRows = await db
+      .select({ key: appConfig.key, value: appConfig.value })
+      .from(appConfig)
+      .where(inArray(appConfig.key, ["translation_provider", "translation_model"]));
+    const tConfigMap = new Map(tConfigRows.map((r) => [r.key, r.value]));
+
+    const healthResults = await checkAllProviders({
+      llmProvider: env.LLM_PROVIDER,
+      llmFallbackProvider: env.LLM_FALLBACK_PROVIDER,
+      anthropicApiKey: env.ANTHROPIC_API_KEY,
+      openaiApiKey: env.OPENAI_API_KEY,
+      deepseekApiKey: env.DEEPSEEK_API_KEY,
+      googleAiApiKey: env.GOOGLE_AI_API_KEY,
+      embeddingModel: env.EMBEDDING_MODEL,
+      translationProvider: (tConfigMap.get("translation_provider") as string) ?? undefined,
+      translationModel: (tConfigMap.get("translation_model") as string) ?? undefined,
+    });
+
+    for (const r of healthResults) {
+      if (r.healthy) {
+        logger.info(`[startup] ${r.displayName} (${r.role}): OK (${r.latencyMs}ms)`);
+      } else {
+        logger.warn(`[startup] ${r.displayName} (${r.role}): FAILED — ${r.error}`);
+      }
+    }
+
+    const unhealthy = healthResults.filter((r) => !r.healthy);
+    if (unhealthy.length === 0) {
+      logger.info(`[startup] all ${healthResults.length} API providers healthy`);
+    } else {
+      logger.warn(
+        `[startup] ${unhealthy.length}/${healthResults.length} API providers unhealthy`,
+      );
+    }
+  } catch (err) {
+    logger.error("[startup] provider health check failed", err);
+  }
 
   // Worker error handlers
   ingestWorker.on("failed", (job, err) => {

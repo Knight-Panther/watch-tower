@@ -166,6 +166,8 @@ export const createTranslationWorker = ({ connection, db, distributionQueue }: T
         totalTokens: number;
         costMicrodollars: number;
         latencyMs: number;
+        status: string;
+        errorMessage: string | null;
       }[] = [];
 
       for (const article of claimed) {
@@ -257,6 +259,8 @@ export const createTranslationWorker = ({ connection, db, distributionQueue }: T
                 result!.usage.outputTokens,
               ),
               latencyMs: result!.latencyMs,
+              status: "success" as const,
+              errorMessage: null as string | null,
             });
           }
 
@@ -311,6 +315,8 @@ export const createTranslationWorker = ({ connection, db, distributionQueue }: T
               totalTokens: t.totalTokens,
               costMicrodollars: t.costMicrodollars,
               latencyMs: t.latencyMs,
+              status: t.status,
+              errorMessage: t.errorMessage,
             })),
           );
         } catch (err) {

@@ -119,6 +119,28 @@ export const createSemanticDedupWorker = ({
           WHERE id IN (${sql.join(failedIds.map((id) => sql`${id}::uuid`), sql`, `)})
         `);
         logger.error("[semantic-dedup] embedding generation failed, reset articles", err);
+
+        // Log failure telemetry
+        try {
+          const chars = texts.reduce((sum, t) => sum + t.length, 0);
+          await db.insert(llmTelemetry).values({
+            articleId: null,
+            operation: "embed_batch",
+            provider: embeddingProvider.name,
+            model: embeddingProvider.model,
+            isFallback: false,
+            inputTokens: Math.ceil(chars / 4),
+            outputTokens: 0,
+            totalTokens: Math.ceil(chars / 4),
+            costMicrodollars: 0,
+            latencyMs: Date.now() - embedStartTime,
+            status: "error",
+            errorMessage: err instanceof Error ? err.message : "Unknown error",
+          });
+        } catch {
+          // telemetry failure should not mask the original error
+        }
+
         throw err; // Will retry via BullMQ
       }
       const embedLatencyMs = Date.now() - embedStartTime;
@@ -145,6 +167,7 @@ export const createSemanticDedupWorker = ({
             estimatedTokens,
           ),
           latencyMs: embedLatencyMs,
+          status: "success",
         });
       } catch (telemetryErr) {
         logger.error("[semantic-dedup] failed to log telemetry, continuing pipeline", telemetryErr);

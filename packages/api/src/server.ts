@@ -29,6 +29,7 @@ import { registerResetRoutes } from "./routes/reset.js";
 import { registerSocialAccountRoutes } from "./routes/social-accounts.js";
 import { registerCreditsRoutes } from "./routes/credits.js";
 import { registerSiteRulesRoutes } from "./routes/site-rules.js";
+import { registerProviderHealthRoutes } from "./routes/provider-health.js";
 import { createRequireApiKey } from "./utils/auth.js";
 
 dotenv.config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) });
@@ -157,6 +158,7 @@ export const buildApp = async () => {
   registerSocialAccountRoutes(app, deps);
   registerCreditsRoutes(app, deps);
   registerSiteRulesRoutes(app, deps);
+  registerProviderHealthRoutes(app, deps);
 
   const closeRedis = () => redis.quit();
   return { app, port: env.PORT, closeDb, closeRedis, ingestQueue, maintenanceQueue };

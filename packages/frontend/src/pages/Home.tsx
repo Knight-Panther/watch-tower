@@ -1,6 +1,8 @@
-import { useMemo } from "react";
-import type { Sector, Source, StatsSource } from "../api";
+import { useMemo, useState } from "react";
+import type { Sector, Source, StatsSource, ProviderHealthResult } from "../api";
+import { checkProviderHealth } from "../api";
 import Spinner from "../components/Spinner";
+import ApiHealthModal from "../components/ApiHealthModal";
 
 type HomeProps = {
   sources: Source[];
@@ -46,6 +48,28 @@ type HomeProps = {
 };
 
 export default function Home(props: HomeProps) {
+  const [healthModalOpen, setHealthModalOpen] = useState(false);
+  const [healthLoading, setHealthLoading] = useState(false);
+  const [healthResults, setHealthResults] = useState<ProviderHealthResult[] | null>(null);
+  const [healthCheckedAt, setHealthCheckedAt] = useState<string | null>(null);
+  const [healthError, setHealthError] = useState<string | null>(null);
+
+  const onCheckApiHealth = async () => {
+    setHealthModalOpen(true);
+    setHealthLoading(true);
+    setHealthError(null);
+    setHealthResults(null);
+    try {
+      const data = await checkProviderHealth();
+      setHealthResults(data.results);
+      setHealthCheckedAt(data.checked_at);
+    } catch (err) {
+      setHealthError(err instanceof Error ? err.message : "Health check failed");
+    } finally {
+      setHealthLoading(false);
+    }
+  };
+
   const filteredSources = useMemo(() => {
     const maxAgeFilter = props.filters.maxAgeDays.trim() ? Number(props.filters.maxAgeDays) : null;
     const maxAgeValid =
@@ -98,6 +122,12 @@ export default function Home(props: HomeProps) {
             className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:border-slate-500"
           >
             Refresh
+          </button>
+          <button
+            onClick={onCheckApiHealth}
+            className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:border-slate-500"
+          >
+            Check API Health
           </button>
         </div>
       </section>
@@ -414,6 +444,16 @@ export default function Home(props: HomeProps) {
           ) : null}
         </div>
       </section>
+
+      {healthModalOpen && (
+        <ApiHealthModal
+          results={healthResults}
+          checkedAt={healthCheckedAt}
+          loading={healthLoading}
+          error={healthError}
+          onClose={() => setHealthModalOpen(false)}
+        />
+      )}
     </>
   );
 }

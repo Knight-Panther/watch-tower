@@ -209,6 +209,11 @@ export const llmTelemetry = pgTable(
 
     // Timing
     latencyMs: integer("latency_ms"),
+
+    // Outcome
+    status: text("status").notNull().default("success"), // 'success' | 'error'
+    errorMessage: text("error_message"),
+
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
