@@ -69,6 +69,38 @@ export const createRateLimiter = (redis: Redis) => {
 
       return { current };
     },
+
+    /**
+     * Check rate limit without recording an attempt.
+     * Use for pre-flight checks before committing to a state change.
+     */
+    async peek(platform: string, limitPerHour: number): Promise<RateLimitResult> {
+      const key = `rate_limit:${platform}`;
+      const now = Date.now();
+      const windowStart = now - 60 * 60 * 1000;
+
+      await redis.zremrangebyscore(key, 0, windowStart);
+      const current = await redis.zcard(key);
+
+      if (current >= limitPerHour) {
+        const oldest = await redis.zrange(key, 0, 0, "WITHSCORES");
+        const oldestTime = oldest.length >= 2 ? parseInt(oldest[1]) : now;
+        const retryAfterMs = oldestTime + 60 * 60 * 1000 - now;
+
+        return {
+          allowed: false,
+          current,
+          limit: limitPerHour,
+          retryAfterMs: Math.max(0, retryAfterMs),
+        };
+      }
+
+      return {
+        allowed: true,
+        current,
+        limit: limitPerHour,
+      };
+    },
   };
 };
 

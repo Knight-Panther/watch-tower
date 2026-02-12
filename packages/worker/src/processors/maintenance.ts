@@ -233,12 +233,32 @@ const resetZombieTranslations = async (db: Database) => {
 };
 
 /**
- * Reset all zombie articles (embedding + scoring + translation stages)
+ * Reset articles stuck in 'posting' stage (from crashed distribution workers).
+ * Uses 5 min threshold. Rolls back to 'approved' so they can be re-queued.
+ */
+const resetZombiePostingArticles = async (db: Database) => {
+  const staleThreshold = new Date(Date.now() - 5 * 60 * 1000);
+  const resetResult = await db.execute(sql`
+    UPDATE articles
+    SET pipeline_stage = 'approved'
+    WHERE pipeline_stage = 'posting'
+      AND created_at < ${staleThreshold}
+    RETURNING id
+  `);
+  if (resetResult.rows.length > 0) {
+    logger.warn(`[maintenance] reset ${resetResult.rows.length} zombie posting articles back to approved`);
+  }
+  return resetResult.rows.length;
+};
+
+/**
+ * Reset all zombie articles (embedding + scoring + translation + posting stages)
  */
 const resetZombieArticles = async (db: Database) => {
   await resetZombieEmbeddingArticles(db);
   await resetZombieScoringArticles(db);
   await resetZombieTranslations(db);
+  await resetZombiePostingArticles(db);
 };
 
 /**
@@ -279,11 +299,12 @@ const rescueOrphanedApprovedArticles = async (db: Database, distributionQueue?: 
     .where(eq(appConfig.key, "posting_language"));
   const postingLanguage = (langRow?.value as string) ?? "en";
 
-  // Find approved articles that haven't progressed in 5 minutes
+  // Find approved articles that haven't progressed in 10 minutes
   // These are likely orphaned due to Redis queue failure
   // In Georgian mode, only rescue articles that have been translated
-  // Skip articles that already have scheduled/posting deliveries (they're rate-limited, not orphaned)
-  const staleThreshold = new Date(Date.now() - 5 * 60 * 1000);
+  // Skip articles that have ANY recent delivery (scheduled, posting, posted, failed)
+  // — only truly orphaned articles have ZERO deliveries
+  const staleThreshold = new Date(Date.now() - 10 * 60 * 1000);
   const orphanedResult =
     postingLanguage === "ka"
       ? await db.execute(sql`
@@ -294,7 +315,7 @@ const rescueOrphanedApprovedArticles = async (db: Database, distributionQueue?: 
             AND title_ka IS NOT NULL
             AND id NOT IN (
               SELECT article_id FROM post_deliveries
-              WHERE status IN ('scheduled', 'posting')
+              WHERE status NOT IN ('cancelled')
             )
           LIMIT 20
         `)
@@ -305,7 +326,7 @@ const rescueOrphanedApprovedArticles = async (db: Database, distributionQueue?: 
             AND approved_at < ${staleThreshold}
             AND id NOT IN (
               SELECT article_id FROM post_deliveries
-              WHERE status IN ('scheduled', 'posting')
+              WHERE status NOT IN ('cancelled')
             )
           LIMIT 20
         `);

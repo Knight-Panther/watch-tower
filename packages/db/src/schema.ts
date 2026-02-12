@@ -160,6 +160,11 @@ export const postDeliveries = pgTable(
     index("idx_post_deliveries_due").on(table.scheduledAt),
     index("idx_post_deliveries_article").on(table.articleId),
     index("idx_post_deliveries_status").on(table.status),
+    // Prevent duplicate active deliveries per article+platform
+    // Only one 'scheduled' or 'posting' delivery can exist at a time
+    uniqueIndex("idx_post_deliveries_active_unique")
+      .on(table.articleId, table.platform)
+      .where(sql`status IN ('scheduled', 'posting')`),
   ],
 );
 

@@ -11,6 +11,7 @@ import {
   rescheduleDelivery,
   cancelDelivery,
   getScheduledStats,
+  getTranslationConfig,
   type ScheduledDelivery,
   type ScheduledFilters,
   type ScheduledResponse,
@@ -65,6 +66,7 @@ export default function Scheduled() {
   const [stats, setStats] = useState<ScheduledStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [postingLanguage, setPostingLanguage] = useState<"en" | "ka">("en");
 
   // Filter state with localStorage persistence (no URL sync to avoid tab conflicts)
   const [filters, setFilter] = useLocalStorageFilters<ScheduledFilters>("scheduled-filters", {
@@ -115,6 +117,12 @@ export default function Scheduled() {
   useEffect(() => {
     loadStats();
   }, [loadStats]);
+
+  useEffect(() => {
+    getTranslationConfig()
+      .then((config) => setPostingLanguage(config.posting_language))
+      .catch(() => {});
+  }, []);
 
   // SSE: auto-refresh when a delivery gets posted
   const { subscribe } = useServerEventsContext();
@@ -454,13 +462,27 @@ export default function Scheduled() {
                               href={delivery.article_url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-slate-200 hover:text-white hover:underline font-medium line-clamp-1 text-xs"
+                              className={`hover:text-white hover:underline font-medium line-clamp-1 text-xs ${
+                                postingLanguage === "ka" && !delivery.article_title_ka
+                                  ? "text-slate-200 italic opacity-60"
+                                  : "text-slate-200"
+                              }`}
                             >
-                              {delivery.article_title}
+                              {postingLanguage === "ka" && delivery.article_title_ka
+                                ? delivery.article_title_ka
+                                : delivery.article_title}
                             </a>
-                            {delivery.article_summary && (
-                              <p className="text-xs text-slate-400 mt-0.5 line-clamp-1">
-                                {delivery.article_summary}
+                            {(postingLanguage === "ka"
+                              ? delivery.article_summary_ka || delivery.article_summary
+                              : delivery.article_summary) && (
+                              <p className={`text-xs mt-0.5 line-clamp-1 ${
+                                postingLanguage === "ka" && !delivery.article_summary_ka
+                                  ? "text-slate-400 italic opacity-60"
+                                  : "text-slate-400"
+                              }`}>
+                                {postingLanguage === "ka" && delivery.article_summary_ka
+                                  ? delivery.article_summary_ka
+                                  : delivery.article_summary}
                               </p>
                             )}
                           </td>
@@ -556,7 +578,11 @@ export default function Scheduled() {
 
             <div className="mt-4">
               <p className="text-sm text-slate-400 mb-2">Article</p>
-              <p className="text-slate-200 line-clamp-2">{rescheduleItem.article_title}</p>
+              <p className="text-slate-200 line-clamp-2">
+                {postingLanguage === "ka" && rescheduleItem.article_title_ka
+                  ? rescheduleItem.article_title_ka
+                  : rescheduleItem.article_title}
+              </p>
             </div>
 
             <div className="mt-4 grid grid-cols-2 gap-4">

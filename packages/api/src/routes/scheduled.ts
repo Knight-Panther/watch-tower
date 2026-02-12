@@ -93,6 +93,9 @@ export const registerScheduledRoutes = (app: FastifyInstance, deps: ApiDeps) => 
           article_url: articles.url,
           article_summary: articles.llmSummary,
           article_score: articles.importanceScore,
+          // Georgian translation fields
+          article_title_ka: articles.titleKa,
+          article_summary_ka: articles.llmSummaryKa,
           // Source/sector
           source_name: rssSources.name,
           sector_id: articles.sectorId,

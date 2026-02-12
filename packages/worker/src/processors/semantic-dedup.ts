@@ -93,7 +93,7 @@ export const createSemanticDedupWorker = ({
         await db.execute(sql`
           UPDATE articles
           SET pipeline_stage = 'embedded'
-          WHERE id = ANY(${skippedIds}::uuid[])
+          WHERE id IN (${sql.join(skippedIds.map((id) => sql`${id}::uuid`), sql`, `)})
         `);
       }
 
@@ -116,7 +116,7 @@ export const createSemanticDedupWorker = ({
         await db.execute(sql`
           UPDATE articles
           SET pipeline_stage = 'ingested'
-          WHERE id = ANY(${failedIds}::uuid[])
+          WHERE id IN (${sql.join(failedIds.map((id) => sql`${id}::uuid`), sql`, `)})
         `);
         logger.error("[semantic-dedup] embedding generation failed, reset articles", err);
         throw err; // Will retry via BullMQ

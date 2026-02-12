@@ -120,6 +120,72 @@ export const createDistributionWorker = ({
         const { articleId } = job.data as { articleId: string };
         logger.info({ articleId }, "[distribution] processing immediate post");
 
+        // ─── Pre-flight: skip claim if ALL platforms are blocked ──────────────
+        // Prevents the noisy approved → posting → approved flip when rate-limited.
+        // Only peeks at rate limits (no recording) — the main loop still does checkAndRecord.
+        const allPlatforms = [
+          { name: "telegram", provider: telegram },
+          { name: "facebook", provider: facebook },
+          { name: "linkedin", provider: linkedin },
+        ].filter((p) => p.provider !== null);
+
+        let anyPlatformReady = false;
+        const blockedPlatforms: { name: string; retryAt: Date; msg: string }[] = [];
+
+        for (const { name } of allPlatforms) {
+          const enabled = await isPlatformEnabled(db, name);
+          if (!enabled) continue;
+
+          const isHealthy = await isPlatformHealthy(db, name);
+          if (!isHealthy) {
+            blockedPlatforms.push({
+              name,
+              retryAt: new Date(Date.now() + 60 * 60 * 1000),
+              msg: "Platform unhealthy, auto-scheduled retry in 1 hour",
+            });
+            continue;
+          }
+
+          const limit = await getRateLimitForPlatform(db, name);
+          const peekResult = await rateLimiter.peek(name, limit);
+          if (!peekResult.allowed) {
+            const retryAfterMs = peekResult.retryAfterMs ?? 60_000;
+            blockedPlatforms.push({
+              name,
+              retryAt: new Date(Date.now() + retryAfterMs),
+              msg: `Rate limited (${peekResult.current}/${peekResult.limit}/hr), auto-scheduled retry`,
+            });
+            continue;
+          }
+
+          anyPlatformReady = true;
+          break; // At least one platform has capacity, proceed to claim
+        }
+
+        if (!anyPlatformReady) {
+          if (blockedPlatforms.length > 0) {
+            // All enabled platforms are blocked — create scheduled deliveries WITHOUT claiming
+            for (const { name, retryAt, msg } of blockedPlatforms) {
+              await db.execute(sql`
+                INSERT INTO post_deliveries (article_id, platform, scheduled_at, status, error_message)
+                VALUES (${articleId}::uuid, ${name}, ${retryAt}, 'scheduled', ${msg})
+                ON CONFLICT (article_id, platform) WHERE status IN ('scheduled', 'posting')
+                DO UPDATE SET
+                  scheduled_at = EXCLUDED.scheduled_at,
+                  error_message = EXCLUDED.error_message
+              `);
+            }
+            logger.info(
+              { articleId, platforms: blockedPlatforms.map((p) => p.name) },
+              "[distribution] all platforms blocked, article stays approved",
+            );
+            return { skipped: true, reason: "all_platforms_blocked" };
+          }
+          // No platforms enabled/configured
+          logger.info({ articleId }, "[distribution] no platforms enabled, skipping");
+          return { skipped: true, reason: "no_platforms_enabled" };
+        }
+
         // ATOMIC CLAIM: Update approved -> posting and fetch in one operation
         // This prevents race conditions where multiple workers could post the same article
         // If another worker already claimed it (stage != 'approved'), we get 0 rows
@@ -214,148 +280,153 @@ export const createDistributionWorker = ({
         }[] = [];
         let anySuccess = false;
 
-        for (const { name, provider } of platforms) {
-          // Check if platform is enabled in app_config
-          const enabled = await isPlatformEnabled(db, name);
-          if (!enabled) {
-            logger.debug({ articleId, platform: name }, "[distribution] platform disabled, skipping");
-            continue;
-          }
+        try {
+          for (const { name, provider } of platforms) {
+            // Check if platform is enabled in app_config
+            const enabled = await isPlatformEnabled(db, name);
+            if (!enabled) {
+              logger.debug({ articleId, platform: name }, "[distribution] platform disabled, skipping");
+              continue;
+            }
 
-          // Emergency brake: check platform health before posting
-          const isHealthy = await isPlatformHealthy(db, name);
-          if (!isHealthy) {
-            const retryAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-            logger.warn(
-              { articleId, platform: name, retryAt },
-              "[distribution] platform unhealthy, scheduling retry",
+            // Emergency brake: check platform health before posting
+            const isHealthy = await isPlatformHealthy(db, name);
+            if (!isHealthy) {
+              const retryAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+              logger.warn(
+                { articleId, platform: name, retryAt },
+                "[distribution] platform unhealthy, scheduling retry",
+              );
+
+              // Upsert: insert or update existing scheduled/posting delivery
+              // Uses partial unique index idx_post_deliveries_active_unique
+              await db.execute(sql`
+                INSERT INTO post_deliveries (article_id, platform, scheduled_at, status, error_message)
+                VALUES (${articleId}::uuid, ${name}, ${retryAt}, 'scheduled', 'Platform unhealthy, auto-scheduled retry in 1 hour')
+                ON CONFLICT (article_id, platform) WHERE status IN ('scheduled', 'posting')
+                DO UPDATE SET
+                  scheduled_at = EXCLUDED.scheduled_at,
+                  error_message = EXCLUDED.error_message
+              `);
+
+              results.push({
+                platform: name,
+                success: false,
+                error: "Platform unhealthy — scheduled retry in 1 hour",
+                rateLimited: true,
+              });
+              continue;
+            }
+
+            // Check rate limit before posting
+            const limit = await getRateLimitForPlatform(db, name);
+            const rateCheck = await rateLimiter.checkAndRecord(name, limit);
+            if (!rateCheck.allowed) {
+              const retryAfterMs = rateCheck.retryAfterMs ?? 60_000;
+              const retryAt = new Date(Date.now() + retryAfterMs);
+
+              logger.warn(
+                { articleId, platform: name, current: rateCheck.current, limit: rateCheck.limit, retryAt },
+                "[distribution] rate limit reached, scheduling retry via post_deliveries",
+              );
+
+              // Upsert: insert or update existing scheduled/posting delivery
+              // Uses partial unique index idx_post_deliveries_active_unique
+              const rateLimitMsg = `Rate limited (${rateCheck.current}/${rateCheck.limit}/hr), auto-scheduled retry`;
+              await db.execute(sql`
+                INSERT INTO post_deliveries (article_id, platform, scheduled_at, status, error_message)
+                VALUES (${articleId}::uuid, ${name}, ${retryAt}, 'scheduled', ${rateLimitMsg})
+                ON CONFLICT (article_id, platform) WHERE status IN ('scheduled', 'posting')
+                DO UPDATE SET
+                  scheduled_at = EXCLUDED.scheduled_at,
+                  error_message = EXCLUDED.error_message
+              `);
+
+              results.push({
+                platform: name,
+                success: false,
+                error: `Rate limited — scheduled retry at ${retryAt.toISOString()}`,
+                rateLimited: true,
+                retryAfterMs,
+              });
+              continue;
+            }
+
+            // Fetch template for this platform
+            const template = await getTemplateForPlatform(db, name);
+
+            // Format post using provider (uses resolved language content)
+            const text = provider!.formatPost(
+              {
+                title: postTitle,
+                summary: postSummary,
+                url: article.url,
+                sector: article.sectorName || "News",
+              },
+              template,
             );
 
-            // Atomic upsert: update existing scheduled delivery or create new one
-            // Uses single CTE to prevent duplicate rows from race conditions
-            await db.execute(sql`
-              WITH existing AS (
-                UPDATE post_deliveries
-                SET scheduled_at = ${retryAt},
-                    error_message = 'Platform unhealthy, auto-scheduled retry in 1 hour'
-                WHERE id = (
-                  SELECT id FROM post_deliveries
-                  WHERE article_id = ${articleId}::uuid AND platform = ${name}
-                    AND status IN ('scheduled', 'posting')
-                  LIMIT 1
-                )
-                RETURNING id
-              )
-              INSERT INTO post_deliveries (article_id, platform, scheduled_at, status, error_message)
-              SELECT ${articleId}::uuid, ${name}, ${retryAt}, 'scheduled', 'Platform unhealthy, auto-scheduled retry in 1 hour'
-              WHERE NOT EXISTS (SELECT 1 FROM existing)
-            `);
-
+            // Post to platform
+            const postResult = await provider!.post({ text });
             results.push({
               platform: name,
-              success: false,
-              error: "Platform unhealthy — scheduled retry in 1 hour",
-              rateLimited: true,
+              success: postResult.success,
+              postId: postResult.postId,
+              error: postResult.error,
+              rateLimited: false,
             });
-            continue;
-          }
 
-          // Check rate limit before posting
-          const limit = await getRateLimitForPlatform(db, name);
-          const rateCheck = await rateLimiter.checkAndRecord(name, limit);
-          if (!rateCheck.allowed) {
-            const retryAfterMs = rateCheck.retryAfterMs ?? 60_000;
-            const retryAt = new Date(Date.now() + retryAfterMs);
-
-            logger.warn(
-              { articleId, platform: name, current: rateCheck.current, limit: rateCheck.limit, retryAt },
-              "[distribution] rate limit reached, scheduling retry via post_deliveries",
-            );
-
-            // Atomic upsert: update existing scheduled delivery or create new one
-            // Uses single CTE to prevent duplicate rows from race conditions
-            const rateLimitMsg = `Rate limited (${rateCheck.current}/${rateCheck.limit}/hr), auto-scheduled retry`;
+            // Cancel any existing scheduled/posting delivery for this article+platform
+            // Prevents orphaned rows when a retry succeeds after an earlier rate-limited attempt
             await db.execute(sql`
-              WITH existing AS (
-                UPDATE post_deliveries
-                SET scheduled_at = ${retryAt},
-                    error_message = ${rateLimitMsg}
-                WHERE id = (
-                  SELECT id FROM post_deliveries
-                  WHERE article_id = ${articleId}::uuid AND platform = ${name}
-                    AND status IN ('scheduled', 'posting')
-                  LIMIT 1
-                )
-                RETURNING id
-              )
-              INSERT INTO post_deliveries (article_id, platform, scheduled_at, status, error_message)
-              SELECT ${articleId}::uuid, ${name}, ${retryAt}, 'scheduled', ${rateLimitMsg}
-              WHERE NOT EXISTS (SELECT 1 FROM existing)
+              UPDATE post_deliveries
+              SET status = 'cancelled'
+              WHERE article_id = ${articleId}::uuid
+                AND platform = ${name}
+                AND status IN ('scheduled', 'posting')
             `);
 
-            results.push({
+            // Create post_deliveries record for audit trail
+            await db.insert(postDeliveries).values({
+              articleId,
               platform: name,
-              success: false,
-              error: `Rate limited — scheduled retry at ${retryAt.toISOString()}`,
-              rateLimited: true,
-              retryAfterMs,
+              scheduledAt: null, // immediate
+              status: postResult.success ? "posted" : "failed",
+              platformPostId: postResult.postId ?? null,
+              errorMessage: postResult.error ?? null,
+              sentAt: postResult.success ? new Date() : null,
             });
-            continue;
+
+            if (postResult.success) {
+              anySuccess = true;
+              // Update platform health lastPostAt (successful post proves platform works)
+              await updateLastPostAt(db, name);
+              await eventPublisher.publish({
+                type: "article:posted",
+                data: { id: articleId, platform: name, postId: postResult.postId },
+              });
+              logger.info(
+                { articleId, platform: name, postId: postResult.postId },
+                "[distribution] posted successfully",
+              );
+            } else {
+              logger.error(
+                { articleId, platform: name, error: postResult.error },
+                "[distribution] post failed",
+              );
+            }
           }
-
-          // Fetch template for this platform
-          const template = await getTemplateForPlatform(db, name);
-
-          // Format post using provider (uses resolved language content)
-          const text = provider!.formatPost(
-            {
-              title: postTitle,
-              summary: postSummary,
-              url: article.url,
-              sector: article.sectorName || "News",
-            },
-            template,
+        } catch (loopError) {
+          // If the platform loop throws, ensure article is rolled back to approved
+          logger.error(
+            { articleId, error: String(loopError) },
+            "[distribution] unexpected error in platform loop, rolling back to approved",
           );
-
-          // Post to platform
-          const postResult = await provider!.post({ text });
-          results.push({
-            platform: name,
-            success: postResult.success,
-            postId: postResult.postId,
-            error: postResult.error,
-            rateLimited: false,
-          });
-
-          // Create post_deliveries record for audit trail
-          await db.insert(postDeliveries).values({
-            articleId,
-            platform: name,
-            scheduledAt: null, // immediate
-            status: postResult.success ? "posted" : "failed",
-            platformPostId: postResult.postId ?? null,
-            errorMessage: postResult.error ?? null,
-            sentAt: postResult.success ? new Date() : null,
-          });
-
-          if (postResult.success) {
-            anySuccess = true;
-            // Update platform health lastPostAt (successful post proves platform works)
-            await updateLastPostAt(db, name);
-            await eventPublisher.publish({
-              type: "article:posted",
-              data: { id: articleId, platform: name, postId: postResult.postId },
-            });
-            logger.info(
-              { articleId, platform: name, postId: postResult.postId },
-              "[distribution] posted successfully",
-            );
-          } else {
-            logger.error(
-              { articleId, platform: name, error: postResult.error },
-              "[distribution] post failed",
-            );
-          }
+          await db.execute(sql`
+            UPDATE articles SET pipeline_stage = 'approved'
+            WHERE id = ${articleId}::uuid AND pipeline_stage = 'posting'
+          `);
+          throw loopError; // Re-throw so BullMQ marks job as failed
         }
 
         // Update article stage based on results
@@ -388,8 +459,15 @@ export const createDistributionWorker = ({
               posting_attempts = posting_attempts + 1
             WHERE id = ${articleId}::uuid
           `);
+        } else {
+          // No platforms were enabled/configured — roll back to approved
+          // (zombie detector will also catch this as a safety net)
+          await db.execute(sql`
+            UPDATE articles SET pipeline_stage = 'approved'
+            WHERE id = ${articleId}::uuid AND pipeline_stage = 'posting'
+          `);
+          logger.info({ articleId }, "[distribution] no platforms processed, rolled back to approved");
         }
-        // If no platforms were enabled, leave as 'posting' (will be picked up when enabled)
 
         return { success: anySuccess, results };
       }

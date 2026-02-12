@@ -670,6 +670,8 @@ export type ScheduledDelivery = {
   article_url: string;
   article_summary: string | null;
   article_score: number | null;
+  article_title_ka: string | null;
+  article_summary_ka: string | null;
   source_name: string | null;
   sector_id: string | null;
   sector_name: string | null;
