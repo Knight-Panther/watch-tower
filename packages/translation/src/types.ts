@@ -8,4 +8,5 @@ export type TranslationResult = {
   };
   latencyMs: number;
   error?: string;
+  isTransient?: boolean; // True for 429, 500, 503, network errors
 };

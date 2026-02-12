@@ -1,10 +1,11 @@
 import { Worker, Queue } from "bullmq";
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import {
   QUEUE_TRANSLATION,
   JOB_TRANSLATION_BATCH,
   JOB_DISTRIBUTION_IMMEDIATE,
+  AUTO_POST_STAGGER_MS,
   logger,
 } from "@watch-tower/shared";
 import type { Database } from "@watch-tower/db";
@@ -74,12 +75,17 @@ function getTranslationApiKey(provider: string): string | undefined {
   }
 }
 
+const MAX_TRANSLATION_ATTEMPTS = 5;
+const MAX_IN_WORKER_RETRIES = 2;
+const RETRY_BASE_DELAY_MS = 5_000; // 5s, 10s
+
 type ClaimedArticle = {
   id: string;
   title: string;
   llmSummary: string;
   importanceScore: number;
   pipelineStage: string;
+  translationAttempts: number;
 };
 
 export const createTranslationWorker = ({ connection, db, distributionQueue }: TranslationDeps) => {
@@ -115,7 +121,9 @@ export const createTranslationWorker = ({ connection, db, distributionQueue }: T
 
       const claimResult = await db.execute(sql`
         UPDATE articles
-        SET translation_status = 'translating'
+        SET
+          translation_status = 'translating',
+          translation_attempts = translation_attempts + 1
         WHERE id IN (
           SELECT id FROM articles
           WHERE importance_score = ANY(${`{${scoreList.join(",")}}`}::smallint[])
@@ -124,6 +132,7 @@ export const createTranslationWorker = ({ connection, db, distributionQueue }: T
             AND title_ka IS NULL
             AND scored_at IS NOT NULL
             AND created_at > ${enabledSince}
+            AND translation_attempts < ${MAX_TRANSLATION_ATTEMPTS}
           ORDER BY created_at ASC
           LIMIT 10
           FOR UPDATE SKIP LOCKED
@@ -133,7 +142,8 @@ export const createTranslationWorker = ({ connection, db, distributionQueue }: T
           title,
           llm_summary as "llmSummary",
           importance_score as "importanceScore",
-          pipeline_stage as "pipelineStage"
+          pipeline_stage as "pipelineStage",
+          translation_attempts as "translationAttempts"
       `);
 
       const claimed = claimResult.rows as ClaimedArticle[];
@@ -147,6 +157,7 @@ export const createTranslationWorker = ({ connection, db, distributionQueue }: T
       // 3. Translate each article
       let translated = 0;
       let failed = 0;
+      let autoPostIndex = 0;
       const telemetryRows: {
         articleId: string;
         model: string;
@@ -158,34 +169,74 @@ export const createTranslationWorker = ({ connection, db, distributionQueue }: T
       }[] = [];
 
       for (const article of claimed) {
-        // Call the configured provider
-        const translate = config.provider === "openai" ? translateWithOpenAI : translateWithGemini;
-        const result = await translate(
-          apiKey,
-          config.model,
-          article.title,
-          article.llmSummary,
-          config.instructions || undefined,
-        );
+        // Call the configured provider with in-worker retry for transient errors
+        const translateFn =
+          config.provider === "openai" ? translateWithOpenAI : translateWithGemini;
 
-        if (result.error || !result.titleKa || !result.summaryKa) {
-          // Mark as failed (translation_status only, pipeline_stage untouched)
-          await db.execute(sql`
-            UPDATE articles
-            SET translation_status = 'failed'
-            WHERE id = ${article.id}::uuid
-          `);
-          failed++;
-          logger.warn({ articleId: article.id, error: result.error }, "[translation] failed");
-        } else {
-          // Save translation
+        let result: Awaited<ReturnType<typeof translateFn>> | null = null;
+
+        for (let attempt = 0; attempt <= MAX_IN_WORKER_RETRIES; attempt++) {
+          if (attempt > 0) {
+            const delayMs = RETRY_BASE_DELAY_MS * attempt;
+            logger.info(
+              { articleId: article.id, attempt, delayMs },
+              "[translation] retrying after transient error",
+            );
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+          }
+
+          result = await translateFn(
+            apiKey,
+            config.model,
+            article.title,
+            article.llmSummary,
+            config.instructions || undefined,
+          );
+
+          // Success — break out of retry loop
+          if (!result.error && result.titleKa && result.summaryKa) break;
+
+          // Permanent error — don't retry
+          if (result.error && !result.isTransient) break;
+
+          // Transient error — continue retry loop
+        }
+
+        // result is guaranteed non-null (at least one attempt ran)
+        if (result!.error || !result!.titleKa || !result!.summaryKa) {
+          // Determine if exhausted (hit max attempts across all maintenance resets)
+          const isExhausted = article.translationAttempts >= MAX_TRANSLATION_ATTEMPTS;
+
           await db.execute(sql`
             UPDATE articles
             SET
-              title_ka = ${result.titleKa},
-              llm_summary_ka = ${result.summaryKa},
+              translation_status = ${isExhausted ? "exhausted" : "failed"},
+              translation_error = ${result!.error ?? "Unknown error"}
+            WHERE id = ${article.id}::uuid
+          `);
+          failed++;
+
+          if (isExhausted) {
+            logger.error(
+              { articleId: article.id, attempts: article.translationAttempts },
+              "[translation] max attempts reached, marking exhausted (permanent)",
+            );
+          } else {
+            logger.warn(
+              { articleId: article.id, attempt: article.translationAttempts, error: result!.error },
+              "[translation] failed",
+            );
+          }
+        } else {
+          // Save translation + clear any previous error
+          await db.execute(sql`
+            UPDATE articles
+            SET
+              title_ka = ${result!.titleKa},
+              llm_summary_ka = ${result!.summaryKa},
               translation_model = ${config.model},
               translation_status = 'translated',
+              translation_error = NULL,
               translated_at = NOW()
             WHERE id = ${article.id}::uuid
           `);
@@ -193,19 +244,19 @@ export const createTranslationWorker = ({ connection, db, distributionQueue }: T
           logger.info({ articleId: article.id }, "[translation] completed");
 
           // Collect telemetry
-          if (result.usage) {
+          if (result!.usage) {
             telemetryRows.push({
               articleId: article.id,
               model: config.model,
-              inputTokens: result.usage.inputTokens,
-              outputTokens: result.usage.outputTokens,
-              totalTokens: result.usage.totalTokens,
+              inputTokens: result!.usage.inputTokens,
+              outputTokens: result!.usage.outputTokens,
+              totalTokens: result!.usage.totalTokens,
               costMicrodollars: calculateTranslationCost(
                 config.model,
-                result.usage.inputTokens,
-                result.usage.outputTokens,
+                result!.usage.inputTokens,
+                result!.usage.outputTokens,
               ),
-              latencyMs: result.latencyMs,
+              latencyMs: result!.latencyMs,
             });
           }
 
@@ -228,14 +279,16 @@ export const createTranslationWorker = ({ connection, db, distributionQueue }: T
             );
 
             if (autoPostEnabled) {
+              const delay = autoPostIndex * AUTO_POST_STAGGER_MS;
               await distributionQueue.add(
                 JOB_DISTRIBUTION_IMMEDIATE,
                 { articleId: article.id },
-                { jobId: `dist-ka-${article.id}` },
+                { jobId: `dist-ka-${article.id}`, delay },
               );
+              autoPostIndex++;
               logger.info(
-                { articleId: article.id },
-                "[translation] queued approved article for distribution",
+                { articleId: article.id, delayMs: delay },
+                "[translation] queued approved article for distribution (staggered)",
               );
             }
           }

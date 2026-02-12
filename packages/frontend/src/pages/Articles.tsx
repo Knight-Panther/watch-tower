@@ -25,6 +25,7 @@ const PIPELINE_STAGES = [
   { value: "approved", label: "Approved" },
   { value: "rejected", label: "Rejected" },
   { value: "posted", label: "Posted" },
+  { value: "posting_failed", label: "Posting Failed" },
   { value: "duplicate", label: "Duplicate" },
 ];
 
@@ -225,6 +226,8 @@ export default function Articles() {
         return "bg-purple-500/20 text-purple-200";
       case "scored":
         return "bg-blue-500/20 text-blue-200";
+      case "posting_failed":
+        return "bg-orange-500/20 text-orange-200";
       case "duplicate":
         return "bg-slate-500/20 text-slate-400";
       default:
@@ -466,9 +469,19 @@ export default function Articles() {
                               <span className="text-xs text-amber-400 mt-1 inline-block">
                                 Translating...
                               </span>
+                            ) : article.translation_status === "exhausted" ? (
+                              <span
+                                className="text-xs text-red-500 mt-1 inline-block"
+                                title={article.translation_error || "Max attempts reached"}
+                              >
+                                Translation exhausted
+                              </span>
                             ) : article.translation_status === "failed" ? (
-                              <span className="text-xs text-red-400 mt-1 inline-block">
-                                Translation failed
+                              <span
+                                className="text-xs text-red-400 mt-1 inline-block"
+                                title={article.translation_error || "Translation failed"}
+                              >
+                                Translation failed{article.translation_error ? `: ${article.translation_error.slice(0, 80)}` : ""}
                               </span>
                             ) : article.llm_summary ? (
                               <p className="text-xs text-slate-500 mt-1 line-clamp-2 italic opacity-60">

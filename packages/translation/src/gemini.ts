@@ -63,11 +63,20 @@ export const translateWithGemini = async (
     };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : "Unknown error";
+    const isTransient =
+      errorMsg.includes("429") ||
+      errorMsg.includes("500") ||
+      errorMsg.includes("503") ||
+      errorMsg.includes("timeout") ||
+      errorMsg.includes("ECONNRESET") ||
+      errorMsg.includes("overloaded");
+
     logger.error(`[translation] Gemini API error: ${errorMsg}`);
     return {
       titleKa: null,
       summaryKa: null,
       error: errorMsg,
+      isTransient,
       latencyMs: Date.now() - startTime,
     };
   }

@@ -122,6 +122,7 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
           title_ka: articles.titleKa,
           llm_summary_ka: articles.llmSummaryKa,
           translation_status: articles.translationStatus,
+          translation_error: articles.translationError,
         })
         .from(articles)
         .leftJoin(rssSources, eq(articles.sourceId, rssSources.id))
@@ -178,6 +179,7 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
           title_ka: articles.titleKa,
           llm_summary_ka: articles.llmSummaryKa,
           translation_status: articles.translationStatus,
+          translation_error: articles.translationError,
           translation_model: articles.translationModel,
           translated_at: articles.translatedAt,
         })

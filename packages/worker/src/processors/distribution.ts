@@ -225,11 +225,37 @@ export const createDistributionWorker = ({
           // Emergency brake: check platform health before posting
           const isHealthy = await isPlatformHealthy(db, name);
           if (!isHealthy) {
-            logger.warn({ articleId, platform: name }, "[distribution] platform unhealthy, skipping");
+            const retryAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+            logger.warn(
+              { articleId, platform: name, retryAt },
+              "[distribution] platform unhealthy, scheduling retry",
+            );
+
+            // Atomic upsert: update existing scheduled delivery or create new one
+            // Uses single CTE to prevent duplicate rows from race conditions
+            await db.execute(sql`
+              WITH existing AS (
+                UPDATE post_deliveries
+                SET scheduled_at = ${retryAt},
+                    error_message = 'Platform unhealthy, auto-scheduled retry in 1 hour'
+                WHERE id = (
+                  SELECT id FROM post_deliveries
+                  WHERE article_id = ${articleId}::uuid AND platform = ${name}
+                    AND status IN ('scheduled', 'posting')
+                  LIMIT 1
+                )
+                RETURNING id
+              )
+              INSERT INTO post_deliveries (article_id, platform, scheduled_at, status, error_message)
+              SELECT ${articleId}::uuid, ${name}, ${retryAt}, 'scheduled', 'Platform unhealthy, auto-scheduled retry in 1 hour'
+              WHERE NOT EXISTS (SELECT 1 FROM existing)
+            `);
+
             results.push({
               platform: name,
               success: false,
-              error: "Platform marked unhealthy - skipping",
+              error: "Platform unhealthy — scheduled retry in 1 hour",
+              rateLimited: true,
             });
             continue;
           }
@@ -238,16 +264,41 @@ export const createDistributionWorker = ({
           const limit = await getRateLimitForPlatform(db, name);
           const rateCheck = await rateLimiter.checkAndRecord(name, limit);
           if (!rateCheck.allowed) {
+            const retryAfterMs = rateCheck.retryAfterMs ?? 60_000;
+            const retryAt = new Date(Date.now() + retryAfterMs);
+
             logger.warn(
-              { articleId, platform: name, current: rateCheck.current, limit: rateCheck.limit },
-              "[distribution] rate limit reached, skipping",
+              { articleId, platform: name, current: rateCheck.current, limit: rateCheck.limit, retryAt },
+              "[distribution] rate limit reached, scheduling retry via post_deliveries",
             );
+
+            // Atomic upsert: update existing scheduled delivery or create new one
+            // Uses single CTE to prevent duplicate rows from race conditions
+            const rateLimitMsg = `Rate limited (${rateCheck.current}/${rateCheck.limit}/hr), auto-scheduled retry`;
+            await db.execute(sql`
+              WITH existing AS (
+                UPDATE post_deliveries
+                SET scheduled_at = ${retryAt},
+                    error_message = ${rateLimitMsg}
+                WHERE id = (
+                  SELECT id FROM post_deliveries
+                  WHERE article_id = ${articleId}::uuid AND platform = ${name}
+                    AND status IN ('scheduled', 'posting')
+                  LIMIT 1
+                )
+                RETURNING id
+              )
+              INSERT INTO post_deliveries (article_id, platform, scheduled_at, status, error_message)
+              SELECT ${articleId}::uuid, ${name}, ${retryAt}, 'scheduled', ${rateLimitMsg}
+              WHERE NOT EXISTS (SELECT 1 FROM existing)
+            `);
+
             results.push({
               platform: name,
               success: false,
-              error: `Rate limit reached (${rateCheck.current}/${rateCheck.limit}/hr)`,
+              error: `Rate limited — scheduled retry at ${retryAt.toISOString()}`,
               rateLimited: true,
-              retryAfterMs: rateCheck.retryAfterMs,
+              retryAfterMs,
             });
             continue;
           }
@@ -308,7 +359,11 @@ export const createDistributionWorker = ({
         }
 
         // Update article stage based on results
+        const anyRateLimited = results.some((r) => r.rateLimited);
+
         if (anySuccess) {
+          // At least one platform succeeded — mark posted
+          // Rate-limited platforms have scheduled deliveries that will be processed independently
           await db.execute(sql`
             UPDATE articles
             SET
@@ -316,11 +371,21 @@ export const createDistributionWorker = ({
               approved_at = COALESCE(approved_at, NOW())
             WHERE id = ${articleId}::uuid
           `);
+        } else if (anyRateLimited && !results.some((r) => !r.rateLimited && !r.success)) {
+          // ALL failures were rate limits or unhealthy (no hard failures) — keep approved
+          // Scheduled deliveries exist, maintenance worker will post later
+          await db.execute(sql`
+            UPDATE articles SET pipeline_stage = 'approved'
+            WHERE id = ${articleId}::uuid
+          `);
+          logger.info({ articleId }, "[distribution] all platforms rate-limited/unhealthy, kept as approved");
         } else if (results.length > 0) {
-          // All platforms failed
+          // Hard failures on all platforms
           await db.execute(sql`
             UPDATE articles
-            SET pipeline_stage = 'posting_failed'
+            SET
+              pipeline_stage = 'posting_failed',
+              posting_attempts = posting_attempts + 1
             WHERE id = ${articleId}::uuid
           `);
         }

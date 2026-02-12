@@ -86,8 +86,12 @@ export const articles = pgTable(
     titleKa: text("title_ka"),
     llmSummaryKa: text("llm_summary_ka"),
     translationModel: text("translation_model"),
-    translationStatus: text("translation_status"), // NULL | 'translating' | 'translated' | 'failed'
+    translationStatus: text("translation_status"), // NULL | 'translating' | 'translated' | 'failed' | 'exhausted'
+    translationAttempts: integer("translation_attempts").default(0).notNull(),
+    translationError: text("translation_error"),
     translatedAt: timestamp("translated_at", { withTimezone: true }),
+    // Posting retry tracking
+    postingAttempts: integer("posting_attempts").default(0).notNull(),
     // Timestamps
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     scoredAt: timestamp("scored_at", { withTimezone: true }),

@@ -213,8 +213,11 @@ const resetZombieTranslations = async (db: Database) => {
     );
   }
 
-  // Reset 'failed' → NULL after 1 hour (allows retry)
-  const failedThreshold = new Date(Date.now() - 60 * 60 * 1000);
+  // Reset 'failed' → NULL after 10 minutes (allows retry)
+  // Safe because translation_attempts cap prevents infinite retries
+  // NOTE: 'exhausted' translations are NOT reset — they hit max attempts
+  const translationRetryMinutes = await getConfigNumber(db, "translation_retry_minutes", 10);
+  const failedThreshold = new Date(Date.now() - translationRetryMinutes * 60 * 1000);
   const failedResult = await db.execute(sql`
     UPDATE articles
     SET translation_status = NULL
@@ -279,6 +282,7 @@ const rescueOrphanedApprovedArticles = async (db: Database, distributionQueue?: 
   // Find approved articles that haven't progressed in 5 minutes
   // These are likely orphaned due to Redis queue failure
   // In Georgian mode, only rescue articles that have been translated
+  // Skip articles that already have scheduled/posting deliveries (they're rate-limited, not orphaned)
   const staleThreshold = new Date(Date.now() - 5 * 60 * 1000);
   const orphanedResult =
     postingLanguage === "ka"
@@ -288,6 +292,10 @@ const rescueOrphanedApprovedArticles = async (db: Database, distributionQueue?: 
             AND approved_at IS NOT NULL
             AND approved_at < ${staleThreshold}
             AND title_ka IS NOT NULL
+            AND id NOT IN (
+              SELECT article_id FROM post_deliveries
+              WHERE status IN ('scheduled', 'posting')
+            )
           LIMIT 20
         `)
       : await db.execute(sql`
@@ -295,6 +303,10 @@ const rescueOrphanedApprovedArticles = async (db: Database, distributionQueue?: 
           WHERE pipeline_stage = 'approved'
             AND approved_at IS NOT NULL
             AND approved_at < ${staleThreshold}
+            AND id NOT IN (
+              SELECT article_id FROM post_deliveries
+              WHERE status IN ('scheduled', 'posting')
+            )
           LIMIT 20
         `);
 
@@ -320,6 +332,46 @@ const rescueOrphanedApprovedArticles = async (db: Database, distributionQueue?: 
     logger.warn(`[maintenance] rescued ${requeued} orphaned approved articles`);
   }
   return requeued;
+};
+
+/**
+ * Retry articles stuck in 'posting_failed' state.
+ * Resets to 'approved' after 30 minutes, up to 3 attempts.
+ * After 3 attempts, leaves as 'posting_failed' (permanent — needs manual intervention).
+ */
+const retryPostingFailed = async (db: Database, distributionQueue?: Queue) => {
+  if (!distributionQueue) return 0;
+
+  const retryThreshold = new Date(Date.now() - 30 * 60 * 1000); // 30 min ago
+  const maxAttempts = 3;
+
+  const result = await db.execute(sql`
+    UPDATE articles
+    SET pipeline_stage = 'approved'
+    WHERE pipeline_stage = 'posting_failed'
+      AND approved_at < ${retryThreshold}
+      AND posting_attempts < ${maxAttempts}
+    RETURNING id
+  `);
+
+  const retried = result.rows as { id: string }[];
+  if (retried.length === 0) return 0;
+
+  // Re-queue for distribution
+  for (const article of retried) {
+    try {
+      await distributionQueue.add(
+        JOB_DISTRIBUTION_IMMEDIATE,
+        { articleId: article.id },
+        { jobId: `retry-failed-${article.id}-${Date.now()}` },
+      );
+    } catch (err) {
+      logger.error(`[maintenance] failed to re-queue posting_failed article ${article.id}`, err);
+    }
+  }
+
+  logger.warn(`[maintenance] retried ${retried.length} posting_failed articles`);
+  return retried.length;
 };
 
 type ArticleForPost = {
@@ -734,6 +786,7 @@ export const createMaintenanceWorker = ({
         await resetZombieDeliveries(db);
         // Rescue orphaned approved articles (Redis queue failure recovery)
         await rescueOrphanedApprovedArticles(db, distributionQueue);
+        await retryPostingFailed(db, distributionQueue);
         await runScheduledIngests(db, ingestQueue);
         // Process any scheduled posts that are due
         await processScheduledPosts(db, providers, rateLimiter, eventPublisher);

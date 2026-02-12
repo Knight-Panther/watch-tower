@@ -4,6 +4,7 @@ import {
   QUEUE_LLM_BRAIN,
   JOB_LLM_SCORE_BATCH,
   JOB_DISTRIBUTION_IMMEDIATE,
+  AUTO_POST_STAGGER_MS,
   logger,
   buildScoringPrompt,
   defaultScoringConfig,
@@ -365,6 +366,9 @@ export const createLLMBrainWorker = ({
           }
         }
 
+        // Track auto-post stagger delay across the batch
+        let autoPostIndex = 0;
+
         // Publish events for real-time dashboard
         for (const result of successes) {
           const thresholds = getThresholds(result.articleId);
@@ -411,14 +415,16 @@ export const createLLMBrainWorker = ({
               } else {
                 const telegramEnabled = await isAnyAutoPostEnabled(db);
                 if (telegramEnabled) {
+                  const delay = autoPostIndex * AUTO_POST_STAGGER_MS;
                   await distributionQueue.add(
                     JOB_DISTRIBUTION_IMMEDIATE,
                     { articleId: result.articleId },
-                    { jobId: `immediate-${result.articleId}` },
+                    { jobId: `immediate-${result.articleId}`, delay },
                   );
+                  autoPostIndex++;
                   logger.info(
-                    { articleId: result.articleId, score: result.score },
-                    "[llm-brain] queued for immediate distribution",
+                    { articleId: result.articleId, score: result.score, delayMs: delay },
+                    "[llm-brain] queued for immediate distribution (staggered)",
                   );
                 } else {
                   logger.debug(

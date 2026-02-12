@@ -503,6 +503,7 @@ export type Article = {
   title_ka: string | null;
   llm_summary_ka: string | null;
   translation_status: string | null;
+  translation_error: string | null;
 };
 
 export type ArticlesResponse = {
