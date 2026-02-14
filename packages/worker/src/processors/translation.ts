@@ -127,7 +127,7 @@ export const createTranslationWorker = ({ connection, db, distributionQueue }: T
         WHERE id IN (
           SELECT id FROM articles
           WHERE importance_score = ANY(${`{${scoreList.join(",")}}`}::smallint[])
-            AND translation_status IS NULL
+            AND (translation_status IS NULL OR translation_status = 'failed')
             AND llm_summary IS NOT NULL
             AND title_ka IS NULL
             AND scored_at IS NOT NULL
