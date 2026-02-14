@@ -251,22 +251,22 @@ export default function Monitoring({
                   source.active ? "" : "opacity-70"
                 }`}
               >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className={`rounded-full border px-2 py-0.5 text-[10px] ${statusTone}`}>
-                      {statusLabel}
-                    </span>
-                    <span className="text-xs text-slate-500">
-                      {source.active ? "Active" : "Inactive"}
-                    </span>
-                  </div>
-                  <p className="mt-2 text-sm font-semibold text-slate-100">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className={`rounded-full border px-2 py-0.5 text-[10px] ${statusTone}`}>
+                    {statusLabel}
+                  </span>
+                  <span className="text-xs text-slate-500">
+                    {source.active ? "Active" : "Inactive"}
+                  </span>
+                  <span className="text-sm font-semibold text-slate-100">
                     {source.name ?? "Untitled source"}
-                  </p>
-                  <p className="text-xs text-slate-400">{source.url}</p>
-                  <p className="mt-2 text-xs text-slate-500">
-                    Sector: {source.sector?.name ?? "Unassigned"}
-                  </p>
+                  </span>
+                  <span className="text-xs text-slate-400 truncate max-w-[280px]" title={source.url}>
+                    {source.url}
+                  </span>
+                  <span className="rounded-full border border-slate-700 px-2 py-0.5 text-[10px] text-slate-400">
+                    {source.sector?.name ?? "Unassigned"}
+                  </span>
                 </div>
                 <div className="grid grid-rows-2 grid-flow-col auto-cols-fr gap-x-4 gap-y-1 text-xs">
                   <span className="text-[10px] uppercase tracking-wide text-slate-500">

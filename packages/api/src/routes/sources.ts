@@ -7,8 +7,8 @@ import { isDomainAllowed } from "../utils/domain-whitelist.js";
 
 const clampMaxAgeDays = (value: number) => Math.min(15, Math.max(1, value));
 
-const selectSourcesWithSector = async (deps: ApiDeps, condition?: Parameters<typeof eq>) => {
-  const rows = await deps.db
+const selectSourcesWithSector = async (deps: ApiDeps, sourceId?: string) => {
+  let query = deps.db
     .select({
       id: rssSources.id,
       url: rssSources.url,
@@ -28,8 +28,14 @@ const selectSourcesWithSector = async (deps: ApiDeps, condition?: Parameters<typ
     })
     .from(rssSources)
     .leftJoin(sectors, eq(rssSources.sectorId, sectors.id))
-    .orderBy(desc(rssSources.createdAt));
+    .orderBy(desc(rssSources.createdAt))
+    .$dynamic();
 
+  if (sourceId) {
+    query = query.where(eq(rssSources.id, sourceId));
+  }
+
+  const rows = await query;
   return rows.map((r) => ({
     ...r,
     sectors: r.sectors?.id ? r.sectors : null,
@@ -124,12 +130,13 @@ export const registerSourceRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       const maxAgeDays = clampMaxAgeDays(inserted.maxAgeDays ?? sectorMaxAge);
       await deps.ingestQueue.add(
         JOB_INGEST_FETCH,
-        { sourceId: inserted.id, url: inserted.url, maxAgeDays },
+        { sourceId: inserted.id, url: inserted.url, sectorId: inserted.sectorId, maxAgeDays },
         { jobId: `ingest-${inserted.id}-${Date.now()}` },
       );
     }
 
-    return inserted;
+    const [shaped] = await selectSourcesWithSector(deps, inserted.id);
+    return shaped ?? inserted;
   });
 
   app.delete<{ Params: { id: string }; Querystring: { hard?: string } }>(

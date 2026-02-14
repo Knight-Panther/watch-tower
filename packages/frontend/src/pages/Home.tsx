@@ -132,150 +132,158 @@ export default function Home(props: HomeProps) {
         </div>
       </section>
 
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-        <h2 className="text-lg font-semibold">Add source</h2>
-        <form onSubmit={props.onSubmit} className="mt-4 grid gap-4 md:grid-cols-[2fr,1fr]">
-          <input
-            value={props.sourceForm.url}
-            onChange={(event) =>
-              props.onSourceFormChange({
-                ...props.sourceForm,
-                url: event.target.value,
-              })
-            }
-            placeholder="RSS URL"
-            className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
-          />
-          {props.sourceErrors.url ? (
-            <p className="text-xs text-red-400">{props.sourceErrors.url}</p>
-          ) : null}
-          <input
-            value={props.sourceForm.name}
-            onChange={(event) =>
-              props.onSourceFormChange({
-                ...props.sourceForm,
-                name: event.target.value,
-              })
-            }
-            placeholder="Name (optional)"
-            className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
-          />
-          <select
-            value={props.sourceForm.sectorId}
-            onChange={(event) =>
-              props.onSourceFormChange({
-                ...props.sourceForm,
-                sectorId: event.target.value,
-              })
-            }
-            className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
-          >
-            <option value="" disabled>
-              Select sector
-            </option>
-            {props.sectors.map((sector) => (
-              <option key={sector.id} value={sector.id}>
-                {sector.name}
-              </option>
-            ))}
-          </select>
-          {props.sectors.length === 0 ? (
-            <p className="text-xs text-amber-300">Create a sector before adding sources.</p>
-          ) : null}
-          {props.sourceErrors.sectorId ? (
-            <p className="text-xs text-red-400">{props.sourceErrors.sectorId}</p>
-          ) : null}
-          <input
-            value={props.sourceForm.maxAgeDays}
-            onChange={(event) =>
-              props.onSourceFormChange({
-                ...props.sourceForm,
-                maxAgeDays: event.target.value,
-              })
-            }
-            placeholder="Max age days (1-15, optional)"
-            className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
-          />
-          {props.sourceErrors.maxAgeDays ? (
-            <p className="text-xs text-red-400">{props.sourceErrors.maxAgeDays}</p>
-          ) : null}
-          <input
-            value={props.sourceForm.ingestIntervalMinutes}
-            onChange={(event) =>
-              props.onSourceFormChange({
-                ...props.sourceForm,
-                ingestIntervalMinutes: event.target.value,
-              })
-            }
-            placeholder="Interval minutes (1-4320)"
-            className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
-          />
-          {props.sourceErrors.ingestIntervalMinutes ? (
-            <p className="text-xs text-red-400">{props.sourceErrors.ingestIntervalMinutes}</p>
-          ) : null}
-          <div className="md:col-span-2">
-            <button
-              type="submit"
-              disabled={props.sectors.length === 0}
-              className="w-full rounded-xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+      <div className="grid gap-4 md:grid-cols-[3fr_2fr]">
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+          <h2 className="text-sm font-semibold text-slate-300">Add source</h2>
+          <form onSubmit={props.onSubmit} className="mt-3 grid gap-2.5 grid-cols-2">
+            <input
+              value={props.sourceForm.url}
+              onChange={(event) =>
+                props.onSourceFormChange({
+                  ...props.sourceForm,
+                  url: event.target.value,
+                })
+              }
+              placeholder="RSS URL"
+              className="col-span-2 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-600"
+            />
+            {props.sourceErrors.url ? (
+              <p className="col-span-2 text-xs text-red-400">{props.sourceErrors.url}</p>
+            ) : null}
+            <input
+              value={props.sourceForm.name}
+              onChange={(event) =>
+                props.onSourceFormChange({
+                  ...props.sourceForm,
+                  name: event.target.value,
+                })
+              }
+              placeholder="Name (optional)"
+              className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-600"
+            />
+            <select
+              value={props.sourceForm.sectorId}
+              onChange={(event) =>
+                props.onSourceFormChange({
+                  ...props.sourceForm,
+                  sectorId: event.target.value,
+                })
+              }
+              className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-600"
             >
-              Add
-            </button>
-          </div>
-        </form>
-      </section>
-
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-        <h2 className="text-lg font-semibold">Filters</h2>
-        <div className="mt-4 grid gap-4 md:grid-cols-[2fr,1fr,1fr]">
-          <input
-            value={props.filters.search}
-            onChange={(event) =>
-              props.onFilterChange({
-                ...props.filters,
-                search: event.target.value,
-              })
-            }
-            placeholder="Search name or URL"
-            className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
-          />
-          <select
-            value={props.filters.sectorId}
-            onChange={(event) =>
-              props.onFilterChange({
-                ...props.filters,
-                sectorId: event.target.value,
-              })
-            }
-            className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
-          >
-            <option value="">All sectors</option>
-            {props.sectors.map((sector) => (
-              <option key={sector.id} value={sector.id}>
-                {sector.name}
+              <option value="" disabled>
+                Select sector
               </option>
-            ))}
-          </select>
-          <input
-            value={props.filters.maxAgeDays}
-            onChange={(event) =>
-              props.onFilterChange({
-                ...props.filters,
-                maxAgeDays: event.target.value,
-              })
-            }
-            placeholder="Max age days (1-15)"
-            className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
-          />
-        </div>
-        {props.filters.maxAgeDays.trim() !== "" ? (
-          Number.isNaN(Number(props.filters.maxAgeDays)) ||
-          Number(props.filters.maxAgeDays) < 1 ||
-          Number(props.filters.maxAgeDays) > 15 ? (
-            <p className="mt-2 text-xs text-red-400">Filter max age must be between 1 and 15</p>
-          ) : null
-        ) : null}
-      </section>
+              {props.sectors.map((sector) => (
+                <option key={sector.id} value={sector.id}>
+                  {sector.name}
+                </option>
+              ))}
+            </select>
+            {props.sectors.length === 0 ? (
+              <p className="col-span-2 text-xs text-amber-300">
+                Create a sector before adding sources.
+              </p>
+            ) : null}
+            {props.sourceErrors.sectorId ? (
+              <p className="col-span-2 text-xs text-red-400">{props.sourceErrors.sectorId}</p>
+            ) : null}
+            <input
+              value={props.sourceForm.maxAgeDays}
+              onChange={(event) =>
+                props.onSourceFormChange({
+                  ...props.sourceForm,
+                  maxAgeDays: event.target.value,
+                })
+              }
+              placeholder="Max age (1-15 days)"
+              className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-600"
+            />
+            {props.sourceErrors.maxAgeDays ? (
+              <p className="col-span-2 text-xs text-red-400">{props.sourceErrors.maxAgeDays}</p>
+            ) : null}
+            <input
+              value={props.sourceForm.ingestIntervalMinutes}
+              onChange={(event) =>
+                props.onSourceFormChange({
+                  ...props.sourceForm,
+                  ingestIntervalMinutes: event.target.value,
+                })
+              }
+              placeholder="Interval (1-4320 min)"
+              className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-600"
+            />
+            {props.sourceErrors.ingestIntervalMinutes ? (
+              <p className="col-span-2 text-xs text-red-400">
+                {props.sourceErrors.ingestIntervalMinutes}
+              </p>
+            ) : null}
+            <div className="col-span-2">
+              <button
+                type="submit"
+                disabled={props.sectors.length === 0}
+                className="w-full rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-900 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Add
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+          <h2 className="text-sm font-semibold text-slate-300">Filters</h2>
+          <div className="mt-3 grid gap-2.5">
+            <input
+              value={props.filters.search}
+              onChange={(event) =>
+                props.onFilterChange({
+                  ...props.filters,
+                  search: event.target.value,
+                })
+              }
+              placeholder="Search name or URL"
+              className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-600"
+            />
+            <select
+              value={props.filters.sectorId}
+              onChange={(event) =>
+                props.onFilterChange({
+                  ...props.filters,
+                  sectorId: event.target.value,
+                })
+              }
+              className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-600"
+            >
+              <option value="">All sectors</option>
+              {props.sectors.map((sector) => (
+                <option key={sector.id} value={sector.id}>
+                  {sector.name}
+                </option>
+              ))}
+            </select>
+            <input
+              value={props.filters.maxAgeDays}
+              onChange={(event) =>
+                props.onFilterChange({
+                  ...props.filters,
+                  maxAgeDays: event.target.value,
+                })
+              }
+              placeholder="Max age days (1-15)"
+              className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-600"
+            />
+          </div>
+          {props.filters.maxAgeDays.trim() !== "" ? (
+            Number.isNaN(Number(props.filters.maxAgeDays)) ||
+            Number(props.filters.maxAgeDays) < 1 ||
+            Number(props.filters.maxAgeDays) > 15 ? (
+              <p className="mt-2 text-xs text-red-400">
+                Filter max age must be between 1 and 15
+              </p>
+            ) : null
+          ) : null}
+        </section>
+      </div>
 
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
         <div className="flex items-center justify-between">

@@ -10,18 +10,24 @@ type SectorManagementProps = {
     defaultMaxAgeDays?: string;
   };
   sectors: Sector[];
+  sectorMaxAgeDrafts: Record<string, string>;
   onCreateSector: (event: React.FormEvent<HTMLFormElement>) => void;
   onSectorFormChange: (next: SectorManagementProps["sectorForm"]) => void;
   onDeleteSector: (sector: Sector) => void;
+  onSectorMaxAgeDraftChange: (sectorId: string, value: string) => void;
+  onSaveSectorSettings: (sectorId: string) => void;
 };
 
 export default function SectorManagement({
   sectorForm,
   sectorErrors,
   sectors,
+  sectorMaxAgeDrafts,
   onCreateSector,
   onSectorFormChange,
   onDeleteSector,
+  onSectorMaxAgeDraftChange,
+  onSaveSectorSettings,
 }: SectorManagementProps) {
   return (
     <>
@@ -67,26 +73,49 @@ export default function SectorManagement({
           Review current sectors or remove them. Sources keep their items until TTL cleanup.
         </p>
         <div className="mt-4 grid gap-3">
-          {sectors.map((sector) => (
-            <div
-              key={sector.id}
-              className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-950/70 px-4 py-3"
-            >
-              <div>
-                <p className="text-sm font-semibold">{sector.name}</p>
-                <p className="text-xs text-slate-400">{sector.slug}</p>
+          {sectors.map((sector) => {
+            const draft = sectorMaxAgeDrafts[sector.id] ?? String(sector.default_max_age_days);
+            const changed = Number(draft) !== sector.default_max_age_days;
+            return (
+              <div
+                key={sector.id}
+                className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-950/70 px-4 py-3"
+              >
+                <div>
+                  <p className="text-sm font-semibold">{sector.name}</p>
+                  <p className="text-xs text-slate-400">{sector.slug}</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-3 text-xs text-slate-300">
+                  <label className="flex items-center gap-2">
+                    <span>Max age:</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={15}
+                      value={draft}
+                      onChange={(e) => onSectorMaxAgeDraftChange(sector.id, e.target.value)}
+                      className="w-16 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-center text-xs text-slate-200 outline-none focus:border-slate-500"
+                    />
+                    <span>days</span>
+                  </label>
+                  {changed && (
+                    <button
+                      onClick={() => onSaveSectorSettings(sector.id)}
+                      className="rounded-lg border border-emerald-700 bg-emerald-900/40 px-3 py-1 text-xs font-medium text-emerald-300 transition hover:border-emerald-500"
+                    >
+                      Save
+                    </button>
+                  )}
+                  <button
+                    onClick={() => onDeleteSector(sector)}
+                    className="text-xs text-red-300 hover:text-red-200 hover:underline"
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
-              <div className="flex flex-wrap items-center gap-4 text-xs text-slate-300">
-                <span>Default max age: {sector.default_max_age_days} days</span>
-                <button
-                  onClick={() => onDeleteSector(sector)}
-                  className="text-xs text-red-300 hover:text-red-200 hover:underline"
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
           {sectors.length === 0 ? <p className="text-sm text-slate-400">No sectors yet.</p> : null}
         </div>
       </section>
