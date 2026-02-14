@@ -61,6 +61,15 @@ type MaintenanceDeps = {
   r2Storage?: R2Storage;
 };
 
+const getConfigBoolean = async (db: Database, key: string, fallback: boolean) => {
+  const [row] = await db
+    .select({ value: appConfig.value })
+    .from(appConfig)
+    .where(eq(appConfig.key, key));
+  if (!row) return fallback;
+  return row.value === true || row.value === "true";
+};
+
 const getConfigNumber = async (db: Database, key: string, fallback: number) => {
   const [row] = await db
     .select({ value: appConfig.value })
@@ -415,6 +424,7 @@ type ClaimedDelivery = {
   id: string;
   articleId: string;
   platform: string;
+  scheduledAt: Date;
 };
 
 // Helper: Get template for platform from social_accounts
@@ -492,7 +502,7 @@ const processScheduledPosts = async (
       LIMIT 10
       FOR UPDATE SKIP LOCKED
     )
-    RETURNING id, article_id as "articleId", platform
+    RETURNING id, article_id as "articleId", platform, scheduled_at as "scheduledAt"
   `);
 
   const claimed = claimResult.rows as ClaimedDelivery[];
@@ -624,16 +634,69 @@ const processScheduledPosts = async (
       let imageUrl: string | undefined;
       if (template.showImage) {
         const [articleImage] = await db
-          .select({ imageUrl: articleImages.imageUrl })
+          .select({
+            imageUrl: articleImages.imageUrl,
+            status: articleImages.status,
+            createdAt: articleImages.createdAt,
+          })
           .from(articleImages)
-          .where(
-            and(
-              eq(articleImages.articleId, delivery.articleId),
-              eq(articleImages.status, "ready"),
-            ),
-          )
+          .where(eq(articleImages.articleId, delivery.articleId))
           .limit(1);
-        imageUrl = articleImage?.imageUrl ?? undefined;
+
+        if (articleImage?.status === "ready") {
+          imageUrl = articleImage.imageUrl ?? undefined;
+        } else if (articleImage?.status === "generating" || articleImage?.status === "pending") {
+          // Check if stuck (> 5 min) — post without image rather than waiting forever
+          const ageMs = Date.now() - new Date(articleImage.createdAt).getTime();
+          if (ageMs < 5 * 60 * 1000) {
+            // Release claim back to scheduled so next tick retries
+            await db
+              .update(postDeliveries)
+              .set({ status: "scheduled" })
+              .where(eq(postDeliveries.id, delivery.id));
+            logger.info(
+              { deliveryId: delivery.id, articleId: delivery.articleId },
+              "[post-scheduler] image still generating, deferring delivery",
+            );
+            continue;
+          }
+          logger.warn(
+            { deliveryId: delivery.id, articleId: delivery.articleId, ageMs },
+            "[post-scheduler] image generation stuck > 5min, posting without image",
+          );
+          // Fall through — post without image
+        } else if (articleImage?.status === "failed") {
+          // Image generation failed after retries — post without image
+          logger.info(
+            { deliveryId: delivery.id, articleId: delivery.articleId },
+            "[post-scheduler] image generation failed, posting without image",
+          );
+          // Fall through — post without image
+        } else if (!articleImage) {
+          // No image row at all — check if we should wait for the 30s sweep to generate one
+          const imgEnabled = await getConfigBoolean(db, "image_generation_enabled", false);
+          const imgMinScore = await getConfigNumber(db, "image_generation_min_score", 4);
+          if (imgEnabled && (article.importanceScore ?? 0) >= imgMinScore) {
+            // Wait up to 3 min from scheduled time for image to be generated
+            const deliveryAge = Date.now() - new Date(delivery.scheduledAt).getTime();
+            if (deliveryAge < 3 * 60 * 1000) {
+              await db
+                .update(postDeliveries)
+                .set({ status: "scheduled" })
+                .where(eq(postDeliveries.id, delivery.id));
+              logger.info(
+                { deliveryId: delivery.id, articleId: delivery.articleId },
+                "[post-scheduler] waiting for image generation, deferring delivery",
+              );
+              continue;
+            }
+            logger.warn(
+              { deliveryId: delivery.id, articleId: delivery.articleId },
+              "[post-scheduler] waited > 3min for image, posting without image",
+            );
+          }
+          // Fall through — post without image
+        }
       }
 
       // Format and post using template (uses resolved language content)

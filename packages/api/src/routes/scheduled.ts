@@ -225,7 +225,10 @@ export const registerScheduledRoutes = (app: FastifyInstance, deps: ApiDeps) => 
 
       // Only allow cancelling 'scheduled' deliveries
       const [existing] = await deps.db
-        .select({ status: postDeliveries.status })
+        .select({
+          status: postDeliveries.status,
+          articleId: postDeliveries.articleId,
+        })
         .from(postDeliveries)
         .where(eq(postDeliveries.id, id));
 
@@ -247,6 +250,29 @@ export const registerScheduledRoutes = (app: FastifyInstance, deps: ApiDeps) => 
           id: postDeliveries.id,
           status: postDeliveries.status,
         });
+
+      // If no active deliveries remain for this article, reset it back to "scored"
+      // so the user can re-schedule. Only reset "approved" articles (not "posted").
+      if (existing.articleId) {
+        const [remaining] = await deps.db
+          .select({ count: count() })
+          .from(postDeliveries)
+          .where(
+            and(
+              eq(postDeliveries.articleId, existing.articleId),
+              inArray(postDeliveries.status, ["scheduled", "pending"]),
+            ),
+          );
+
+        if (Number(remaining.count) === 0) {
+          await deps.db
+            .update(articles)
+            .set({ pipelineStage: "scored", approvedAt: null })
+            .where(
+              and(eq(articles.id, existing.articleId), eq(articles.pipelineStage, "approved")),
+            );
+        }
+      }
 
       return updated;
     },

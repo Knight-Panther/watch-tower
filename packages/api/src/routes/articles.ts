@@ -527,6 +527,25 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       return reply.code(404).send({ error: "No scheduled deliveries found" });
     }
 
+    // If no active deliveries remain for this article, reset it back to "scored"
+    // so the user can re-schedule. Only reset "approved" articles (not "posted").
+    const [remaining] = await deps.db
+      .select({ count: count() })
+      .from(postDeliveries)
+      .where(
+        and(
+          eq(postDeliveries.articleId, id),
+          inArray(postDeliveries.status, ["scheduled", "pending"]),
+        ),
+      );
+
+    if (Number(remaining.count) === 0) {
+      await deps.db
+        .update(articles)
+        .set({ pipelineStage: "scored", approvedAt: null })
+        .where(and(eq(articles.id, id), eq(articles.pipelineStage, "approved")));
+    }
+
     return { cancelled: updated.length, deliveries: updated };
   });
 };
