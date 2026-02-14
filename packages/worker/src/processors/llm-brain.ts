@@ -246,7 +246,7 @@ export const createLLMBrainWorker = ({
           );
         for (const row of thresholdRows) {
           const num = Number(row.value);
-          if (!Number.isNaN(num) && num >= 1 && num <= 5) {
+          if (!Number.isNaN(num) && num >= 0 && num <= 5) {
             if (row.key === "auto_approve_threshold") globalApprove = num;
             if (row.key === "auto_reject_threshold") globalReject = num;
           }
@@ -259,8 +259,10 @@ export const createLLMBrainWorker = ({
       const getThresholds = (articleId: string) => {
         const article = articles.find((a) => a.id === articleId)!;
         const rules = article.sectorId ? sectorRules.get(article.sectorId) : undefined;
+        const rawApprove = rules?.autoApprove ?? globalApprove;
         return {
-          approve: rules?.autoApprove ?? globalApprove,
+          // 0 means "OFF" — never auto-approve (6 is unreachable since scores are 1-5)
+          approve: rawApprove === 0 ? 6 : rawApprove,
           reject: rules?.autoReject ?? globalReject,
         };
       };

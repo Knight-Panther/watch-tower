@@ -152,7 +152,7 @@ export default function ScoringRules() {
   const handleSave = async () => {
     if (!selectedSectorId) return;
 
-    if (autoReject >= autoApprove) {
+    if (autoApprove !== 0 && autoReject >= autoApprove) {
       toast.error("Auto-reject threshold must be less than auto-approve");
       return;
     }
@@ -442,6 +442,7 @@ export default function ScoringRules() {
                     }}
                     className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200"
                   >
+                    <option value={0}>OFF</option>
                     {[3, 4, 5].map((n) => (
                       <option key={n} value={n}>
                         {n}

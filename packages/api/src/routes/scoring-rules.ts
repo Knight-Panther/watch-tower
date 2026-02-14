@@ -122,14 +122,14 @@ export const registerScoringRulesRoutes = (app: FastifyInstance, deps: ApiDeps) 
       });
     }
 
-    // Validate thresholds
+    // Validate thresholds (0 = OFF — disables auto-approve for this sector)
     if (
       !Number.isInteger(auto_approve_threshold) ||
-      auto_approve_threshold < 1 ||
+      auto_approve_threshold < 0 ||
       auto_approve_threshold > 5
     ) {
       return reply.code(400).send({
-        error: "auto_approve_threshold must be integer 1-5",
+        error: "auto_approve_threshold must be integer 0-5 (0 = OFF)",
       });
     }
     if (
@@ -141,7 +141,7 @@ export const registerScoringRulesRoutes = (app: FastifyInstance, deps: ApiDeps) 
         error: "auto_reject_threshold must be integer 1-5",
       });
     }
-    if (auto_reject_threshold >= auto_approve_threshold) {
+    if (auto_approve_threshold !== 0 && auto_reject_threshold >= auto_approve_threshold) {
       return reply.code(400).send({
         error: "auto_reject_threshold must be less than auto_approve_threshold",
       });

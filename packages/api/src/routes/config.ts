@@ -290,15 +290,17 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     { preHandler: deps.requireApiKey },
     async (request, reply) => {
       const { value } = request.body ?? {};
-      if (!Number.isFinite(value) || value < 1 || value > 5) {
-        return reply.code(400).send({ error: "value must be a number between 1 and 5" });
+      if (!Number.isFinite(value) || value < 0 || value > 5) {
+        return reply.code(400).send({ error: "value must be a number between 0 and 5 (0 = OFF)" });
       }
-      // Validate: approve must be > reject
-      const rejectThreshold = await getConfigValue(deps, "auto_reject_threshold", 2);
-      if (value <= rejectThreshold) {
-        return reply.code(400).send({
-          error: `Auto-approve threshold (${value}) must be greater than auto-reject threshold (${rejectThreshold})`,
-        });
+      // Validate: approve must be > reject (skip when OFF)
+      if (value !== 0) {
+        const rejectThreshold = await getConfigValue(deps, "auto_reject_threshold", 2);
+        if (value <= rejectThreshold) {
+          return reply.code(400).send({
+            error: `Auto-approve threshold (${value}) must be greater than auto-reject threshold (${rejectThreshold})`,
+          });
+        }
       }
       await upsertConfig(deps, "auto_approve_threshold", value);
       logger.info(`[config] auto-approve threshold updated to ${value}`);
@@ -319,9 +321,9 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       if (!Number.isFinite(value) || value < 1 || value > 5) {
         return reply.code(400).send({ error: "value must be a number between 1 and 5" });
       }
-      // Validate: reject must be < approve
+      // Validate: reject must be < approve (skip when approve is OFF)
       const approveThreshold = await getConfigValue(deps, "auto_approve_threshold", 5);
-      if (value >= approveThreshold) {
+      if (approveThreshold !== 0 && value >= approveThreshold) {
         return reply.code(400).send({
           error: `Auto-reject threshold (${value}) must be less than auto-approve threshold (${approveThreshold})`,
         });
