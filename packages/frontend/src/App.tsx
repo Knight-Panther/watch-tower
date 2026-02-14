@@ -50,6 +50,7 @@ import SectorManagement from "./pages/SectorManagement";
 import ArticleScheduler from "./pages/ArticleScheduler";
 import ScoringRules from "./pages/ScoringRules";
 import MediaChannelControl from "./pages/MediaChannelControl";
+import ImageTemplate from "./pages/ImageTemplate";
 import SiteRules from "./pages/SiteRules";
 import {
   ServerEventsProvider,
@@ -470,6 +471,8 @@ export default function App() {
     try {
       await runIngest();
       toast.success("Ingest triggered");
+      // Auto-refresh stats after ingest completes (give worker time to process)
+      setTimeout(() => refreshStats(), 5_000);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to trigger ingest";
       setError(message);
@@ -881,6 +884,7 @@ export default function App() {
         <Route path="/article-scheduler" element={<ArticleScheduler />} />
         <Route path="/scoring-rules" element={<ScoringRules />} />
         <Route path="/media-channels" element={<MediaChannelControl />} />
+        <Route path="/image-template" element={<ImageTemplate />} />
         <Route path="/site-rules" element={<SiteRules />} />
         <Route
           path="/settings"

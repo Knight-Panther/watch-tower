@@ -223,7 +223,7 @@ export const llmTelemetry = pgTable(
   ],
 );
 
-// ─── Article Images (for score-5 posts) ─────────────────────────────────────
+// ─── Article Images (AI-generated news card images) ─────────────────────────
 
 export const articleImages = pgTable("article_images", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -232,12 +232,13 @@ export const articleImages = pgTable("article_images", {
     .references(() => articles.id, { onDelete: "cascade" }),
 
   // Generation details
-  provider: text("provider").notNull(), // 'dalle', 'stable', 'ideogram'
+  provider: text("provider").notNull(), // 'gpt-image-mini', 'dalle', 'stable'
   model: text("model"),
   prompt: text("prompt").notNull(),
 
   // Result
   imageUrl: text("image_url"),
+  r2Key: text("r2_key"), // R2 object key for cleanup
   status: text("status").notNull().default("pending"), // 'pending', 'generating', 'ready', 'failed'
   errorMessage: text("error_message"),
 

@@ -15,7 +15,7 @@ export const registerProviderHealthRoutes = (app: FastifyInstance, deps: ApiDeps
     const rows = await deps.db
       .select({ key: appConfig.key, value: appConfig.value })
       .from(appConfig)
-      .where(inArray(appConfig.key, ["translation_provider", "translation_model"]));
+      .where(inArray(appConfig.key, ["translation_provider", "translation_model", "image_generation_enabled"]));
     const configMap = new Map(rows.map((r) => [r.key, r.value]));
 
     const env = process.env;
@@ -29,6 +29,7 @@ export const registerProviderHealthRoutes = (app: FastifyInstance, deps: ApiDeps
       embeddingModel: env.EMBEDDING_MODEL,
       translationProvider: (configMap.get("translation_provider") as string) ?? undefined,
       translationModel: (configMap.get("translation_model") as string) ?? undefined,
+      imageGenerationEnabled: configMap.get("image_generation_enabled") === true,
     });
 
     return reply.send({

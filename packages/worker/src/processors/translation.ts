@@ -5,6 +5,7 @@ import {
   QUEUE_TRANSLATION,
   JOB_TRANSLATION_BATCH,
   JOB_DISTRIBUTION_IMMEDIATE,
+  JOB_IMAGE_GENERATE,
   AUTO_POST_STAGGER_MS,
   logger,
 } from "@watch-tower/shared";
@@ -20,6 +21,7 @@ type TranslationDeps = {
   connection: { host: string; port: number };
   db: Database;
   distributionQueue?: Queue;
+  imageGenerationQueue?: Queue;
 };
 
 type TranslationConfig = {
@@ -88,7 +90,12 @@ type ClaimedArticle = {
   translationAttempts: number;
 };
 
-export const createTranslationWorker = ({ connection, db, distributionQueue }: TranslationDeps) => {
+export const createTranslationWorker = ({
+  connection,
+  db,
+  distributionQueue,
+  imageGenerationQueue,
+}: TranslationDeps) => {
   return new Worker(
     QUEUE_TRANSLATION,
     async (job) => {
@@ -265,24 +272,49 @@ export const createTranslationWorker = ({ connection, db, distributionQueue }: T
           }
 
           // 4. Auto-post: If article is already 'approved' (score 5 auto-approve),
-          // queue it for distribution now that translation is ready
-          if (article.pipelineStage === "approved" && distributionQueue) {
-            // Check if ANY platform has auto-post enabled
-            const autoPostRows = await db
+          // queue it for distribution now that translation is ready.
+          // If image generation is enabled and score meets threshold, route
+          // through image gen first (it will chain to distribution).
+          if (article.pipelineStage === "approved") {
+            // Check image generation config
+            const imgConfigRows = await db
               .select({ key: appConfig.key, value: appConfig.value })
               .from(appConfig)
               .where(
                 inArray(appConfig.key, [
+                  "image_generation_enabled",
+                  "image_generation_min_score",
                   "auto_post_telegram",
                   "auto_post_facebook",
                   "auto_post_linkedin",
                 ]),
               );
-            const autoPostEnabled = autoPostRows.some(
-              (r) => r.value === true || r.value === "true",
-            );
+            const imgConfigMap = new Map(imgConfigRows.map((r) => [r.key, r.value]));
 
-            if (autoPostEnabled) {
+            const imageEnabled =
+              (imgConfigMap.get("image_generation_enabled") === true ||
+                imgConfigMap.get("image_generation_enabled") === "true") &&
+              !!imageGenerationQueue;
+            const imageMinScore = (imgConfigMap.get("image_generation_min_score") as number) ?? 4;
+
+            const autoPostEnabled = ["auto_post_telegram", "auto_post_facebook", "auto_post_linkedin"]
+              .some((k) => imgConfigMap.get(k) === true || imgConfigMap.get(k) === "true");
+
+            if (imageEnabled && article.importanceScore >= imageMinScore) {
+              // Route through image generation → it will chain to distribution
+              const delay = autoPostIndex * AUTO_POST_STAGGER_MS;
+              await imageGenerationQueue!.add(
+                JOB_IMAGE_GENERATE,
+                { articleId: article.id },
+                { jobId: `img-ka-${article.id}`, delay },
+              );
+              autoPostIndex++;
+              logger.info(
+                { articleId: article.id, delayMs: delay },
+                "[translation] queued for image generation (will chain to distribution)",
+              );
+            } else if (autoPostEnabled && distributionQueue) {
+              // No image gen → queue distribution directly (existing behavior)
               const delay = autoPostIndex * AUTO_POST_STAGGER_MS;
               await distributionQueue.add(
                 JOB_DISTRIBUTION_IMMEDIATE,

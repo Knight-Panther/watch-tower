@@ -9,6 +9,7 @@ const navItems = [
   { to: "/sectors", label: "Sectors" },
   { to: "/scoring-rules", label: "LLM Brain" },
   { to: "/media-channels", label: "Media Channels" },
+  { to: "/image-template", label: "Image Template" },
   { to: "/site-rules", label: "Restrictions" },
   { to: "/settings", label: "DB/Telemetry" },
 ];

@@ -29,7 +29,9 @@ export const registerSocialAccountRoutes = (app: FastifyInstance, deps: ApiDeps)
       account_name: a.accountName,
       is_active: a.isActive,
       rate_limit_per_hour: a.rateLimitPerHour ?? 4,
-      post_template: (a.postTemplate as PostTemplateConfig | null) ?? getDefaultTemplate(a.platform),
+      post_template: a.postTemplate
+        ? { ...getDefaultTemplate(a.platform), ...(a.postTemplate as PostTemplateConfig) }
+        : getDefaultTemplate(a.platform),
       is_template_custom: a.postTemplate !== null,
       created_at: a.createdAt,
       updated_at: a.updatedAt,
@@ -54,8 +56,10 @@ export const registerSocialAccountRoutes = (app: FastifyInstance, deps: ApiDeps)
         return reply.status(404).send({ error: "Social account not found" });
       }
 
-      const template =
-        (account.postTemplate as PostTemplateConfig | null) ?? getDefaultTemplate(account.platform);
+      const defaults = getDefaultTemplate(account.platform);
+      const template = account.postTemplate
+        ? { ...defaults, ...(account.postTemplate as PostTemplateConfig) }
+        : defaults;
 
       return {
         platform: account.platform,

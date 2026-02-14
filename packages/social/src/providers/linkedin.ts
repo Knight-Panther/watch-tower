@@ -60,7 +60,155 @@ export const createLinkedInProvider = (config: LinkedInConfig): SocialProvider =
       try {
         const authorUrn = `urn:li:${authorType}:${authorId}`;
 
-        // Extract URL if present for article sharing
+        if (request.imageUrl) {
+          // 3-step image upload flow for LinkedIn
+
+          // Step 1: Register upload → get uploadUrl + asset URN
+          const registerBody = {
+            registerUploadRequest: {
+              recipes: ["urn:li:digitalmediaRecipe:feedshare-image"],
+              owner: authorUrn,
+              serviceRelationships: [
+                {
+                  relationshipType: "OWNER",
+                  identifier: "urn:li:userGeneratedContent",
+                },
+              ],
+            },
+          };
+
+          const registerResp = await fetchWithTimeout(
+            `${LINKEDIN_API_BASE}/assets?action=registerUpload`,
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(registerBody),
+            },
+            timeoutMs,
+          );
+
+          if (!registerResp.ok) {
+            const err = (await registerResp.json().catch(() => ({}))) as { message?: string };
+            return {
+              platform: "linkedin",
+              postId: "",
+              success: false,
+              error: sanitizeError(err.message || `Register upload failed: HTTP ${registerResp.status}`),
+            };
+          }
+
+          const registerData = (await registerResp.json()) as {
+            value: {
+              uploadMechanism: {
+                "com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest": {
+                  uploadUrl: string;
+                };
+              };
+              asset: string;
+            };
+          };
+
+          const uploadUrl =
+            registerData.value.uploadMechanism[
+              "com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest"
+            ].uploadUrl;
+          const assetUrn = registerData.value.asset;
+
+          // Step 2: Fetch image from R2 and upload binary to LinkedIn
+          const imageResp = await fetchWithTimeout(request.imageUrl, { method: "GET" }, timeoutMs);
+          if (!imageResp.ok) {
+            return {
+              platform: "linkedin",
+              postId: "",
+              success: false,
+              error: `Failed to fetch image from R2: HTTP ${imageResp.status}`,
+            };
+          }
+          const imageBuffer = await imageResp.arrayBuffer();
+
+          const uploadResp = await fetchWithTimeout(
+            uploadUrl,
+            {
+              method: "PUT",
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                "Content-Type": "image/webp",
+              },
+              body: imageBuffer,
+            },
+            timeoutMs,
+          );
+
+          if (!uploadResp.ok && uploadResp.status !== 201) {
+            return {
+              platform: "linkedin",
+              postId: "",
+              success: false,
+              error: `Image upload to LinkedIn failed: HTTP ${uploadResp.status}`,
+            };
+          }
+
+          // Step 3: Create post with image asset
+          const textWithoutUrl = request.text.replace(/https?:\/\/[^\s]+/g, "").trim();
+
+          const postBody = {
+            author: authorUrn,
+            lifecycleState: "PUBLISHED",
+            specificContent: {
+              "com.linkedin.ugc.ShareContent": {
+                shareCommentary: {
+                  text: textWithoutUrl,
+                },
+                shareMediaCategory: "IMAGE",
+                media: [
+                  {
+                    status: "READY",
+                    media: assetUrn,
+                  },
+                ],
+              },
+            },
+            visibility: {
+              "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC",
+            },
+          };
+
+          const response = await fetchWithTimeout(
+            `${LINKEDIN_API_BASE}/ugcPosts`,
+            {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                "Content-Type": "application/json",
+                "X-Restli-Protocol-Version": "2.0.0",
+              },
+              body: JSON.stringify(postBody),
+            },
+            timeoutMs,
+          );
+
+          if (!response.ok) {
+            const errorData = (await response.json().catch(() => ({}))) as { message?: string };
+            return {
+              platform: "linkedin",
+              postId: "",
+              success: false,
+              error: sanitizeError(errorData.message || `HTTP ${response.status}`),
+            };
+          }
+
+          const postId = response.headers.get("x-restli-id") || "";
+          return {
+            platform: "linkedin",
+            postId,
+            success: true,
+          };
+        }
+
+        // Text/article post (no image)
         const urlMatch = request.text.match(/https?:\/\/[^\s]+/);
         const textWithoutUrl = request.text.replace(/https?:\/\/[^\s]+/g, "").trim();
 

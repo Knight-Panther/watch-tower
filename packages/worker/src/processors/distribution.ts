@@ -14,8 +14,9 @@ import {
   getDefaultTemplate,
   type PostTemplateConfig,
 } from "@watch-tower/shared";
+import { and } from "drizzle-orm";
 import type { Database } from "@watch-tower/db";
-import { appConfig, postDeliveries } from "@watch-tower/db";
+import { appConfig, postDeliveries, articleImages } from "@watch-tower/db";
 import {
   createTelegramProvider,
   createFacebookProvider,
@@ -58,6 +59,7 @@ async function isPlatformEnabled(db: Database, platform: string): Promise<boolea
 }
 
 // Helper: Get template for platform from social_accounts
+// Merges saved template with defaults so new fields (e.g. showImage) are never undefined.
 async function getTemplateForPlatform(
   db: Database,
   platform: string,
@@ -68,10 +70,10 @@ async function getTemplateForPlatform(
     WHERE platform = ${platform} AND is_active = true
     LIMIT 1
   `);
-  return (
-    (result.rows[0] as { postTemplate: PostTemplateConfig | null } | undefined)?.postTemplate ??
-    getDefaultTemplate(platform)
-  );
+  const saved = (result.rows[0] as { postTemplate: PostTemplateConfig | null } | undefined)
+    ?.postTemplate;
+  const defaults = getDefaultTemplate(platform);
+  return saved ? { ...defaults, ...saved } : defaults;
 }
 
 // Helper: Get rate limit for platform from social_accounts
@@ -263,6 +265,16 @@ export const createDistributionWorker = ({
             ? article.llmSummaryKa
             : article.llmSummary || article.title;
 
+        // Fetch ready image for this article (if any)
+        const [articleImage] = await db
+          .select({ imageUrl: articleImages.imageUrl })
+          .from(articleImages)
+          .where(and(
+            eq(articleImages.articleId, articleId),
+            eq(articleImages.status, "ready"),
+          ))
+          .limit(1);
+
         // Build list of platforms to post to
         const platforms = [
           { name: "telegram", provider: telegram },
@@ -366,8 +378,10 @@ export const createDistributionWorker = ({
               template,
             );
 
-            // Post to platform
-            const postResult = await provider!.post({ text });
+            // Post to platform (attach image if template allows and image exists)
+            const imageUrl =
+              template.showImage && articleImage?.imageUrl ? articleImage.imageUrl : undefined;
+            const postResult = await provider!.post({ text, imageUrl });
             results.push({
               platform: name,
               success: postResult.success,

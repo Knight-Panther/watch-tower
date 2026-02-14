@@ -58,6 +58,49 @@ export const createFacebookProvider = (config: FacebookConfig): SocialProvider =
 
     async post(request: PostRequest): Promise<PostResult> {
       try {
+        if (request.imageUrl) {
+          // Image post: use /photos endpoint — Facebook downloads the image from URL
+          const url = `${GRAPH_API_BASE}/${pageId}/photos`;
+
+          const body: Record<string, string> = {
+            url: request.imageUrl,
+            caption: request.text,
+            access_token: accessToken,
+          };
+
+          const response = await fetchWithTimeout(
+            url,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: new URLSearchParams(body),
+            },
+            timeoutMs,
+          );
+
+          const result = (await response.json()) as {
+            id?: string;
+            post_id?: string;
+            error?: { message: string };
+          };
+
+          if (!response.ok || result.error) {
+            return {
+              platform: "facebook",
+              postId: "",
+              success: false,
+              error: sanitizeError(result.error?.message || `HTTP ${response.status}`),
+            };
+          }
+
+          return {
+            platform: "facebook",
+            postId: result.post_id || result.id || "",
+            success: true,
+          };
+        }
+
+        // Text post: use /feed endpoint with link preview
         const url = `${GRAPH_API_BASE}/${pageId}/feed`;
 
         const body: Record<string, string> = {
@@ -212,12 +255,8 @@ export const createFacebookProvider = (config: FacebookConfig): SocialProvider =
         parts.push(article.title);
       }
 
-      // Facebook typically skips long summary, relies on link preview
       if (template.showSummary && article.summary) {
-        // Truncate for Facebook
-        const truncated =
-          article.summary.length > 150 ? article.summary.slice(0, 147) + "..." : article.summary;
-        parts.push(truncated);
+        parts.push(article.summary);
       }
 
       if (template.showUrl) {

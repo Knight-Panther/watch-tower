@@ -16,7 +16,9 @@ import {
   QUEUE_LLM_BRAIN,
   QUEUE_DISTRIBUTION,
   QUEUE_TRANSLATION,
+  QUEUE_IMAGE_GENERATION,
   JOB_TRANSLATION_BATCH,
+  JOB_IMAGE_GENERATE,
   setLogLevel,
   logger,
 } from "@watch-tower/shared";
@@ -31,6 +33,8 @@ import { createSemanticDedupWorker } from "./processors/semantic-dedup.js";
 import { createLLMBrainWorker } from "./processors/llm-brain.js";
 import { createDistributionWorker } from "./processors/distribution.js";
 import { createTranslationWorker } from "./processors/translation.js";
+import { createImageGenerationWorker } from "./processors/image-generation.js";
+import { createR2Storage } from "./services/r2-storage.js";
 import { createEventPublisher } from "./events.js";
 import { ensureRepeatableJobs } from "./job-registry.js";
 import { createRateLimiter } from "./utils/rate-limiter.js";
@@ -147,6 +151,17 @@ const main = async () => {
     },
   });
 
+  // Image generation queue
+  const imageGenerationQueue = new Queue(QUEUE_IMAGE_GENERATION, {
+    connection,
+    defaultJobOptions: {
+      attempts: 3,
+      backoff: { type: "exponential", delay: 15000 },
+      removeOnComplete: 100,
+      removeOnFail: 50,
+    },
+  });
+
   // Embedding provider (skip if no API key)
   const embeddingProvider = env.OPENAI_API_KEY
     ? createEmbeddingProvider({
@@ -209,6 +224,25 @@ const main = async () => {
 
   const hasAnyPlatform = telegramConfig || facebookConfig || linkedinConfig;
 
+  // R2 storage (needs all R2 env vars to be configured)
+  const hasR2Config = !!(
+    process.env.R2_ACCOUNT_ID &&
+    process.env.R2_ACCESS_KEY_ID &&
+    process.env.R2_SECRET_ACCESS_KEY &&
+    process.env.R2_BUCKET_NAME &&
+    process.env.R2_PUBLIC_URL
+  );
+
+  const r2Storage = hasR2Config
+    ? createR2Storage({
+        accountId: process.env.R2_ACCOUNT_ID!,
+        accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+        bucketName: process.env.R2_BUCKET_NAME!,
+        publicUrl: process.env.R2_PUBLIC_URL!,
+      })
+    : null;
+
   const ingestWorker = createIngestWorker({ connection, db, eventPublisher });
   const maintenanceWorker = createMaintenanceWorker({
     connection,
@@ -224,6 +258,7 @@ const main = async () => {
     llmQueue: primaryApiKey ? llmQueue : undefined,
     rateLimiter,
     eventPublisher,
+    r2Storage: r2Storage ?? undefined,
   });
 
   // Semantic dedup worker (only if embeddings enabled)
@@ -302,15 +337,27 @@ const main = async () => {
         connection,
         db,
         distributionQueue: hasAnyPlatform ? distributionQueue : undefined,
+        imageGenerationQueue,
       })
     : null;
+
+  // Image generation worker (needs OpenAI key + R2 config)
+  const imageGenerationWorker =
+    env.OPENAI_API_KEY && r2Storage
+      ? createImageGenerationWorker({
+          connection,
+          db,
+          r2Storage,
+          distributionQueue: hasAnyPlatform ? distributionQueue : undefined,
+        })
+      : null;
 
   // ─── Startup Provider Health Check ──────────────────────────────────────────
   try {
     const tConfigRows = await db
       .select({ key: appConfig.key, value: appConfig.value })
       .from(appConfig)
-      .where(inArray(appConfig.key, ["translation_provider", "translation_model"]));
+      .where(inArray(appConfig.key, ["translation_provider", "translation_model", "image_generation_enabled"]));
     const tConfigMap = new Map(tConfigRows.map((r) => [r.key, r.value]));
 
     const healthResults = await checkAllProviders({
@@ -323,6 +370,7 @@ const main = async () => {
       embeddingModel: env.EMBEDDING_MODEL,
       translationProvider: (tConfigMap.get("translation_provider") as string) ?? undefined,
       translationModel: (tConfigMap.get("translation_model") as string) ?? undefined,
+      imageGenerationEnabled: tConfigMap.get("image_generation_enabled") === true,
     });
 
     for (const r of healthResults) {
@@ -414,6 +462,18 @@ const main = async () => {
     });
   }
 
+  if (imageGenerationWorker) {
+    imageGenerationWorker.on("failed", (job, err) => {
+      logger.error(`[image-gen] job ${job?.id ?? "unknown"} failed`, err.message);
+    });
+    imageGenerationWorker.on("error", (err) => {
+      logger.error("[image-gen] worker error", err.message);
+    });
+    imageGenerationWorker.on("stalled", (jobId) => {
+      logger.warn(`[image-gen] job ${jobId} stalled - will be retried`);
+    });
+  }
+
   // Clean failed jobs from previous runs (waiting jobs are preserved)
   await ingestQueue.clean(0, 0, "failed");
   await maintenanceQueue.clean(0, 0, "failed");
@@ -421,6 +481,7 @@ const main = async () => {
   await llmQueue.clean(0, 0, "failed");
   await distributionQueue.clean(0, 0, "failed");
   await translationQueue.clean(0, 0, "failed");
+  await imageGenerationQueue.clean(0, 0, "failed");
   logger.info("[worker] cleaned failed jobs");
 
   // Set up recurring jobs (BullMQ deduplicates by jobId automatically)
@@ -508,6 +569,19 @@ const main = async () => {
     logger.info("[worker] translation disabled (no GOOGLE_AI_API_KEY or OPENAI_API_KEY)");
   }
 
+  // Image generation recurring job (every 30 seconds — fallback for missed articles)
+  if (imageGenerationWorker) {
+    await imageGenerationQueue.add(
+      JOB_IMAGE_GENERATE,
+      {},
+      { repeat: { every: 30_000 }, jobId: "image-gen-repeat" },
+    );
+    logger.info("[worker] image generation enabled (gpt-image-1-mini + R2)");
+  } else {
+    const reason = !env.OPENAI_API_KEY ? "no OPENAI_API_KEY" : "no R2 config";
+    logger.info(`[worker] image generation disabled (${reason})`);
+  }
+
   // Self-healing interval: re-register repeatable jobs if they were deleted (e.g., Redis wipe)
   // This runs independently of BullMQ jobs to solve chicken-and-egg problem
   const selfHealInterval = setInterval(async () => {
@@ -545,12 +619,14 @@ const main = async () => {
       await llmBrainWorker?.close();
       await distributionWorker?.close();
       await translationWorker?.close();
+      await imageGenerationWorker?.close();
       await ingestQueue.close();
       await maintenanceQueue.close();
       await semanticDedupQueue.close();
       await llmQueue.close();
       await distributionQueue.close();
       await translationQueue.close();
+      await imageGenerationQueue.close();
       await redis.quit();
       await closeDb();
     } finally {

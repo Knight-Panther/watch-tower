@@ -387,16 +387,23 @@ export default function PostTemplates() {
                 </div>
               )}
 
-              {/* Image (Future) */}
-              <div className="flex items-center justify-between rounded-xl border border-slate-700/50 bg-slate-950/50 px-4 py-3 opacity-50">
+              {/* Image */}
+              <div className="flex items-center justify-between rounded-xl border border-slate-700 bg-slate-950 px-4 py-3">
                 <div>
-                  <p className="text-sm font-medium text-slate-200">
-                    Image <span className="ml-2 text-xs text-slate-500">(Coming Soon)</span>
-                  </p>
-                  <p className="text-xs text-slate-500">Attach AI-generated image</p>
+                  <p className="text-sm font-medium text-slate-200">Image</p>
+                  <p className="text-xs text-slate-500">Attach AI-generated image to post</p>
                 </div>
-                <button disabled className="relative h-6 w-11 cursor-not-allowed rounded-full bg-slate-700">
-                  <span className="absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-slate-500" />
+                <button
+                  onClick={() => updateTemplate("showImage", !template.showImage)}
+                  className={`relative h-6 w-11 rounded-full transition-colors ${
+                    template.showImage ? "bg-emerald-500" : "bg-slate-600"
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+                      template.showImage ? "translate-x-5" : "translate-x-0"
+                    }`}
+                  />
                 </button>
               </div>
             </div>

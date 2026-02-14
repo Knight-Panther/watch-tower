@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { eq, inArray } from "drizzle-orm";
 import { appConfig } from "@watch-tower/db";
-import { logger } from "@watch-tower/shared";
+import { logger, imageTemplateSchema, DEFAULT_IMAGE_TEMPLATE } from "@watch-tower/shared";
 import type { ApiDeps } from "../server.js";
 
 const CONSTRAINTS = {
@@ -447,5 +447,103 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
 
     logger.info("[config] translation settings updated");
     return { success: true };
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Image Generation Settings
+  // Controls AI image generation for news card posts.
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  app.get("/config/image-generation", { preHandler: deps.requireApiKey }, async () => {
+    const keys = [
+      "image_generation_enabled",
+      "image_generation_min_score",
+      "image_generation_quality",
+      "image_generation_size",
+      "image_generation_prompt",
+    ];
+
+    const rows = await deps.db
+      .select({ key: appConfig.key, value: appConfig.value })
+      .from(appConfig)
+      .where(inArray(appConfig.key, keys));
+
+    const m = new Map(rows.map((r) => [r.key, r.value]));
+
+    return {
+      enabled: (m.get("image_generation_enabled") as boolean) ?? false,
+      minScore: (m.get("image_generation_min_score") as number) ?? 4,
+      quality: (m.get("image_generation_quality") as string) ?? "medium",
+      size: (m.get("image_generation_size") as string) ?? "1024x1536",
+      prompt: (m.get("image_generation_prompt") as string) ?? "",
+    };
+  });
+
+  app.patch<{
+    Body: {
+      enabled?: boolean;
+      minScore?: number;
+      quality?: string;
+      size?: string;
+      prompt?: string;
+    };
+  }>("/config/image-generation", { preHandler: deps.requireApiKey }, async (request, reply) => {
+    const { enabled, minScore, quality, size, prompt } = request.body ?? {};
+
+    if (enabled !== undefined && typeof enabled !== "boolean") {
+      return reply.code(400).send({ error: "enabled must be a boolean" });
+    }
+    if (minScore !== undefined && (!Number.isFinite(minScore) || minScore < 1 || minScore > 5)) {
+      return reply.code(400).send({ error: "minScore must be a number between 1 and 5" });
+    }
+    const validQualities = ["low", "medium", "high"];
+    if (quality !== undefined && !validQualities.includes(quality)) {
+      return reply.code(400).send({ error: `quality must be one of: ${validQualities.join(", ")}` });
+    }
+    const validSizes = ["1024x1024", "1024x1536", "1536x1024"];
+    if (size !== undefined && !validSizes.includes(size)) {
+      return reply.code(400).send({ error: `size must be one of: ${validSizes.join(", ")}` });
+    }
+
+    const updates: { key: string; value: unknown }[] = [];
+    if (enabled !== undefined) updates.push({ key: "image_generation_enabled", value: enabled });
+    if (minScore !== undefined) {
+      updates.push({ key: "image_generation_min_score", value: minScore });
+    }
+    if (quality !== undefined) updates.push({ key: "image_generation_quality", value: quality });
+    if (size !== undefined) updates.push({ key: "image_generation_size", value: size });
+    if (prompt !== undefined) updates.push({ key: "image_generation_prompt", value: prompt });
+
+    for (const { key, value } of updates) {
+      await upsertTypedConfig(deps, key, value);
+    }
+
+    logger.info("[config] image generation settings updated");
+    return { success: true };
+  });
+
+  // ─── Image Template ─────────────────────────────────────────────────────────
+
+  app.get("/config/image-template", { preHandler: deps.requireApiKey }, async () => {
+    const [row] = await deps.db
+      .select({ value: appConfig.value })
+      .from(appConfig)
+      .where(eq(appConfig.key, "image_template"));
+
+    return row?.value ?? DEFAULT_IMAGE_TEMPLATE;
+  });
+
+  app.patch("/config/image-template", { preHandler: deps.requireApiKey }, async (request, reply) => {
+    const parsed = imageTemplateSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "Invalid image template",
+        details: parsed.error.flatten().fieldErrors,
+      });
+    }
+
+    await upsertTypedConfig(deps, "image_template", parsed.data);
+    logger.info("[config] image template updated");
+    return parsed.data;
   });
 };

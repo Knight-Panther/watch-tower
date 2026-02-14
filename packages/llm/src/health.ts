@@ -24,6 +24,7 @@ export type HealthCheckConfig = {
   deepseekApiKey?: string;
   googleAiApiKey?: string;
   embeddingModel?: string;
+  imageGenerationEnabled?: boolean;
 };
 
 // ─── Per-provider timeout ───────────────────────────────────────────────────
@@ -220,6 +221,35 @@ async function checkGemini(apiKey: string, model: string): Promise<ProviderHealt
   }
 }
 
+async function checkOpenAIImages(apiKey: string): Promise<ProviderHealthResult> {
+  const start = Date.now();
+  const model = "gpt-image-1-mini";
+  try {
+    const client = new OpenAI({ apiKey, baseURL: DEFAULT_BASE_URLS.openai });
+    // Lightweight check — just verify the model is accessible (no image generated)
+    await withTimeout(client.models.retrieve(model), TIMEOUT_MS);
+    return {
+      provider: "openai-images",
+      role: "image-generation",
+      displayName: "OpenAI Images",
+      model,
+      healthy: true,
+      latencyMs: Date.now() - start,
+      error: null,
+    };
+  } catch (err) {
+    return {
+      provider: "openai-images",
+      role: "image-generation",
+      displayName: "OpenAI Images",
+      model,
+      healthy: false,
+      latencyMs: Date.now() - start,
+      error: err instanceof Error ? err.message : "Unknown error",
+    };
+  }
+}
+
 // ─── LLM checker dispatch ───────────────────────────────────────────────────
 
 const LLM_CHECKERS: Record<string, (apiKey: string, model: string) => Promise<ProviderHealthResult>> = {
@@ -297,6 +327,11 @@ export async function checkAllProviders(
         ).then((r) => ({ ...r, role: "translation", displayName: "OpenAI (Translation)" })),
       );
     }
+  }
+
+  // 5. Image generation (OpenAI Images API)
+  if (config.imageGenerationEnabled && config.openaiApiKey) {
+    checks.push(checkOpenAIImages(config.openaiApiKey));
   }
 
   // Run all in parallel

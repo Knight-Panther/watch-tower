@@ -75,6 +75,16 @@ const formatLatency = (ms: number): string => {
   return `${ms}ms`;
 };
 
+const OPERATION_LABELS: Record<string, string> = {
+  score_and_summarize: "LLM Scoring",
+  embed_batch: "Embeddings",
+  translate: "Translation",
+  image_generation: "Image Generation",
+};
+
+const formatOperation = (op: string): string =>
+  OPERATION_LABELS[op] ?? op.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
 export default function Settings({
   telemetrySummary,
   telemetryByProvider,
@@ -332,9 +342,13 @@ export default function Settings({
                   </div>
                   <div>
                     <span className="text-[10px] uppercase tracking-wide text-slate-500">
-                      Tokens
+                      {provider.model?.startsWith("gpt-image") ? "Images" : "Tokens"}
                     </span>
-                    <p className="mt-1 text-slate-200">{formatTokens(provider.total_tokens)}</p>
+                    <p className="mt-1 text-slate-200">
+                      {provider.model?.startsWith("gpt-image")
+                        ? provider.requests
+                        : formatTokens(provider.total_tokens)}
+                    </p>
                   </div>
                   <div>
                     <span className="text-[10px] uppercase tracking-wide text-slate-500">Cost</span>
@@ -364,7 +378,7 @@ export default function Settings({
                 key={op.operation}
                 className="rounded-xl border border-slate-800 bg-slate-950/70 p-3"
               >
-                <p className="text-sm font-semibold text-slate-100">{op.operation}</p>
+                <p className="text-sm font-semibold text-slate-100">{formatOperation(op.operation)}</p>
                 <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
                   <div>
                     <span className="text-[10px] uppercase tracking-wide text-slate-500">
@@ -374,9 +388,13 @@ export default function Settings({
                   </div>
                   <div>
                     <span className="text-[10px] uppercase tracking-wide text-slate-500">
-                      Tokens
+                      {op.operation === "image_generation" ? "Images" : "Tokens"}
                     </span>
-                    <p className="mt-1 text-slate-200">{formatTokens(op.total_tokens)}</p>
+                    <p className="mt-1 text-slate-200">
+                      {op.operation === "image_generation"
+                        ? op.requests
+                        : formatTokens(op.total_tokens)}
+                    </p>
                   </div>
                   <div>
                     <span className="text-[10px] uppercase tracking-wide text-slate-500">Cost</span>

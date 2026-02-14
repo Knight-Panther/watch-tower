@@ -7,7 +7,7 @@ export const registerIngestRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     try {
       const job = await deps.maintenanceQueue.add(
         JOB_MAINTENANCE_SCHEDULE,
-        {},
+        { force: true },
         { jobId: `schedule-manual-${Date.now()}` },
       );
       return { queued: true, jobId: job.id };

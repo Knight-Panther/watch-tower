@@ -33,7 +33,13 @@ INSERT INTO app_config (key, value, updated_at) VALUES
   ('translation_scores', '[3, 4, 5]', NOW()),
   ('translation_provider', '"gemini"', NOW()),
   ('translation_model', '"gemini-2.5-flash"', NOW()),
-  ('translation_instructions', '"Translate the following English news content into Georgian. Maintain a professional, news-appropriate tone. Keep proper nouns (company names, person names) in their original form. Technical terms like Bitcoin, blockchain, AI may remain in English if no widely-accepted Georgian equivalent exists. The translation should be natural and fluent, not word-for-word."', NOW())
+  ('translation_instructions', '"Translate the following English news content into Georgian. Maintain a professional, news-appropriate tone. Keep proper nouns (company names, person names) in their original form. Technical terms like Bitcoin, blockchain, AI may remain in English if no widely-accepted Georgian equivalent exists. The translation should be natural and fluent, not word-for-word."', NOW()),
+  -- Image generation settings (disabled by default)
+  ('image_generation_enabled', 'false', NOW()),
+  ('image_generation_min_score', '4', NOW()),
+  ('image_generation_quality', '"medium"', NOW()),
+  ('image_generation_size', '"1024x1536"', NOW()),
+  ('image_template', '{"titlePosition":{"x":10,"y":70},"titleAlignment":"left","titleMaxWidth":80,"titleFontSize":42,"titleFontFamily":"Noto Sans Georgian","titleColor":"#FFFFFF","backdropEnabled":true,"backdropColor":"#000000B3","backdropPadding":24,"backdropBorderRadius":12,"watermarkPosition":{"x":85,"y":5},"watermarkScale":0.15}', NOW())
 ON CONFLICT (key) DO NOTHING;
 
 -- Seed default scoring rules for each sector

@@ -36,6 +36,7 @@ import type { Queue } from "bullmq";
 import { ensureRepeatableJobs } from "../job-registry.js";
 import type { RateLimiter } from "../utils/rate-limiter.js";
 import type { EventPublisher } from "../events.js";
+import type { R2Storage } from "../services/r2-storage.js";
 import {
   hashToken,
   upsertPlatformHealth,
@@ -57,6 +58,7 @@ type MaintenanceDeps = {
   llmQueue?: Queue;
   rateLimiter: RateLimiter;
   eventPublisher?: EventPublisher;
+  r2Storage?: R2Storage;
 };
 
 const getConfigNumber = async (db: Database, key: string, fallback: number) => {
@@ -69,7 +71,7 @@ const getConfigNumber = async (db: Database, key: string, fallback: number) => {
   return Number.isNaN(num) ? fallback : num;
 };
 
-const runScheduledIngests = async (db: Database, ingestQueue: Queue) => {
+const runScheduledIngests = async (db: Database, ingestQueue: Queue, force = false) => {
   const sources = await db
     .select({
       id: rssSources.id,
@@ -120,7 +122,7 @@ const runScheduledIngests = async (db: Database, ingestQueue: Queue) => {
     const intervalMs = Math.min(4320, Math.max(1, intervalMinutes)) * 60 * 1000;
     const lastRun = lastRunBySource.get(source.id);
     const elapsed = lastRun ? now - lastRun : Infinity;
-    const isDue = !lastRun || elapsed >= intervalMs - TOLERANCE_MS;
+    const isDue = force || !lastRun || elapsed >= intervalMs - TOLERANCE_MS;
 
     logger.debug(
       `[scheduler] ${source.id.slice(0, 8)}: interval=${intervalMinutes}m, elapsed=${Math.round(elapsed / 1000)}s, due=${isDue}`,
@@ -130,8 +132,11 @@ const runScheduledIngests = async (db: Database, ingestQueue: Queue) => {
 
     const maxAgeDays = Math.min(15, Math.max(1, source.maxAgeDays ?? source.sectorDefaultMaxAge ?? 5));
 
-    // Time bucket prevents duplicate jobs within same interval window
-    const timeBucket = Math.floor(now / intervalMs);
+    // Time bucket prevents duplicate jobs within same interval window.
+    // Force runs use timestamp-based ID to bypass dedup.
+    const jobId = force
+      ? `ingest-${source.id}-force-${now}`
+      : `ingest-${source.id}-${Math.floor(now / intervalMs)}`;
     await ingestQueue.add(
       JOB_INGEST_FETCH,
       {
@@ -140,7 +145,7 @@ const runScheduledIngests = async (db: Database, ingestQueue: Queue) => {
         sectorId: source.sectorId,
         maxAgeDays,
       },
-      { jobId: `ingest-${source.id}-${timeBucket}` },
+      { jobId },
     );
 
     fired++;
@@ -413,6 +418,7 @@ type ClaimedDelivery = {
 };
 
 // Helper: Get template for platform from social_accounts
+// Merges saved template with defaults so new fields (e.g. showImage) are never undefined.
 async function getTemplateForPlatform(
   db: Database,
   platform: string,
@@ -423,10 +429,10 @@ async function getTemplateForPlatform(
     WHERE platform = ${platform} AND is_active = true
     LIMIT 1
   `);
-  return (
-    (result.rows[0] as { postTemplate: PostTemplateConfig | null } | undefined)?.postTemplate ??
-    getDefaultTemplate(platform)
-  );
+  const saved = (result.rows[0] as { postTemplate: PostTemplateConfig | null } | undefined)
+    ?.postTemplate;
+  const defaults = getDefaultTemplate(platform);
+  return saved ? { ...defaults, ...saved } : defaults;
 }
 
 // Helper: Get rate limit for platform from social_accounts
@@ -614,6 +620,22 @@ const processScheduledPosts = async (
       // Get template for this platform
       const template = await getTemplateForPlatform(db, delivery.platform);
 
+      // Fetch ready image for this article (if any)
+      let imageUrl: string | undefined;
+      if (template.showImage) {
+        const [articleImage] = await db
+          .select({ imageUrl: articleImages.imageUrl })
+          .from(articleImages)
+          .where(
+            and(
+              eq(articleImages.articleId, delivery.articleId),
+              eq(articleImages.status, "ready"),
+            ),
+          )
+          .limit(1);
+        imageUrl = articleImage?.imageUrl ?? undefined;
+      }
+
       // Format and post using template (uses resolved language content)
       const text = provider.formatPost(
         {
@@ -625,7 +647,7 @@ const processScheduledPosts = async (
         template,
       );
 
-      const postResult = await provider.post({ text });
+      const postResult = await provider.post({ text, imageUrl });
 
       if (!postResult.success) {
         logger.error(
@@ -700,6 +722,7 @@ export const createMaintenanceWorker = ({
   llmQueue,
   rateLimiter,
   eventPublisher,
+  r2Storage,
 }: MaintenanceDeps) => {
   // Create providers at startup (only for configured platforms)
   const providers: PlatformProviders = {
@@ -752,10 +775,31 @@ export const createMaintenanceWorker = ({
           errors.push("llm_telemetry");
         }
 
-        // Article images cleanup
+        // Article images cleanup (delete R2 objects first, then DB rows)
         try {
           const articleImagesTtlDays = await getConfigNumber(db, "article_images_ttl_days", 30);
           const imagesCutoff = new Date(Date.now() - articleImagesTtlDays * 24 * 60 * 60 * 1000);
+
+          // Fetch r2Keys before deleting DB rows so we can clean up R2 storage
+          if (r2Storage) {
+            const expiredImages = await db
+              .select({ id: articleImages.id, r2Key: articleImages.r2Key })
+              .from(articleImages)
+              .where(lt(articleImages.createdAt, imagesCutoff));
+
+            const r2Keys = expiredImages
+              .map((img) => img.r2Key)
+              .filter((k): k is string => k !== null);
+
+            if (r2Keys.length > 0) {
+              await r2Storage.deleteImages(r2Keys);
+              logger.info(
+                { count: r2Keys.length },
+                "[maintenance] deleted R2 image objects",
+              );
+            }
+          }
+
           await db.delete(articleImages).where(lt(articleImages.createdAt, imagesCutoff));
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -808,7 +852,7 @@ export const createMaintenanceWorker = ({
         // Rescue orphaned approved articles (Redis queue failure recovery)
         await rescueOrphanedApprovedArticles(db, distributionQueue);
         await retryPostingFailed(db, distributionQueue);
-        await runScheduledIngests(db, ingestQueue);
+        await runScheduledIngests(db, ingestQueue, job.data?.force === true);
         // Process any scheduled posts that are due
         await processScheduledPosts(db, providers, rateLimiter, eventPublisher);
         return;

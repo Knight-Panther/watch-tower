@@ -14,9 +14,10 @@ const ROLE_LABELS: Record<string, string> = {
   "llm-fallback": "LLM Fallback",
   embeddings: "Embeddings",
   translation: "Translation",
+  "image-generation": "Image Generation",
 };
 
-const ROLE_ORDER = ["embeddings", "llm-primary", "llm-fallback", "translation"];
+const ROLE_ORDER = ["embeddings", "llm-primary", "llm-fallback", "translation", "image-generation"];
 
 export default function ApiHealthModal({
   results,
