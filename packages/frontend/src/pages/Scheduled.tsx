@@ -18,6 +18,17 @@ import {
   type ScheduledStats,
 } from "../api";
 
+/** Only allow http/https URLs as link targets (block javascript:, data:, etc.) */
+const safeHref = (url: string | null | undefined): string | undefined => {
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    return ["http:", "https:"].includes(parsed.protocol) ? url : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 const STATUS_OPTIONS = [
   { value: "scheduled", label: "Scheduled" },
   { value: "posting", label: "Posting" },
@@ -459,7 +470,7 @@ export default function Scheduled() {
                           </td>
                           <td className="px-4 py-2.5 max-w-md">
                             <a
-                              href={delivery.article_url}
+                              href={safeHref(delivery.article_url) ?? "#"}
                               target="_blank"
                               rel="noopener noreferrer"
                               className={`hover:text-white hover:underline font-medium line-clamp-1 text-xs ${

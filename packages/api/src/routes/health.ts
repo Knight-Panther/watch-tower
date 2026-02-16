@@ -1,5 +1,4 @@
 import type { FastifyInstance } from "fastify";
-import { Redis } from "ioredis";
 import { sql } from "drizzle-orm";
 import { platformHealth } from "@watch-tower/db";
 import { JOB_PLATFORM_HEALTH_CHECK } from "@watch-tower/shared";
@@ -15,18 +14,10 @@ export const registerHealthRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     let redisStatus = "ok";
     let dbStatus = "ok";
 
-    const redis = new Redis({
-      ...deps.redisConnection,
-      lazyConnect: true,
-      maxRetriesPerRequest: 1,
-    });
     try {
-      await redis.connect();
-      await redis.ping();
+      await deps.redis.ping();
     } catch {
       redisStatus = "error";
-    } finally {
-      await redis.quit().catch(() => {});
     }
 
     try {

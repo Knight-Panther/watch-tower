@@ -31,24 +31,3 @@ SUMMARY (English):
 ${summary}`;
 };
 
-/** @deprecated Use buildSystemPrompt + buildUserPrompt instead */
-export const buildTranslationPrompt = (
-  title: string,
-  summary: string,
-  instructions: string,
-): string => {
-  return `${instructions}
-
----
-
-TITLE (English):
-${title}
-
-SUMMARY (English):
-${summary}
-
----
-
-Respond with ONLY valid JSON in this exact format:
-{"title_ka": "Georgian title here", "summary_ka": "Georgian summary here"}`;
-};

@@ -444,9 +444,11 @@ export default function PostTemplates() {
                   className="whitespace-pre-wrap text-sm text-slate-200"
                   dangerouslySetInnerHTML={{
                     __html: preview
+                      // Strip all tags except <b>, </b>, <a ...>, </a>
+                      .replace(/<(?!\/?b>|\/?a[\s>])[^>]*>/gi, "")
                       .replace(/<b>/g, '<strong class="font-semibold">')
                       .replace(/<\/b>/g, "</strong>")
-                      .replace(/<a /g, '<a class="text-blue-400 underline" ')
+                      .replace(/<a /g, '<a class="text-blue-400 underline" rel="noopener noreferrer" ')
                       .replace(/\n\n/g, "<br/><br/>"),
                   }}
                 />

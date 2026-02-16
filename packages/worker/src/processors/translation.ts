@@ -22,6 +22,7 @@ type TranslationDeps = {
   db: Database;
   distributionQueue?: Queue;
   imageGenerationQueue?: Queue;
+  apiKeys?: { googleAi?: string; openai?: string };
 };
 
 type TranslationConfig = {
@@ -66,12 +67,15 @@ async function getTranslationConfig(db: Database): Promise<TranslationConfig> {
 /**
  * Resolve API key for the configured provider.
  */
-function getTranslationApiKey(provider: string): string | undefined {
+function getTranslationApiKey(
+  provider: string,
+  keys?: { googleAi?: string; openai?: string },
+): string | undefined {
   switch (provider) {
     case "gemini":
-      return process.env.GOOGLE_AI_API_KEY;
+      return keys?.googleAi;
     case "openai":
-      return process.env.OPENAI_API_KEY;
+      return keys?.openai;
     default:
       return undefined;
   }
@@ -95,6 +99,7 @@ export const createTranslationWorker = ({
   db,
   distributionQueue,
   imageGenerationQueue,
+  apiKeys,
 }: TranslationDeps) => {
   return new Worker(
     QUEUE_TRANSLATION,
@@ -112,7 +117,7 @@ export const createTranslationWorker = ({
       }
 
       // Check API key for configured provider
-      const apiKey = getTranslationApiKey(config.provider);
+      const apiKey = getTranslationApiKey(config.provider, apiKeys);
       if (!apiKey) {
         logger.warn(`[translation] no API key for provider: ${config.provider}`);
         return { skipped: true, reason: "no_api_key" };

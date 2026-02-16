@@ -25,7 +25,7 @@ export const parseScoringResponse = (
 ): { success: true; data: ScoringResponse } | { success: false; error: string } => {
   try {
     // Strip markdown code fences if present
-    let cleaned = text
+    const cleaned = text
       .replace(/^```json\s*/i, "")
       .replace(/^```\s*/i, "")
       .replace(/\s*```$/i, "")

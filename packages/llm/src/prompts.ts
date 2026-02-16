@@ -6,35 +6,7 @@
 export const MAX_CONTENT_LENGTH = 10000;
 
 /**
- * Default scoring prompt template.
- * Uses explicit JSON example (not <1-5>) to improve parse reliability.
- */
-export const DEFAULT_SCORING_PROMPT = `You are a news importance scorer for a media monitoring system.
-
-Rate the following article on a scale of 1-5 based on its importance and newsworthiness.
-
-Scoring criteria:
-1 = Not newsworthy (press releases, minor updates, promotional content)
-2 = Low importance (routine news, minor developments)
-3 = Moderate importance (notable but not urgent)
-4 = High importance (significant developments, breaking news)
-5 = Critical importance (major breaking news, market-moving events)
-
-Consider:
-- Novelty and uniqueness of the information
-- Potential impact on the sector/industry
-- Timeliness and urgency
-- Credibility indicators
-
-Article Title: {title}
-Article Content: {content}
-Sector: {sector}
-
-Respond with ONLY a valid JSON object, no markdown, no explanation:
-{"score": 3, "reasoning": "Brief explanation here"}`;
-
-/**
- * Prompt template for Phase 4+ (includes summary).
+ * Scoring prompt template (includes summary).
  */
 export const SCORING_WITH_SUMMARY_PROMPT = `You are a news analyst for a media monitoring system.
 

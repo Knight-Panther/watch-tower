@@ -26,7 +26,7 @@ import { createDb } from "@watch-tower/db";
 import { createEmbeddingProvider } from "@watch-tower/embeddings";
 import { createLLMProviderWithFallback, checkAllProviders } from "@watch-tower/llm";
 import { appConfig } from "@watch-tower/db";
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { createIngestWorker } from "./processors/feed.js";
 import { createMaintenanceWorker } from "./processors/maintenance.js";
 import { createSemanticDedupWorker } from "./processors/semantic-dedup.js";
@@ -226,20 +226,20 @@ const main = async () => {
 
   // R2 storage (needs all R2 env vars to be configured)
   const hasR2Config = !!(
-    process.env.R2_ACCOUNT_ID &&
-    process.env.R2_ACCESS_KEY_ID &&
-    process.env.R2_SECRET_ACCESS_KEY &&
-    process.env.R2_BUCKET_NAME &&
-    process.env.R2_PUBLIC_URL
+    env.R2_ACCOUNT_ID &&
+    env.R2_ACCESS_KEY_ID &&
+    env.R2_SECRET_ACCESS_KEY &&
+    env.R2_BUCKET_NAME &&
+    env.R2_PUBLIC_URL
   );
 
   const r2Storage = hasR2Config
     ? createR2Storage({
-        accountId: process.env.R2_ACCOUNT_ID!,
-        accessKeyId: process.env.R2_ACCESS_KEY_ID!,
-        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
-        bucketName: process.env.R2_BUCKET_NAME!,
-        publicUrl: process.env.R2_PUBLIC_URL!,
+        accountId: env.R2_ACCOUNT_ID!,
+        accessKeyId: env.R2_ACCESS_KEY_ID!,
+        secretAccessKey: env.R2_SECRET_ACCESS_KEY!,
+        bucketName: env.R2_BUCKET_NAME!,
+        publicUrl: env.R2_PUBLIC_URL!,
       })
     : null;
 
@@ -338,6 +338,7 @@ const main = async () => {
         db,
         distributionQueue: hasAnyPlatform ? distributionQueue : undefined,
         imageGenerationQueue,
+        apiKeys: { googleAi: env.GOOGLE_AI_API_KEY, openai: env.OPENAI_API_KEY },
       })
     : null;
 
@@ -349,6 +350,7 @@ const main = async () => {
           db,
           r2Storage,
           distributionQueue: hasAnyPlatform ? distributionQueue : undefined,
+          openaiApiKey: env.OPENAI_API_KEY,
         })
       : null;
 

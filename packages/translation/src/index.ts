@@ -4,7 +4,6 @@ export { translateWithOpenAI } from "./openai.js";
 export {
   buildSystemPrompt,
   buildUserPrompt,
-  buildTranslationPrompt,
   DEFAULT_TRANSLATION_INSTRUCTIONS,
 } from "./prompts.js";
 export { calculateTranslationCost } from "./pricing.js";

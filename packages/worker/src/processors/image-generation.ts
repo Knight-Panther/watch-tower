@@ -1,5 +1,5 @@
 import { Worker, Queue } from "bullmq";
-import { and, eq, gt, inArray, isNull, notExists, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, notExists, sql } from "drizzle-orm";
 import OpenAI from "openai";
 import {
   QUEUE_IMAGE_GENERATION,
@@ -22,6 +22,7 @@ type ImageGenDeps = {
   db: Database;
   r2Storage: R2Storage;
   distributionQueue?: Queue;
+  openaiApiKey?: string;
 };
 
 type ImageGenConfig = {
@@ -85,8 +86,9 @@ export const createImageGenerationWorker = ({
   db,
   r2Storage,
   distributionQueue,
+  openaiApiKey,
 }: ImageGenDeps) => {
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  const openai = new OpenAI({ apiKey: openaiApiKey });
 
   return new Worker(
     QUEUE_IMAGE_GENERATION,
@@ -102,7 +104,7 @@ export const createImageGenerationWorker = ({
         return { skipped: true, reason: "image_generation_disabled" };
       }
 
-      if (!process.env.OPENAI_API_KEY) {
+      if (!openaiApiKey) {
         logger.warn("[image-gen] OPENAI_API_KEY not set, skipping");
         return { skipped: true, reason: "no_api_key" };
       }

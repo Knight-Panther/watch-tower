@@ -356,7 +356,7 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       await upsertBooleanConfig(deps, "emergency_stop", enabled);
       // Log this critical action
       const action = enabled ? "ACTIVATED" : "DEACTIVATED";
-      console.warn(`[KILL SWITCH] Emergency stop ${action} via API`);
+      logger.warn(`[KILL SWITCH] Emergency stop ${action} via API`);
       return { enabled };
     },
   );

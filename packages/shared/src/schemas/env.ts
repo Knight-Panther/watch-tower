@@ -93,6 +93,28 @@ const coreEnvSchema = z.object({
     .string()
     .optional()
     .transform((val) => (val === "" ? undefined : val)),
+
+  // Cloudflare R2 storage (image generation)
+  R2_ACCOUNT_ID: z
+    .string()
+    .optional()
+    .transform((val) => (val === "" ? undefined : val)),
+  R2_ACCESS_KEY_ID: z
+    .string()
+    .optional()
+    .transform((val) => (val === "" ? undefined : val)),
+  R2_SECRET_ACCESS_KEY: z
+    .string()
+    .optional()
+    .transform((val) => (val === "" ? undefined : val)),
+  R2_BUCKET_NAME: z
+    .string()
+    .optional()
+    .transform((val) => (val === "" ? undefined : val)),
+  R2_PUBLIC_URL: z
+    .string()
+    .optional()
+    .transform((val) => (val === "" ? undefined : val)),
 });
 
 // ─── Base Environment Schema (merged with security) ──────────────────────────
@@ -101,7 +123,3 @@ export const baseEnvSchema = coreEnvSchema.merge(securityEnvSchema);
 
 export type BaseEnv = z.infer<typeof baseEnvSchema>;
 
-export const frontendEnvSchema = z.object({
-  VITE_API_URL: z.string().url(),
-  VITE_API_KEY: z.string().min(1),
-});

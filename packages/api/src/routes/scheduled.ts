@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { eq, and, gte, lte, inArray, desc, asc, sql, count } from "drizzle-orm";
+import { eq, and, gte, lte, inArray, desc, asc, count } from "drizzle-orm";
 import { articles, postDeliveries, rssSources, sectors } from "@watch-tower/db";
 import type { ApiDeps } from "../server.js";
 

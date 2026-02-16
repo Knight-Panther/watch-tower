@@ -18,15 +18,14 @@ export const registerProviderHealthRoutes = (app: FastifyInstance, deps: ApiDeps
       .where(inArray(appConfig.key, ["translation_provider", "translation_model", "image_generation_enabled"]));
     const configMap = new Map(rows.map((r) => [r.key, r.value]));
 
-    const env = process.env;
     const results = await checkAllProviders({
-      llmProvider: env.LLM_PROVIDER,
-      llmFallbackProvider: env.LLM_FALLBACK_PROVIDER,
-      anthropicApiKey: env.ANTHROPIC_API_KEY,
-      openaiApiKey: env.OPENAI_API_KEY,
-      deepseekApiKey: env.DEEPSEEK_API_KEY,
-      googleAiApiKey: env.GOOGLE_AI_API_KEY,
-      embeddingModel: env.EMBEDDING_MODEL,
+      llmProvider: deps.env.LLM_PROVIDER,
+      llmFallbackProvider: deps.env.LLM_FALLBACK_PROVIDER,
+      anthropicApiKey: deps.env.ANTHROPIC_API_KEY,
+      openaiApiKey: deps.env.OPENAI_API_KEY,
+      deepseekApiKey: deps.env.DEEPSEEK_API_KEY,
+      googleAiApiKey: deps.env.GOOGLE_AI_API_KEY,
+      embeddingModel: deps.env.EMBEDDING_MODEL,
       translationProvider: (configMap.get("translation_provider") as string) ?? undefined,
       translationModel: (configMap.get("translation_model") as string) ?? undefined,
       imageGenerationEnabled: configMap.get("image_generation_enabled") === true,

@@ -13,7 +13,6 @@ export { DeepSeekLLMProvider } from "./deepseek.js";
 export { LLMProviderWithFallback } from "./fallback.js";
 export { ScoringResponseSchema, parseScoringResponse } from "./schemas.js";
 export {
-  DEFAULT_SCORING_PROMPT,
   SCORING_WITH_SUMMARY_PROMPT,
   formatScoringPrompt,
   MAX_CONTENT_LENGTH,

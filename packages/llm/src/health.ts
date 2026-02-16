@@ -311,7 +311,7 @@ export async function checkAllProviders(
     checks.push(
       checkGemini(
         config.googleAiApiKey,
-        config.translationModel ?? "gemini-2.0-flash",
+        config.translationModel ?? "gemini-2.5-flash",
       ),
     );
   } else if (config.translationProvider === "openai" && config.openaiApiKey) {

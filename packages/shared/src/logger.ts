@@ -13,8 +13,6 @@ export const setLogLevel = (level: LogLevel) => {
   currentLevel = level;
 };
 
-export const getLogLevel = (): LogLevel => currentLevel;
-
 const shouldLog = (level: LogLevel): boolean =>
   LEVEL_PRIORITY[level] >= LEVEL_PRIORITY[currentLevel];
 

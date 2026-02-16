@@ -96,19 +96,3 @@ export type ServerEvent =
   | SourceFetchedEvent
   | StatsUpdatedEvent;
 
-// Type guard helpers
-export const isArticleEvent = (
-  event: ServerEvent,
-): event is
-  | ArticleIngestedEvent
-  | ArticleEmbeddedEvent
-  | ArticleScoredEvent
-  | ArticleApprovedEvent
-  | ArticleRejectedEvent
-  | ArticlePostedEvent => event.type.startsWith("article:");
-
-export const isSourceEvent = (event: ServerEvent): event is SourceFetchedEvent =>
-  event.type === "source:fetched";
-
-export const isStatsEvent = (event: ServerEvent): event is StatsUpdatedEvent =>
-  event.type === "stats:updated";

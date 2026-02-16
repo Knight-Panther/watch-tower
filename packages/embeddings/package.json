@@ -9,11 +9,11 @@
     "dev": "tsc --watch"
   },
   "dependencies": {
-    "openai": "^4.70.0",
+    "openai": "^4.73.0",
     "@watch-tower/db": "*",
     "@watch-tower/shared": "*"
   },
   "devDependencies": {
-    "typescript": "^5.6.0"
+    "typescript": "^5.9.3"
   }
 }

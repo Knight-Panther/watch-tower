@@ -1,5 +1,4 @@
 import type { FastifyInstance } from "fastify";
-import { sql } from "drizzle-orm";
 import {
   articles,
   feedFetchRuns,

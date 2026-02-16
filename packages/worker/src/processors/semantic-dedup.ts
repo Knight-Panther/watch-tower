@@ -200,7 +200,6 @@ export const createSemanticDedupWorker = ({
       for (let i = 0; i < validArticles.length; i++) {
         const article = validArticles[i];
         const embedding = embeddings[i];
-        const vectorStr = `[${embedding.join(",")}]`;
 
         // Check for similar articles - now includes 'embedding' stage with embeddings
         // Uses UUID tie-breaker for same-timestamp articles

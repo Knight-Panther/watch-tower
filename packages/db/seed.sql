@@ -26,6 +26,9 @@ INSERT INTO app_config (key, value, updated_at) VALUES
   ('auto_post_telegram', 'true', NOW()),
   ('auto_post_facebook', 'false', NOW()),
   ('auto_post_linkedin', 'false', NOW()),
+  -- Scoring thresholds (0 = OFF for auto-approve, range 1-5 for auto-reject)
+  ('auto_approve_threshold', '5', NOW()),
+  ('auto_reject_threshold', '2', NOW()),
   -- Security: Kill switch (Layer 8) - stops ALL social posting when enabled
   ('emergency_stop', 'false', NOW()),
   -- Translation settings (Georgian)
@@ -39,6 +42,7 @@ INSERT INTO app_config (key, value, updated_at) VALUES
   ('image_generation_min_score', '4', NOW()),
   ('image_generation_quality', '"medium"', NOW()),
   ('image_generation_size', '"1024x1536"', NOW()),
+  ('image_generation_prompt', '""', NOW()),
   ('image_template', '{"titlePosition":{"x":10,"y":70},"titleAlignment":"left","titleMaxWidth":80,"titleFontSize":42,"titleFontFamily":"Noto Sans Georgian","titleColor":"#FFFFFF","backdropEnabled":true,"backdropColor":"#000000B3","backdropPadding":24,"backdropBorderRadius":12,"watermarkPosition":{"x":85,"y":5},"watermarkScale":0.15}', NOW())
 ON CONFLICT (key) DO NOTHING;
 

@@ -18,6 +18,17 @@ import {
   type ArticlesResponse,
 } from "../api";
 
+/** Only allow http/https URLs as link targets (block javascript:, data:, etc.) */
+const safeHref = (url: string | null | undefined): string | undefined => {
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    return ["http:", "https:"].includes(parsed.protocol) ? url : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 const PIPELINE_STAGES = [
   { value: "ingested", label: "Ingested" },
   { value: "embedded", label: "Embedded" },
@@ -444,7 +455,7 @@ export default function Articles() {
                           <>
                             {article.translation_status === "translated" && article.title_ka ? (
                               <a
-                                href={article.url}
+                                href={safeHref(article.url) ?? "#"}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="text-slate-200 hover:text-white hover:underline font-medium line-clamp-1"
@@ -453,7 +464,7 @@ export default function Articles() {
                               </a>
                             ) : (
                               <a
-                                href={article.url}
+                                href={safeHref(article.url) ?? "#"}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="text-slate-200 hover:text-white hover:underline font-medium line-clamp-1 italic opacity-60"
@@ -492,7 +503,7 @@ export default function Articles() {
                         ) : (
                           <>
                             <a
-                              href={article.url}
+                              href={safeHref(article.url) ?? "#"}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-slate-200 hover:text-white hover:underline font-medium line-clamp-1"

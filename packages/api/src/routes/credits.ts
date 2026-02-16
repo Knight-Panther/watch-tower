@@ -22,8 +22,14 @@ export const registerCreditsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       }
     }
 
-    // Fetch balances from all configured providers
-    const balances = await getConfiguredBalances(process.env);
+    // Fetch balances from all configured providers (use validated env, not raw process.env)
+    const apiKeys: Record<string, string | undefined> = {
+      ANTHROPIC_API_KEY: deps.env.ANTHROPIC_API_KEY,
+      OPENAI_API_KEY: deps.env.OPENAI_API_KEY,
+      DEEPSEEK_API_KEY: deps.env.DEEPSEEK_API_KEY,
+      GOOGLE_AI_API_KEY: deps.env.GOOGLE_AI_API_KEY,
+    };
+    const balances = await getConfiguredBalances(apiKeys);
 
     const result = {
       providers: balances.map((b) => ({
@@ -53,8 +59,14 @@ export const registerCreditsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     // Clear cache
     await deps.redis.del(CACHE_KEY);
 
-    // Fetch fresh balances
-    const balances = await getConfiguredBalances(process.env);
+    // Fetch fresh balances (use validated env, not raw process.env)
+    const apiKeys: Record<string, string | undefined> = {
+      ANTHROPIC_API_KEY: deps.env.ANTHROPIC_API_KEY,
+      OPENAI_API_KEY: deps.env.OPENAI_API_KEY,
+      DEEPSEEK_API_KEY: deps.env.DEEPSEEK_API_KEY,
+      GOOGLE_AI_API_KEY: deps.env.GOOGLE_AI_API_KEY,
+    };
+    const balances = await getConfiguredBalances(apiKeys);
 
     const result = {
       providers: balances.map((b) => ({

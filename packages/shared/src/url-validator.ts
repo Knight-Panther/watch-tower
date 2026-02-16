@@ -29,7 +29,7 @@ const BLOCKED_HOSTNAMES = [
   "169.254.169.254", // AWS/Azure/GCP metadata
 ];
 
-export type UrlValidationResult = {
+type UrlValidationResult = {
   valid: boolean;
   error?: string;
   url?: URL;

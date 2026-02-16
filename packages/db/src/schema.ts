@@ -91,7 +91,7 @@ export const articles = pgTable(
     translationError: text("translation_error"),
     translatedAt: timestamp("translated_at", { withTimezone: true }),
     // Posting retry tracking
-    postingAttempts: integer("posting_attempts").default(0).notNull(),
+    postingAttempts: integer("posting_attempts").notNull().default(0),
     // Timestamps
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     scoredAt: timestamp("scored_at", { withTimezone: true }),
@@ -101,6 +101,14 @@ export const articles = pgTable(
     index("idx_articles_source_published").on(table.sourceId, table.publishedAt),
     index("idx_articles_sector_stage").on(table.sectorId, table.pipelineStage),
     index("idx_articles_stage").on(table.pipelineStage),
+    // Translation worker: WHERE importance_score = ANY([4,5]) AND translation_status IS NULL
+    index("idx_articles_translation").on(
+      table.importanceScore,
+      table.translationStatus,
+      table.createdAt,
+    ),
+    // Maintenance zombie reset: WHERE pipeline_stage IN (...) AND created_at < threshold
+    index("idx_articles_stage_created").on(table.pipelineStage, table.createdAt),
   ],
 );
 
@@ -114,7 +122,6 @@ export const scoringRules = pgTable("scoring_rules", {
     .unique(),
   promptTemplate: text("prompt_template").notNull(),
   scoreCriteria: jsonb("score_criteria").notNull().default({}),
-  modelPreference: text("model_preference").default("claude"),
   autoApproveThreshold: smallint("auto_approve_threshold").notNull().default(5),
   autoRejectThreshold: smallint("auto_reject_threshold").notNull().default(2),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -130,10 +137,6 @@ export const socialAccounts = pgTable("social_accounts", {
   credentials: jsonb("credentials").notNull().default({}),
   postTemplate: jsonb("post_template"), // PostTemplateConfig from @watch-tower/shared
   isActive: boolean("is_active").notNull().default(true),
-  sectorIds: uuid("sector_ids")
-    .array()
-    .notNull()
-    .default(sql`'{}'::uuid[]`),
   rateLimitPerHour: smallint("rate_limit_per_hour").notNull().default(4),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -170,18 +173,25 @@ export const postDeliveries = pgTable(
 
 // ─── Feed Fetch Runs (telemetry) ─────────────────────────────────────────────
 
-export const feedFetchRuns = pgTable("feed_fetch_runs", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  sourceId: uuid("source_id").references(() => rssSources.id, { onDelete: "cascade" }),
-  status: text("status").notNull(),
-  startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
-  finishedAt: timestamp("finished_at", { withTimezone: true }),
-  durationMs: integer("duration_ms"),
-  itemCount: integer("item_count"),
-  itemAdded: integer("item_added"),
-  errorMessage: text("error_message"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const feedFetchRuns = pgTable(
+  "feed_fetch_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sourceId: uuid("source_id").references(() => rssSources.id, { onDelete: "cascade" }),
+    status: text("status").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    durationMs: integer("duration_ms"),
+    itemCount: integer("item_count"),
+    itemAdded: integer("item_added"),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Stats endpoint + maintenance scheduler: WHERE source_id = ? AND status = 'success'
+    index("idx_feed_fetch_runs_source_status").on(table.sourceId, table.status, table.createdAt),
+  ],
+);
 
 // ─── LLM Telemetry ──────────────────────────────────────────────────────────
 
@@ -225,30 +235,37 @@ export const llmTelemetry = pgTable(
 
 // ─── Article Images (AI-generated news card images) ─────────────────────────
 
-export const articleImages = pgTable("article_images", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  articleId: uuid("article_id")
-    .notNull()
-    .references(() => articles.id, { onDelete: "cascade" }),
+export const articleImages = pgTable(
+  "article_images",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    articleId: uuid("article_id")
+      .notNull()
+      .references(() => articles.id, { onDelete: "cascade" }),
 
-  // Generation details
-  provider: text("provider").notNull(), // 'gpt-image-mini', 'dalle', 'stable'
-  model: text("model"),
-  prompt: text("prompt").notNull(),
+    // Generation details
+    provider: text("provider").notNull(), // 'gpt-image-mini', 'dalle', 'stable'
+    model: text("model"),
+    prompt: text("prompt").notNull(),
 
-  // Result
-  imageUrl: text("image_url"),
-  r2Key: text("r2_key"), // R2 object key for cleanup
-  status: text("status").notNull().default("pending"), // 'pending', 'generating', 'ready', 'failed'
-  errorMessage: text("error_message"),
+    // Result
+    imageUrl: text("image_url"),
+    r2Key: text("r2_key"), // R2 object key for cleanup
+    status: text("status").notNull().default("pending"), // 'pending', 'generating', 'ready', 'failed'
+    errorMessage: text("error_message"),
 
-  // Cost tracking (microdollars)
-  costMicrodollars: integer("cost_microdollars"),
+    // Cost tracking (microdollars)
+    costMicrodollars: integer("cost_microdollars"),
 
-  // Timing
-  latencyMs: integer("latency_ms"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+    // Timing
+    latencyMs: integer("latency_ms"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // Image generation polling + TTL cleanup
+    index("idx_article_images_created").on(table.createdAt),
+  ],
+);
 
 // ─── App Config ──────────────────────────────────────────────────────────────
 

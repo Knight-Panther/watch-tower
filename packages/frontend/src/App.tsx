@@ -862,9 +862,7 @@ export default function App() {
               onCreateSector={onCreateSector}
               onSectorFormChange={onSectorFormChange}
               onDeleteSector={onDeleteSector}
-              onSectorMaxAgeDraftChange={(id, value) =>
-                setSectorMaxAgeDrafts((prev) => ({ ...prev, [id]: value }))
-              }
+              onSectorMaxAgeDraftChange={onSectorMaxAgeDraftChange}
               onSaveSectorSettings={onSaveSectorSettings}
             />
           }

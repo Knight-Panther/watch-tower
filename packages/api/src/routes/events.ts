@@ -105,13 +105,25 @@ const maybeCleanupSubscriber = async () => {
 
 export const registerEventsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
   app.get("/api/events", { preHandler: deps.requireApiKey }, async (request, reply) => {
-    // Set SSE headers
-    reply.raw.writeHead(200, {
+    // Take over the response from Fastify — without this, Fastify tries to
+    // call reply.send() when the async handler returns, which kills the SSE
+    // connection immediately and causes a reconnection storm (~every 4s).
+    reply.hijack();
+
+    // Set SSE headers — must include CORS manually since reply.hijack()
+    // bypasses Fastify's onSend hooks where the CORS plugin adds headers.
+    // Without this, the browser kills the cross-origin SSE connection immediately.
+    const origin = request.headers.origin;
+    const sseHeaders: Record<string, string> = {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
-      "Access-Control-Allow-Origin": "*",
-    });
+    };
+    if (origin) {
+      sseHeaders["Access-Control-Allow-Origin"] = origin;
+      sseHeaders["Access-Control-Allow-Credentials"] = "true";
+    }
+    reply.raw.writeHead(200, sseHeaders);
 
     let isConnected = true;
     activeClientCount++;

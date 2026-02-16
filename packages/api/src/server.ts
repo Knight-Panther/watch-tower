@@ -8,6 +8,7 @@ import { Queue } from "bullmq";
 import { sql } from "drizzle-orm";
 import {
   baseEnvSchema,
+  type BaseEnv,
   QUEUE_INGEST,
   QUEUE_MAINTENANCE,
   setLogLevel,
@@ -41,6 +42,7 @@ export type ApiDeps = {
   maintenanceQueue: Queue;
   ingestQueue: Queue;
   requireApiKey: ReturnType<typeof createRequireApiKey>;
+  env: BaseEnv;
 };
 
 export const buildApp = async () => {
@@ -93,7 +95,21 @@ export const buildApp = async () => {
   const ingestQueue = new Queue(QUEUE_INGEST, { connection: redisConnection });
   const maintenanceQueue = new Queue(QUEUE_MAINTENANCE, { connection: redisConnection });
 
-  const app = Fastify({ logger: true });
+  const app = Fastify({
+    logger: {
+      serializers: {
+        req(req) {
+          return {
+            method: req.method,
+            url: req.url?.replace(/api_key=[^&]+/, "api_key=***"),
+            host: req.headers?.host,
+            remoteAddress: req.socket?.remoteAddress,
+            remotePort: req.socket?.remotePort,
+          };
+        },
+      },
+    },
+  });
 
   // Layer 6: CORS Whitelist - only allow configured origins
   const allowedOrigins = env.ALLOWED_ORIGINS?.split(",").map((o) => o.trim()) || [
@@ -141,6 +157,7 @@ export const buildApp = async () => {
     maintenanceQueue,
     ingestQueue,
     requireApiKey,
+    env,
   };
 
   registerHealthRoutes(app, deps);

@@ -20,7 +20,7 @@
     "@watch-tower/translation": "file:../translation",
     "@napi-rs/canvas": "^0.1.65",
     "@aws-sdk/client-s3": "^3.750.0",
-    "openai": "^4.70.0",
+    "openai": "^4.73.0",
     "sharp": "^0.33.5",
     "bullmq": "^5.66.5",
     "dotenv": "^17.2.3",
