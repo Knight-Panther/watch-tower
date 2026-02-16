@@ -348,6 +348,16 @@ const rescueOrphanedApprovedArticles = async (db: Database, distributionQueue?: 
   const orphaned = orphanedResult.rows as { id: string }[];
   if (orphaned.length === 0) return 0;
 
+  // Skip rescue if no platforms have auto-posting enabled — avoids infinite loop
+  // where maintenance rescues → distribution skips → maintenance rescues again
+  const enabledPlatforms = await db.execute(sql`
+    SELECT key FROM app_config
+    WHERE key IN ('auto_post_telegram', 'auto_post_facebook', 'auto_post_linkedin')
+      AND value = 'true'::jsonb
+    LIMIT 1
+  `);
+  if (enabledPlatforms.rows.length === 0) return 0;
+
   // Re-queue each orphaned article
   let requeued = 0;
   for (const article of orphaned) {
