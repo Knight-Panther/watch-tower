@@ -140,12 +140,13 @@ export default function ImageTemplate() {
     const titleY = (template.titlePosition.y / 100) * H;
     const maxW = (template.titleMaxWidth / 100) * W;
 
-    // Scale font size for preview (canvas is smaller than 1024x1536)
+    // Scale font size for preview (canvas is smaller than actual image)
     const scale = W / 1024;
     const fontSize = template.titleFontSize * scale;
 
-    // Word wrap
-    ctx.font = `bold ${fontSize}px sans-serif`;
+    // Word wrap (match backend font family for accurate wrapping)
+    ctx.font = `bold ${fontSize}px "${template.titleFontFamily}", sans-serif`;
+    ctx.textBaseline = "top";
     const words = SAMPLE_TITLE.split(" ");
     const lines: string[] = [];
     let currentLine = words[0] || "";
@@ -161,7 +162,7 @@ export default function ImageTemplate() {
     }
     lines.push(currentLine);
 
-    const lineHeight = fontSize * 1.3;
+    const lineHeight = fontSize * 1.35;
     const textBlockHeight = lines.length * lineHeight;
 
     // Backdrop
@@ -184,9 +185,10 @@ export default function ImageTemplate() {
       ctx.globalAlpha = 1;
     }
 
-    // Title text
+    // Title text (match backend: textBaseline "top", same font, same alignment logic)
     ctx.fillStyle = template.titleColor;
-    ctx.font = `bold ${fontSize}px sans-serif`;
+    ctx.font = `bold ${fontSize}px "${template.titleFontFamily}", sans-serif`;
+    ctx.textBaseline = "top";
     ctx.textAlign = template.titleAlignment as CanvasTextAlign;
 
     const textX =
@@ -197,24 +199,25 @@ export default function ImageTemplate() {
           : titleX;
 
     for (let i = 0; i < lines.length; i++) {
-      ctx.fillText(lines[i], textX, titleY + i * lineHeight + fontSize * 0.8);
+      ctx.fillText(lines[i], textX, titleY + i * lineHeight);
     }
 
-    // Watermark placeholder (scale relative to image width, matching backend)
+    // Watermark placeholder (matches backend position/scale exactly)
     const wmWidth = template.watermarkScale * W;
     const wmX = (template.watermarkPosition.x / 100) * W - wmWidth / 2;
     const wmY = (template.watermarkPosition.y / 100) * H;
 
-    ctx.globalAlpha = 0.7;
+    ctx.globalAlpha = 0.85;
     ctx.fillStyle = "#FFFFFF";
     ctx.font = `bold ${wmWidth * 0.3}px sans-serif`;
     ctx.textAlign = "center";
-    ctx.fillText("XTelo", wmX + wmWidth / 2, wmY + wmWidth * 0.15 + wmWidth * 0.1);
+    ctx.textBaseline = "top";
+    ctx.fillText("XTelo", wmX + wmWidth / 2, wmY);
     ctx.globalAlpha = 1;
 
     // Reset
     ctx.textAlign = "left";
-  }, [template]);
+  }, [template, genConfig.size]);
 
   const updateGen = <K extends keyof ImageGenerationConfig>(
     key: K,
@@ -703,10 +706,23 @@ export default function ImageTemplate() {
             <div className="mt-4 overflow-hidden rounded-xl border border-slate-800">
               <canvas
                 ref={canvasRef}
-                width={512}
-                height={768}
+                width={genConfig.size === "1536x1024" ? 768 : 512}
+                height={
+                  genConfig.size === "1024x1024"
+                    ? 512
+                    : genConfig.size === "1536x1024"
+                      ? 512
+                      : 768
+                }
                 className="w-full"
-                style={{ aspectRatio: "2/3" }}
+                style={{
+                  aspectRatio:
+                    genConfig.size === "1024x1024"
+                      ? "1/1"
+                      : genConfig.size === "1536x1024"
+                        ? "3/2"
+                        : "2/3",
+                }}
               />
             </div>
           </section>
