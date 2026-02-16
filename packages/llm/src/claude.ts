@@ -1,8 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { LLMProvider } from "./provider.js";
 import type { ScoringRequest, ScoringResult } from "./types.js";
-import { SCORING_WITH_SUMMARY_PROMPT, formatScoringPrompt } from "./prompts.js";
+import { SCORING_WITH_SUMMARY_PROMPT, formatScoringPrompt, truncateContent } from "./prompts.js";
 import { parseScoringResponse } from "./schemas.js";
+import { buildScoringUserMessage } from "@watch-tower/shared";
 import { logger } from "@watch-tower/shared";
 
 /**
@@ -28,19 +29,42 @@ export class ClaudeLLMProvider implements LLMProvider {
   }
 
   async score(request: ScoringRequest): Promise<ScoringResult> {
-    const prompt = formatScoringPrompt(request.promptTemplate ?? SCORING_WITH_SUMMARY_PROMPT, {
-      title: request.title,
-      content: request.contentSnippet ?? "",
-      sector: request.sectorName ?? "General",
-    });
+    // New path: system/user split (structured config or default)
+    // Legacy path: single user message (old prompt_template strings)
+    const useNewPath = !!request.systemPrompt;
+
+    let systemPrompt: string | undefined;
+    let userMessage: string;
+
+    if (useNewPath) {
+      systemPrompt = request.systemPrompt;
+      const truncatedContent = truncateContent(request.contentSnippet ?? "");
+      userMessage = buildScoringUserMessage(
+        request.title,
+        truncatedContent,
+        request.sectorName ?? "General",
+      );
+    } else {
+      // Legacy: single merged prompt
+      userMessage = formatScoringPrompt(
+        request.promptTemplate ?? SCORING_WITH_SUMMARY_PROMPT,
+        {
+          title: request.title,
+          content: request.contentSnippet ?? "",
+          sector: request.sectorName ?? "General",
+        },
+      );
+    }
 
     const startTime = Date.now();
 
     try {
       const response = await this.client.messages.create({
         model: this.model,
-        max_tokens: 256,
-        messages: [{ role: "user", content: prompt }],
+        max_tokens: 512,
+        temperature: 0.2,
+        ...(systemPrompt ? { system: systemPrompt } : {}),
+        messages: [{ role: "user", content: userMessage }],
       });
 
       const latencyMs = Date.now() - startTime;

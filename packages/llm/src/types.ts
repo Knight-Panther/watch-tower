@@ -3,7 +3,8 @@ export type ScoringRequest = {
   title: string;
   contentSnippet: string | null;
   sectorName?: string;
-  promptTemplate?: string; // Custom prompt, or use default
+  promptTemplate?: string; // Legacy: single merged prompt (backward compat)
+  systemPrompt?: string; // New: stable instructions (role, rubric, examples, format)
 };
 
 export type ScoringResult = {

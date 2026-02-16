@@ -6,7 +6,7 @@ import {
   JOB_DISTRIBUTION_IMMEDIATE,
   AUTO_POST_STAGGER_MS,
   logger,
-  buildScoringPrompt,
+  buildScoringSystemPrompt,
   defaultScoringConfig,
   scoringConfigSchema,
   type ScoringConfig,
@@ -166,31 +166,50 @@ export const createLLMBrainWorker = ({
 
       /**
        * Resolves the scoring prompt for an article.
-       * Priority: structured config (validated) > legacy prompt_template > default config
+       * Returns either:
+       *   { systemPrompt } — new split path (structured config or default)
+       *   { promptTemplate } — legacy single-message path (old prompt_template strings)
+       *
+       * Priority: structured config > legacy prompt_template > default config
        */
-      const resolvePrompt = (sectorId: string | null, sectorName: string | null): string | undefined => {
-        if (!sectorId) return undefined;
+      type ResolvedPrompt =
+        | { systemPrompt: string; promptTemplate?: undefined }
+        | { systemPrompt?: undefined; promptTemplate: string };
+
+      const resolvePrompt = (
+        sectorId: string | null,
+        sectorName: string | null,
+      ): ResolvedPrompt => {
+        const name = sectorName ?? "General";
+
+        if (!sectorId) {
+          // No sector — use default config with system/user split
+          return { systemPrompt: buildScoringSystemPrompt(defaultScoringConfig, name) };
+        }
 
         const rules = sectorRules.get(sectorId);
-        if (!rules) return undefined;
+        if (!rules) {
+          // Sector exists but no custom rules — use default config
+          return { systemPrompt: buildScoringSystemPrompt(defaultScoringConfig, name) };
+        }
 
-        // Priority 1: Structured config (new system) - validate to prevent worker crash
+        // Priority 1: Structured config (new system) — system/user split
         if (rules.config && typeof rules.config === "object" && Object.keys(rules.config).length > 0) {
           const parsed = scoringConfigSchema.safeParse(rules.config);
           if (parsed.success) {
-            return buildScoringPrompt(parsed.data, sectorName ?? "General");
+            return { systemPrompt: buildScoringSystemPrompt(parsed.data, name) };
           }
-          // Invalid config in DB - log warning and fall through to legacy/default
+          // Invalid config in DB — log warning and fall through
           logger.warn({ sectorId }, "[llm-brain] invalid score_criteria in DB, using fallback");
         }
 
-        // Priority 2: Legacy prompt_template (backward compat)
+        // Priority 2: Legacy prompt_template (backward compat — single message)
         if (rules.promptTemplate) {
-          return rules.promptTemplate;
+          return { promptTemplate: rules.promptTemplate };
         }
 
-        // Priority 3: Default config
-        return buildScoringPrompt(defaultScoringConfig, sectorName ?? "General");
+        // Priority 3: Default config — system/user split
+        return { systemPrompt: buildScoringSystemPrompt(defaultScoringConfig, name) };
       };
 
       // Enrich articles with sector names
@@ -202,14 +221,17 @@ export const createLLMBrainWorker = ({
       logger.info(`[llm-brain] claimed ${articles.length} articles for scoring`);
 
       // 2. Build scoring requests with sector-specific prompts
-      // Uses compile-on-read: structured config > legacy prompt > default
+      // Uses compile-on-read: structured config (system/user) > legacy prompt > default
       const requests: ScoringRequest[] = articles.map((a) => {
+        const resolved = resolvePrompt(a.sectorId, a.sectorName);
         return {
           articleId: a.id,
           title: a.title,
           contentSnippet: a.contentSnippet,
           sectorName: a.sectorName ?? undefined,
-          promptTemplate: resolvePrompt(a.sectorId, a.sectorName),
+          ...(resolved.systemPrompt
+            ? { systemPrompt: resolved.systemPrompt }
+            : { promptTemplate: resolved.promptTemplate }),
         };
       });
 

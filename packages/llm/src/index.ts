@@ -15,6 +15,7 @@ export { ScoringResponseSchema, parseScoringResponse } from "./schemas.js";
 export {
   SCORING_WITH_SUMMARY_PROMPT,
   formatScoringPrompt,
+  truncateContent,
   MAX_CONTENT_LENGTH,
 } from "./prompts.js";
 export {

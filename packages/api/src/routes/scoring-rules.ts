@@ -5,7 +5,6 @@ import {
   scoringConfigSchema,
   defaultScoringConfig,
   buildScoringPrompt,
-  type ScoringConfig,
 } from "@watch-tower/shared";
 import type { ApiDeps } from "../server.js";
 
@@ -34,12 +33,17 @@ export const registerScoringRulesRoutes = (app: FastifyInstance, deps: ApiDeps) 
       const hasStructuredConfig =
         r.config && typeof r.config === "object" && Object.keys(r.config).length > 0;
 
+      // Normalize through Zod so old JSONB rows get default values for new fields (e.g. examples)
+      const normalizedConfig = hasStructuredConfig
+        ? scoringConfigSchema.parse(r.config)
+        : defaultScoringConfig;
+
       return {
         id: r.id,
         sector_id: r.sectorId,
         sector_name: r.sectorName,
         sector_slug: r.sectorSlug,
-        config: hasStructuredConfig ? r.config : defaultScoringConfig,
+        config: normalizedConfig,
         is_legacy: !hasStructuredConfig && !!r.promptTemplate,
         auto_approve_threshold: r.autoApproveThreshold,
         auto_reject_threshold: r.autoRejectThreshold,
@@ -78,8 +82,9 @@ export const registerScoringRulesRoutes = (app: FastifyInstance, deps: ApiDeps) 
         typeof rule.scoreCriteria === "object" &&
         Object.keys(rule.scoreCriteria).length > 0;
 
+      // Normalize through Zod so old JSONB rows get default values for new fields (e.g. examples)
       const config = hasStructuredConfig
-        ? (rule.scoreCriteria as ScoringConfig)
+        ? scoringConfigSchema.parse(rule.scoreCriteria)
         : defaultScoringConfig;
 
       // Generate preview of what prompt the worker will use

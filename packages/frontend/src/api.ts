@@ -825,6 +825,7 @@ export type ScoringConfig = {
   score3: string;
   score4: string;
   score5: string;
+  examples: Array<{ title: string; score: number; reasoning: string }>;
   summaryMaxChars: number;
   summaryTone: "professional" | "casual" | "urgent";
   summaryLanguage: string;

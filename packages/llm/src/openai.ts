@@ -2,8 +2,9 @@ import OpenAI from "openai";
 import type { LLMProvider } from "./provider.js";
 import type { ScoringRequest, ScoringResult } from "./types.js";
 import { DEFAULT_MODELS, DEFAULT_BASE_URLS } from "./types.js";
-import { SCORING_WITH_SUMMARY_PROMPT, formatScoringPrompt } from "./prompts.js";
+import { SCORING_WITH_SUMMARY_PROMPT, formatScoringPrompt, truncateContent } from "./prompts.js";
 import { parseScoringResponse } from "./schemas.js";
+import { buildScoringUserMessage } from "@watch-tower/shared";
 import { logger } from "@watch-tower/shared";
 
 /**
@@ -15,7 +16,13 @@ const FALLBACK_SCORE = 3;
 /**
  * Models that support JSON mode (response_format: { type: "json_object" })
  */
-const JSON_MODE_MODELS = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo", "deepseek-chat"];
+const JSON_MODE_MODELS = [
+  "gpt-4o",
+  "gpt-4o-mini",
+  "gpt-4-turbo",
+  "gpt-3.5-turbo",
+  "deepseek-chat",
+];
 
 export class OpenAILLMProvider implements LLMProvider {
   private client: OpenAI;
@@ -39,11 +46,33 @@ export class OpenAILLMProvider implements LLMProvider {
   }
 
   async score(request: ScoringRequest): Promise<ScoringResult> {
-    const prompt = formatScoringPrompt(request.promptTemplate ?? SCORING_WITH_SUMMARY_PROMPT, {
-      title: request.title,
-      content: request.contentSnippet ?? "",
-      sector: request.sectorName ?? "General",
-    });
+    // New path: system/user split (structured config or default)
+    // Legacy path: single user message (old prompt_template strings)
+    const useNewPath = !!request.systemPrompt;
+
+    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
+
+    if (useNewPath) {
+      messages.push({ role: "system", content: request.systemPrompt! });
+      const truncatedContent = truncateContent(request.contentSnippet ?? "");
+      const userMessage = buildScoringUserMessage(
+        request.title,
+        truncatedContent,
+        request.sectorName ?? "General",
+      );
+      messages.push({ role: "user", content: userMessage });
+    } else {
+      // Legacy: single merged prompt
+      const prompt = formatScoringPrompt(
+        request.promptTemplate ?? SCORING_WITH_SUMMARY_PROMPT,
+        {
+          title: request.title,
+          content: request.contentSnippet ?? "",
+          sector: request.sectorName ?? "General",
+        },
+      );
+      messages.push({ role: "user", content: prompt });
+    }
 
     const startTime = Date.now();
 
@@ -53,9 +82,10 @@ export class OpenAILLMProvider implements LLMProvider {
 
       const response = await this.client.chat.completions.create({
         model: this.model,
-        max_tokens: 256,
-        messages: [{ role: "user", content: prompt }],
-        ...(supportsJsonMode && { response_format: { type: "json_object" } }),
+        max_tokens: 512,
+        temperature: 0.2,
+        messages,
+        ...(supportsJsonMode && { response_format: { type: "json_object" as const } }),
       });
 
       const latencyMs = Date.now() - startTime;
@@ -66,7 +96,7 @@ export class OpenAILLMProvider implements LLMProvider {
       const usage = response.usage
         ? {
             inputTokens: response.usage.prompt_tokens,
-            outputTokens: response.usage.completion_tokens,
+            outputTokens: response.usage.completion_tokens ?? 0,
             totalTokens: response.usage.total_tokens,
           }
         : undefined;

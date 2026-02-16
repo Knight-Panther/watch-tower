@@ -6,7 +6,17 @@
 export const MAX_CONTENT_LENGTH = 10000;
 
 /**
- * Scoring prompt template (includes summary).
+ * Truncate article content and append "[truncated]" marker if needed.
+ * The scoring system prompt instructs the model not to penalize truncated content.
+ */
+export const truncateContent = (content: string): string => {
+  if (content.length <= MAX_CONTENT_LENGTH) return content;
+  return content.slice(0, MAX_CONTENT_LENGTH) + "... [truncated]";
+};
+
+/**
+ * @deprecated Use buildScoringSystemPrompt + buildScoringUserMessage from @watch-tower/shared.
+ * Kept for backward compatibility with legacy scoring_rules.prompt_template strings.
  */
 export const SCORING_WITH_SUMMARY_PROMPT = `You are a news analyst for a media monitoring system.
 
@@ -31,17 +41,14 @@ Respond with ONLY a valid JSON object, no markdown, no explanation:
 {"score": 3, "summary": "One or two sentence summary here.", "reasoning": "Brief explanation"}`;
 
 /**
- * Format prompt template with article data.
- * Truncates content to MAX_CONTENT_LENGTH.
+ * @deprecated Use buildScoringSystemPrompt + buildScoringUserMessage from @watch-tower/shared.
+ * Kept for backward compatibility with legacy scoring_rules.prompt_template strings.
  */
 export const formatScoringPrompt = (
   template: string,
   article: { title: string; content: string; sector: string },
 ): string => {
-  const truncatedContent =
-    article.content.length > MAX_CONTENT_LENGTH
-      ? article.content.slice(0, MAX_CONTENT_LENGTH) + "... [truncated]"
-      : article.content;
+  const truncatedContent = truncateContent(article.content);
 
   return template
     .replace("{title}", article.title)
