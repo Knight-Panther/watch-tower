@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { socialAccounts } from "@watch-tower/db";
 import {
   postTemplateSchema,
@@ -311,6 +311,8 @@ export const registerSocialAccountRoutes = (app: FastifyInstance, deps: ApiDeps)
         return reply.status(404).send({ error: "Social account not found" });
       }
 
+      const oldLimit = account.rateLimitPerHour ?? 4;
+
       await deps.db
         .update(socialAccounts)
         .set({
@@ -319,10 +321,29 @@ export const registerSocialAccountRoutes = (app: FastifyInstance, deps: ApiDeps)
         })
         .where(eq(socialAccounts.id, id));
 
+      // Pull forward any rate-limited deliveries so the maintenance worker
+      // picks them up on the next 30s tick instead of waiting for the original
+      // (now-stale) scheduled_at. Fires on any save, not just increases,
+      // so re-saving the same value also unsticks stuck deliveries.
+      let wokenDeliveries = 0;
+      if (rate_limit_per_hour >= oldLimit) {
+        const result = await deps.db.execute(sql`
+          UPDATE post_deliveries
+          SET scheduled_at = NOW(),
+              error_message = error_message || ' [limit increased to ' || ${rate_limit_per_hour}::text || '/hr]'
+          WHERE platform = ${account.platform}
+            AND status = 'scheduled'
+            AND scheduled_at > NOW()
+            AND error_message LIKE 'Rate limited%'
+        `);
+        wokenDeliveries = result.rowCount ?? 0;
+      }
+
       return {
         success: true,
         platform: account.platform,
         rate_limit_per_hour,
+        woken_deliveries: wokenDeliveries,
       };
     },
   );
