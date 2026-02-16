@@ -93,9 +93,33 @@ export const createFacebookProvider = (config: FacebookConfig): SocialProvider =
             };
           }
 
+          const postId = result.post_id || result.id || "";
+
+          // Auto-comment source URL on image posts (keeps post text clean on mobile)
+          if (request.sourceUrl && postId) {
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+            try {
+              const commentUrl = `${GRAPH_API_BASE}/${postId}/comments`;
+              await fetchWithTimeout(
+                commentUrl,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                  body: new URLSearchParams({
+                    message: request.sourceUrl,
+                    access_token: accessToken,
+                  }),
+                },
+                timeoutMs,
+              );
+            } catch {
+              // Comment failure is non-critical — post itself succeeded
+            }
+          }
+
           return {
             platform: "facebook",
-            postId: result.post_id || result.id || "",
+            postId,
             success: true,
           };
         }

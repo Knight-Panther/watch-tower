@@ -12,6 +12,7 @@ export const postTemplateSchema = z.object({
   showSummary: z.boolean().default(true),
   showUrl: z.boolean().default(true),
   showImage: z.boolean().default(false), // Future: AI-generated images
+  autoCommentUrl: z.boolean().default(false), // Post source URL as first comment (Facebook)
 
   // Customization
   breakingEmoji: z.string().max(10).default("🔴"),
@@ -32,6 +33,7 @@ export const defaultTemplates: Record<string, PostTemplateConfig> = {
     showSummary: true,
     showUrl: true,
     showImage: true,
+    autoCommentUrl: false,
     breakingEmoji: "🔴",
     breakingText: "BREAKING",
     urlLinkText: "Read more →",
@@ -43,6 +45,7 @@ export const defaultTemplates: Record<string, PostTemplateConfig> = {
     showSummary: true,
     showUrl: true,
     showImage: true,
+    autoCommentUrl: false,
     breakingEmoji: "",
     breakingText: "",
     urlLinkText: "🔗 Full article",
@@ -54,6 +57,7 @@ export const defaultTemplates: Record<string, PostTemplateConfig> = {
     showSummary: false,
     showUrl: true,
     showImage: true,
+    autoCommentUrl: false,
     breakingEmoji: "",
     breakingText: "",
     urlLinkText: "Read more ↓",

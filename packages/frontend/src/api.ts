@@ -1110,6 +1110,7 @@ export interface PostTemplateConfig {
   showSummary: boolean;
   showUrl: boolean;
   showImage: boolean;
+  autoCommentUrl: boolean;
   breakingEmoji: string;
   breakingText: string;
   urlLinkText: string;

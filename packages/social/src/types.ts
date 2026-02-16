@@ -3,6 +3,8 @@ import type { PostTemplateConfig } from "@watch-tower/shared";
 export type PostRequest = {
   text: string;
   imageUrl?: string;
+  /** Original article URL — Facebook uses this to auto-comment the source link */
+  sourceUrl?: string;
 };
 
 export type PostResult = {

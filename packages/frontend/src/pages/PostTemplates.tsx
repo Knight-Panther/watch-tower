@@ -20,6 +20,7 @@ const DEFAULT_TEMPLATES: Record<string, PostTemplateConfig> = {
     showSummary: true,
     showUrl: true,
     showImage: true,
+    autoCommentUrl: false,
     breakingEmoji: "🔴",
     breakingText: "BREAKING",
     urlLinkText: "Read more →",
@@ -31,6 +32,7 @@ const DEFAULT_TEMPLATES: Record<string, PostTemplateConfig> = {
     showSummary: true,
     showUrl: true,
     showImage: true,
+    autoCommentUrl: false,
     breakingEmoji: "",
     breakingText: "",
     urlLinkText: "🔗 Full article",
@@ -42,6 +44,7 @@ const DEFAULT_TEMPLATES: Record<string, PostTemplateConfig> = {
     showSummary: false,
     showUrl: true,
     showImage: true,
+    autoCommentUrl: false,
     breakingEmoji: "",
     breakingText: "",
     urlLinkText: "Read more ↓",
@@ -406,6 +409,32 @@ export default function PostTemplates() {
                   />
                 </button>
               </div>
+
+              {/* Auto-Comment URL (Facebook only — posts source link as first comment) */}
+              {template.showImage && selectedAccount?.platform === "facebook" && (
+                <div className="ml-4 border-l-2 border-slate-700 pl-4">
+                  <div className="flex items-center justify-between rounded-xl border border-slate-700 bg-slate-950 px-4 py-3">
+                    <div>
+                      <p className="text-sm font-medium text-slate-200">Auto-Comment URL</p>
+                      <p className="text-xs text-slate-500">
+                        Post source link as first comment instead of in text
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => updateTemplate("autoCommentUrl", !template.autoCommentUrl)}
+                      className={`relative h-6 w-11 rounded-full transition-colors ${
+                        template.autoCommentUrl ? "bg-emerald-500" : "bg-slate-600"
+                      }`}
+                    >
+                      <span
+                        className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+                          template.autoCommentUrl ? "translate-x-5" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

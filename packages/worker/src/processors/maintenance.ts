@@ -720,7 +720,9 @@ const processScheduledPosts = async (
         template,
       );
 
-      const postResult = await provider.post({ text, imageUrl });
+      const sourceUrl =
+        template.autoCommentUrl && imageUrl ? article.url : undefined;
+      const postResult = await provider.post({ text, imageUrl, sourceUrl });
 
       if (!postResult.success) {
         logger.error(
