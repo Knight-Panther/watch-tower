@@ -5,8 +5,8 @@ Independent media monitoring agent. Scans RSS feeds by sector, deduplicates (URL
 ## Pipeline Architecture
 
 ```
-[1] INGEST ──→ [2] SEMANTIC DEDUP ──→ [3] LLM BRAIN ──→ [4] DISTRIBUTE
-(fetch+filter)   (embed+compare)       (score+summarize)   (approve+post)
+[1] INGEST ──→ [2] SEMANTIC DEDUP ──→ [3] LLM BRAIN ──→ [4] TRANSLATE ──→ [5] IMAGE GEN ──→ [6] DISTRIBUTE
+(fetch+filter)   (embed+compare)       (score+summarize)   (ka translation)  (news cards)     (approve+post)
 ```
 
 ## Tech Stack
@@ -18,6 +18,10 @@ Independent media monitoring agent. Scans RSS feeds by sector, deduplicates (URL
 - **Queue/Cache**: Redis 7
 - **LLM**: Provider abstraction (Claude, OpenAI, DeepSeek) with fallback support
 - **Embeddings**: OpenAI text-embedding-3-small (1536 dims)
+- **Translation**: Gemini (Google AI) + OpenAI, Georgian (ka) language support
+- **Image Generation**: OpenAI gpt-image-1-mini + canvas compositor
+- **Object Storage**: Cloudflare R2 (AI-generated news card images)
+- **Real-time**: Server-Sent Events (SSE) for live dashboard updates
 - **Social**: Telegram Bot API, Facebook Graph API, LinkedIn API
 - **Monorepo**: npm workspaces + Turborepo
 - **Deployment**: Docker Compose on VPS
@@ -30,8 +34,9 @@ packages/
 ├── shared/        # Queue constants, env schemas, shared types
 ├── llm/           # LLM provider abstraction (Claude, OpenAI, DeepSeek + fallback)
 ├── embeddings/    # Embedding generation + pgvector similarity search
+├── translation/   # Georgian translation (Gemini, OpenAI providers)
 ├── social/        # Social poster abstraction (Telegram, Facebook, LinkedIn)
-├── worker/        # Pipeline processors (ingest, dedup, score, distribute)
+├── worker/        # Pipeline processors (ingest, dedup, score, translate, image-gen, distribute)
 ├── api/           # Fastify REST API
 └── frontend/      # React admin dashboard
 ```
@@ -40,9 +45,10 @@ packages/
 ```
 frontend → api (HTTP)
 api → db, shared
-worker → db, shared, llm, embeddings, social
+worker → db, shared, llm, embeddings, translation, social
 llm → shared
 embeddings → db
+translation → shared
 social → shared
 ```
 
@@ -70,6 +76,9 @@ npm run build              # Build all packages
 # Code Quality
 npm run lint               # ESLint
 npm run format             # Prettier
+
+# Pipeline Operations
+npm run pipeline:reset     # Flush Redis + truncate articles/deliveries/telemetry + reset fetch timestamps
 ```
 
 ## Database Schema
@@ -80,13 +89,13 @@ Core tables (PostgreSQL + pgvector):
 |-------|---------|
 | `sectors` | Feed categories (Biotech, Crypto, Stocks, etc.) |
 | `rss_sources` | Feed URLs + ingest config |
-| `articles` | Core entity: title, snippet, embedding, score, pipeline_stage |
+| `articles` | Core entity: title, snippet, embedding, score, pipeline_stage, translation fields |
 | `scoring_rules` | Per-sector LLM prompt templates + thresholds |
-| `social_accounts` | Connected platform credentials (future: DB-stored) |
+| `social_accounts` | Connected platform credentials + post templates + rate limits |
 | `post_deliveries` | Scheduled/immediate posting per article per platform |
 | `feed_fetch_runs` | Fetch attempt telemetry |
 | `llm_telemetry` | LLM API call tracking (tokens, cost, latency) |
-| `article_images` | AI-generated images for posts (future) |
+| `article_images` | AI-generated news card images (OpenAI gpt-image-1-mini + R2 storage) |
 | `app_config` | Key-value settings (incl. `auto_post_score5` toggle, `emergency_stop`) |
 | `platform_health` | Social platform health status, token expiry tracking |
 | `allowed_domains` | RSS source domain whitelist (security) |
@@ -100,11 +109,13 @@ Core tables (PostgreSQL + pgvector):
 
 | Queue | Job | Concurrency | Purpose |
 |-------|-----|-------------|---------|
-| `pipeline:ingest` | `ingest-fetch` | 5 | Fetch RSS, date/URL filter, store |
-| `pipeline:semantic-dedup` | `semantic-batch` | 2 | Embed batch of 50, vector search, mark dupes |
-| `pipeline:llm-brain` | `llm-score-batch` | 1 | Score + summarize batch of 10 |
-| `pipeline:distribution` | `distribution-immediate` | 1 | Post individual articles to platforms |
-| `maintenance` | schedule/cleanup/post-scheduler | 1 | Recurring scheduling, TTL cleanup, scheduled post dispatch |
+| `pipeline-ingest` | `ingest-fetch` | 5 | Fetch RSS, date/URL filter, store |
+| `pipeline-semantic-dedup` | `semantic-batch` | 2 | Embed batch of 50, vector search, mark dupes |
+| `pipeline-llm-brain` | `llm-score-batch` | 1 | Score + summarize batch of 10 |
+| `pipeline-translation` | `translation-batch` | 1 | Translate approved articles to Georgian (Gemini/OpenAI) |
+| `pipeline-image-generation` | `image-generate` | 1 | Generate AI news card images (gpt-image-1-mini + R2) |
+| `pipeline-distribution` | `distribution-immediate` | 1 | Post individual articles to platforms |
+| `maintenance` | schedule/cleanup/post-scheduler/health-check | 1 | Recurring scheduling, TTL cleanup, post dispatch, platform health |
 
 **Chaining:** Each processor queries DB for unprocessed articles and queues the next stage. Database `pipeline_stage` is the source of truth (not queue state).
 
@@ -138,6 +149,7 @@ Core tables (PostgreSQL + pgvector):
 ```env
 # Environment
 NODE_ENV=development          # development | production (affects rate limiting, etc.)
+LOG_LEVEL=info                # debug | info | warn | error
 
 # Database (PostgreSQL)
 DATABASE_URL=postgres://watchtower:watchtower@127.0.0.1:5432/watchtower
@@ -149,18 +161,42 @@ REDIS_PORT=6379
 # API
 API_KEY=local-dev-key
 PORT=3001
-LOG_LEVEL=info                # debug | info | warn | error
 
 # Embeddings (OpenAI)
 OPENAI_API_KEY=sk-...
 EMBEDDING_MODEL=text-embedding-3-small
 SIMILARITY_THRESHOLD=0.85
 
-# LLM Brain (see packages/llm/README.md for full guide)
+# LLM Brain
 ANTHROPIC_API_KEY=sk-ant-...
 # DEEPSEEK_API_KEY=sk-...
 LLM_PROVIDER=claude              # 'claude' | 'openai' | 'deepseek'
+# LLM_CLAUDE_MODEL=claude-sonnet-4-20250514
+# LLM_OPENAI_MODEL=gpt-4o-mini
+# LLM_DEEPSEEK_MODEL=deepseek-chat
 # LLM_FALLBACK_PROVIDER=openai   # Optional fallback on API failure
+# LLM_FALLBACK_MODEL=gpt-4o-mini
+LLM_AUTO_APPROVE_THRESHOLD=5     # Score >= this → auto-approve (default 5)
+LLM_AUTO_REJECT_THRESHOLD=2      # Score <= this → auto-reject (default 2)
+
+# Translation (Georgian)
+GOOGLE_AI_API_KEY=...             # For Gemini translation provider
+
+# Image Generation + R2 Storage
+R2_ACCOUNT_ID=...                 # Cloudflare R2 account
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
+R2_BUCKET_NAME=...
+R2_PUBLIC_URL=...                 # Public URL prefix for generated images
+
+# Social Platforms
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_CHAT_ID=-100...
+FB_PAGE_ID=...
+FB_ACCESS_TOKEN=...
+LINKEDIN_AUTHOR_TYPE=person       # 'person' | 'organization'
+LINKEDIN_AUTHOR_ID=...
+LINKEDIN_ACCESS_TOKEN=...
 
 # Frontend
 VITE_API_URL=http://localhost:3001
@@ -206,9 +242,9 @@ Articles store only `title + content_snippet` (not full article body).
 ## Approval & Posting Workflow
 
 **Scoring outcomes:**
-- Score 5 → auto-approve + immediate post (if `app_config.auto_post_score5 = true`)
+- Score >= 4 → auto-approve + immediate post (per-platform toggles: `auto_post_telegram`, `auto_post_facebook`, `auto_post_linkedin`)
 - Score 1-2 → auto-reject
-- Score 3-4 → manual review in dashboard
+- Score 3 → manual review in dashboard
 
 **Manual approval flow (combined modal):**
 1. User clicks "Approve" on scored article (3-4)
@@ -229,7 +265,7 @@ Articles store only `title + content_snippet` (not full article body).
   - LinkedIn: 4/hour (safe, 100/day limit)
 - Individual article posts (no digest/batch format)
 - Scheduling via `post_deliveries.scheduled_at` column
-- Future: AI image generation per post (interface stub exists)
+- Post templates: per-platform customizable formats (stored in `social_accounts.post_template`)
 
 ### Token Expiration
 
@@ -238,6 +274,40 @@ Articles store only `title + content_snippet` (not full article body).
 | Telegram | Never expires | N/A |
 | Facebook | ~60 days | Manual re-auth or use long-lived page token |
 | LinkedIn | ~60 days | Manual re-auth (offline_access requires partner approval) |
+
+## Translation (Georgian)
+
+Articles scoring >= 4 are automatically translated to Georgian (`ka`) after approval.
+
+- **Providers**: Gemini (Google AI) primary, OpenAI fallback
+- **Fields**: `title_ka`, `llm_summary_ka` on articles table
+- **Status tracking**: `translation_status` column (`NULL` → `translating` → `translated` | `failed` | `exhausted`)
+- **Retry**: up to 3 attempts (`translation_attempts`), then marked `exhausted`
+- **Backfill guard**: `translation_enabled_since` in app_config prevents re-translating old articles
+- **Config**: `translation_provider`, `translation_model`, `posting_language` in app_config
+- **Queue**: `pipeline-translation`, polls every 15s for untranslated approved articles
+- **Language control**: `posting_language` in app_config (`ka` = post Georgian text, `en` = post English)
+
+## AI Image Generation
+
+Auto-generates news card images for approved articles using OpenAI + Cloudflare R2.
+
+- **Provider**: OpenAI `gpt-image-1-mini` for base image generation
+- **Compositor**: Canvas-based news card builder (gradient backgrounds, text wrapping, branding)
+- **Storage**: Cloudflare R2 with public URL for social media embedding
+- **Template**: Configurable via Image Template designer page (fonts, colors, layouts)
+- **Queue**: `pipeline-image-generation`, polls every 30s
+- **Table**: `article_images` tracks generation status, R2 keys, cost (microdollars)
+- **Config**: `image_generation_enabled` in app_config toggles the feature
+
+## Real-time Events (SSE)
+
+Dashboard receives live updates via Server-Sent Events instead of polling.
+
+- **API endpoint**: `/events` — SSE stream for real-time article/pipeline updates
+- **Publisher**: Worker emits events via Redis pub/sub (`watch-tower:events` channel)
+- **Frontend**: Layout.tsx maintains SSE connection with auto-reconnect, shows connection status indicator
+- **Events**: New articles ingested, scores assigned, posts delivered, etc.
 
 ## Security Hardening (9-Layer Defense)
 
@@ -314,6 +384,7 @@ npm run dev                # Start API + Worker + Frontend
 | `VITE_API_KEY` | `local-dev-key` | Same as API_KEY |
 | `LOG_LEVEL` | `debug` | `info` or `warn` |
 | `ALLOWED_ORIGINS` | `http://localhost:5173` | `https://yourdomain.com` |
+| `R2_PUBLIC_URL` | Local/dev bucket URL | Production R2 public URL |
 
 ### OAuth Redirect URLs
 
@@ -367,26 +438,29 @@ docker logs watchtower-worker --tail 100
 3. **Denormalized sector_id on articles** — avoids JOIN through rss_sources on every vector/LLM query
 4. **Separate packages for llm/embeddings/social** — clean interfaces, testable, swappable providers
 5. **Turborepo** — handles build dependency graph automatically, caches builds
+6. **Self-healing job registry** — repeatable BullMQ jobs auto-recover every 30s if Redis is wiped
+7. **Startup provider health checks** — validates all API keys (LLM, embedding, translation, social) at worker boot
+8. **Delivery-controlled posting** — `post_deliveries` table decouples approval from posting; article stays `approved`, delivery row tracks per-platform scheduling
 
-## Priority Tasks
+## Completed Features
 
-Implementation tasks are tracked in the `priority-tasks/` folder at the project root.
+All core pipeline tasks have been implemented:
 
-- **Active tasks**: `taskN.md` files contain detailed implementation steps
-- **Completed tasks**: Renamed to `taskN_done.md` after all items are implemented
-- **Always check this folder first** when starting a new session to understand pending work
-
-Completed:
-- `task12_done.md` — Security Hardening (9-layer defense system, Site Rules UI, security tests)
-- `task11_done.md` — Platform Health Monitoring (token validity, expiry tracking, emergency brake)
-- `task1_done.md` — Infrastructure hardening & reliability
-- `task2_done.md` — Stage 2: Semantic Dedup Pipeline
-- `task3_done.md` — Stage 3: LLM Brain Pipeline (scoring + summarization + multi-provider)
-- `task4_done.md` — LLM Token Telemetry
-- `task5_done.md` — Articles Panel + Distribution Pipeline (Telegram)
-- `task6_done.md` — Scheduled Posting System
-- `task9_done.md` — Facebook & LinkedIn Integration
-- `task10_done.md` — Rate Limiting & Provider Hardening
+1. Infrastructure hardening & reliability
+2. Semantic Dedup Pipeline (embeddings + pgvector)
+3. LLM Brain Pipeline (scoring + summarization + multi-provider)
+4. LLM Token Telemetry
+5. Articles Panel + Distribution Pipeline (Telegram)
+6. Scheduled Posting System
+7. Facebook & LinkedIn Integration
+8. Rate Limiting & Provider Hardening
+9. Platform Health Monitoring (token validity, expiry tracking, emergency brake)
+10. Security Hardening (9-layer defense system, Site Rules UI)
+11. Georgian Translation (Gemini/OpenAI)
+12. AI Image Generation (gpt-image-1-mini + R2 + canvas compositor)
+13. Real-time Events (SSE)
+14. Post Template System (per-platform customizable formats)
+15. Self-healing Job Registry (auto-recovery after Redis wipe)
 
 ---
 
