@@ -95,7 +95,11 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       }
     };
     const sortColumn = getSortColumn();
-    const orderBy = sort_dir === "asc" ? asc(sortColumn) : desc(sortColumn);
+    const primaryOrder = sort_dir === "asc" ? asc(sortColumn) : desc(sortColumn);
+    // Secondary sort ensures deterministic ordering when primary column has ties
+    const secondaryOrder = sortColumn === articles.publishedAt
+      ? desc(articles.createdAt)
+      : desc(articles.publishedAt);
 
     // Execute queries in parallel
     const [rows, totalResult] = await Promise.all([
@@ -128,7 +132,7 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
         .leftJoin(rssSources, eq(articles.sourceId, rssSources.id))
         .leftJoin(sectors, eq(articles.sectorId, sectors.id))
         .where(whereClause)
-        .orderBy(orderBy)
+        .orderBy(primaryOrder, secondaryOrder)
         .limit(safeLimit)
         .offset(offset),
 

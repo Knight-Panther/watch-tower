@@ -79,7 +79,7 @@ export const findSimilarArticles = async (
     WHERE
       embedding IS NOT NULL
       AND (
-        pipeline_stage NOT IN ('duplicate', 'rejected', 'ingested')
+        pipeline_stage NOT IN ('duplicate', 'ingested')
         OR (pipeline_stage = 'embedding' AND embedding IS NOT NULL)
       )
       AND is_semantic_duplicate IS NOT TRUE

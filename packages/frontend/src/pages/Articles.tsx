@@ -12,6 +12,8 @@ import {
   updateArticle,
   rejectArticle,
   scheduleArticle,
+  batchApproveArticles,
+  batchRejectArticles,
   type Article,
   type ArticleFilters,
   type ArticleFilterOptions,
@@ -42,6 +44,13 @@ const PIPELINE_STAGES = [
 
 const SCORE_OPTIONS = [1, 2, 3, 4, 5];
 
+const DEFAULT_FILTERS: ArticleFilters = {
+  page: 1,
+  limit: 50,
+  sort_by: "published_at",
+  sort_dir: "desc",
+};
+
 export default function Articles() {
   const [articles, setArticles] = useState<Article[]>([]);
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, total_pages: 0 });
@@ -49,15 +58,13 @@ export default function Articles() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Batch selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
   // Filter state with localStorage persistence (no URL sync to avoid tab conflicts)
   const [filters, setFilter, setFilters] = useLocalStorageFilters<ArticleFilters>(
     "articles-filters",
-    {
-      page: 1,
-      limit: 50,
-      sort_by: "published_at",
-      sort_dir: "desc",
-    },
+    DEFAULT_FILTERS,
   );
 
   // Language from translation config
@@ -79,6 +86,7 @@ export default function Articles() {
       const response: ArticlesResponse = await getArticles(filters);
       setArticles(response.data);
       setPagination(response.pagination);
+      setSelectedIds(new Set()); // Clear selection on data change
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load articles";
       setError(message);
@@ -217,6 +225,88 @@ export default function Articles() {
     }
   };
 
+  // Batch actions
+  const handleBatchReject = async () => {
+    if (selectedIds.size === 0) return;
+    try {
+      await batchRejectArticles([...selectedIds]);
+      toast.success(`${selectedIds.size} article(s) rejected`);
+      loadArticles();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to batch reject";
+      toast.error(message);
+    }
+  };
+
+  const handleBatchApprove = async () => {
+    if (selectedIds.size === 0) return;
+    try {
+      await batchApproveArticles([...selectedIds]);
+      toast.success(`${selectedIds.size} article(s) approved`);
+      loadArticles();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to batch approve";
+      toast.error(message);
+    }
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === articles.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(articles.map((a) => a.id)));
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const clearFilters = () => {
+    setFilters({
+      ...DEFAULT_FILTERS,
+      sector_id: undefined,
+      source_id: undefined,
+      status: undefined,
+      search: undefined,
+      min_score: undefined,
+      max_score: undefined,
+      date_from: undefined,
+      date_to: undefined,
+    });
+  };
+
+  const hasActiveFilters =
+    !!filters.sector_id ||
+    !!filters.source_id ||
+    !!filters.status ||
+    !!filters.search ||
+    filters.min_score !== undefined ||
+    filters.max_score !== undefined ||
+    !!filters.date_from ||
+    !!filters.date_to;
+
+  const applyNeedsReview = () => {
+    setFilters({
+      ...DEFAULT_FILTERS,
+      sector_id: undefined,
+      source_id: undefined,
+      search: undefined,
+      max_score: undefined,
+      date_from: undefined,
+      date_to: undefined,
+      status: "scored",
+      min_score: 3,
+      sort_by: "importance_score",
+      sort_dir: "desc",
+    });
+  };
+
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return "-";
     return new Date(dateStr).toLocaleDateString("en-US", {
@@ -268,6 +358,28 @@ export default function Articles() {
         >
           {isLoading ? <Spinner /> : "Refresh"}
         </button>
+      </section>
+
+      {/* Quick Filters */}
+      <section className="flex flex-wrap gap-2">
+        <button
+          onClick={applyNeedsReview}
+          className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+            filters.status === "scored" && filters.min_score === 3
+              ? "bg-amber-500/20 text-amber-200 border border-amber-500/50"
+              : "border border-slate-700 text-slate-300 hover:border-slate-500"
+          }`}
+        >
+          Needs Review
+        </button>
+        {hasActiveFilters && (
+          <button
+            onClick={clearFilters}
+            className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-400 transition hover:border-red-500/50 hover:text-red-300"
+          >
+            Clear Filters
+          </button>
+        )}
       </section>
 
       {/* Filters */}
@@ -355,6 +467,24 @@ export default function Articles() {
               </option>
             ))}
           </select>
+
+          {/* Date From */}
+          <input
+            type="date"
+            value={filters.date_from || ""}
+            onChange={(e) => handleFilterChange("date_from", e.target.value)}
+            className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600 [color-scheme:dark]"
+            placeholder="From date"
+          />
+
+          {/* Date To */}
+          <input
+            type="date"
+            value={filters.date_to || ""}
+            onChange={(e) => handleFilterChange("date_to", e.target.value)}
+            className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600 [color-scheme:dark]"
+            placeholder="To date"
+          />
         </div>
       </section>
 
@@ -365,12 +495,47 @@ export default function Articles() {
         </div>
       )}
 
+      {/* Batch Action Bar */}
+      {selectedIds.size > 0 && (
+        <section className="flex items-center gap-3 rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-3">
+          <span className="text-sm text-slate-300 font-medium">
+            {selectedIds.size} selected
+          </span>
+          <button
+            onClick={handleBatchApprove}
+            className="rounded-lg bg-emerald-500/20 px-3 py-1.5 text-xs font-medium text-emerald-200 hover:bg-emerald-500/30"
+          >
+            Approve Selected
+          </button>
+          <button
+            onClick={handleBatchReject}
+            className="rounded-lg bg-red-500/20 px-3 py-1.5 text-xs font-medium text-red-200 hover:bg-red-500/30"
+          >
+            Reject Selected
+          </button>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="ml-auto text-xs text-slate-500 hover:text-slate-300"
+          >
+            Deselect all
+          </button>
+        </section>
+      )}
+
       {/* Articles Table */}
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-800/50">
               <tr>
+                <th className="px-3 py-3 w-10">
+                  <input
+                    type="checkbox"
+                    checked={articles.length > 0 && selectedIds.size === articles.length}
+                    onChange={toggleSelectAll}
+                    className="h-4 w-4 rounded border-slate-600 bg-slate-800 accent-emerald-500"
+                  />
+                </th>
                 <th
                   onClick={() => handleSort("published_at")}
                   className="px-4 py-3 text-left font-medium text-slate-300 cursor-pointer hover:text-white"
@@ -397,7 +562,15 @@ export default function Articles() {
             </thead>
             <tbody className="divide-y divide-slate-800">
               {articles.map((article) => (
-                <tr key={article.id} className="hover:bg-slate-800/30">
+                <tr key={article.id} className={`hover:bg-slate-800/30 ${selectedIds.has(article.id) ? "bg-slate-800/20" : ""}`}>
+                  <td className="px-3 py-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(article.id)}
+                      onChange={() => toggleSelect(article.id)}
+                      className="h-4 w-4 rounded border-slate-600 bg-slate-800 accent-emerald-500"
+                    />
+                  </td>
                   <td className="px-4 py-3 text-slate-400 whitespace-nowrap">
                     {formatDate(article.published_at)}
                   </td>
@@ -573,7 +746,7 @@ export default function Articles() {
               ))}
               {!isLoading && articles.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
                     No articles found
                   </td>
                 </tr>
