@@ -244,15 +244,16 @@ export const createDistributionWorker = ({
           .where(eq(appConfig.key, "posting_language"));
         const postingLanguage = (langRow?.value as string) ?? "en";
 
-        // Georgian mode: check translation is available
+        // Georgian mode: block posting of untranslated articles.
+        // Article stays approved — once translation completes, auto-post flow will re-trigger.
         if (postingLanguage === "ka" && (!article.titleKa || !article.llmSummaryKa)) {
-          // Roll back to approved — translation worker hasn't finished yet
           await db.execute(sql`
             UPDATE articles SET pipeline_stage = 'approved' WHERE id = ${articleId}::uuid
           `);
           logger.warn(
             { articleId },
-            "[distribution] Georgian mode but no translation — rolled back to approved",
+            "[distribution] Georgian mode: article not yet translated, skipping. " +
+              "Will auto-post after translation completes.",
           );
           return { skipped: true, reason: "awaiting_translation" };
         }

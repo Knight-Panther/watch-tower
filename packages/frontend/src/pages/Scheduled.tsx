@@ -93,6 +93,10 @@ export default function Scheduled() {
   const [newDate, setNewDate] = useState("");
   const [newTime, setNewTime] = useState("");
 
+  // Cancel confirmation modal state
+  const [cancelItem, setCancelItem] = useState<ScheduledDelivery | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
+
   // Collapsible block state: track which blocks are explicitly toggled
   const [collapsedBlocks, setCollapsedBlocks] = useState<Set<string>>(new Set());
 
@@ -155,16 +159,20 @@ export default function Scheduled() {
     setFilter("page", newPage);
   };
 
-  const handleCancel = async (delivery: ScheduledDelivery) => {
-    if (!confirm("Cancel this scheduled post?")) return;
+  const handleCancel = async () => {
+    if (!cancelItem) return;
+    setIsCancelling(true);
     try {
-      await cancelDelivery(delivery.id);
+      await cancelDelivery(cancelItem.id);
       toast.success("Post cancelled");
+      setCancelItem(null);
       loadDeliveries();
       loadStats();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to cancel";
       toast.error(message);
+    } finally {
+      setIsCancelling(false);
     }
   };
 
@@ -527,7 +535,7 @@ export default function Scheduled() {
                                   Reschedule
                                 </button>
                                 <button
-                                  onClick={() => handleCancel(delivery)}
+                                  onClick={() => setCancelItem(delivery)}
                                   className="px-2 py-0.5 bg-red-500/20 text-red-200 rounded text-xs hover:bg-red-500/30"
                                 >
                                   Cancel
@@ -619,6 +627,54 @@ export default function Scheduled() {
                 className="rounded-full bg-blue-500/20 px-4 py-2 text-sm font-semibold text-blue-200 hover:bg-blue-500/30"
               >
                 Reschedule
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cancel Confirmation Modal */}
+      {cancelItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-100 shadow-xl">
+            <h3 className="text-lg font-semibold text-red-200">Cancel Scheduled Post?</h3>
+
+            <div className="mt-4">
+              <p className="text-sm text-slate-200 line-clamp-2">
+                {postingLanguage === "ka" && cancelItem.article_title_ka
+                  ? cancelItem.article_title_ka
+                  : cancelItem.article_title}
+              </p>
+              <div className="mt-2 flex items-center gap-2">
+                <span
+                  className={`px-2 py-0.5 rounded text-xs ${getPlatformBadgeClass(cancelItem.platform)}`}
+                >
+                  {cancelItem.platform}
+                </span>
+                <span className="text-xs text-slate-400">
+                  {formatDateShort(cancelItem.scheduled_at)} {formatTime24(cancelItem.scheduled_at)}
+                </span>
+              </div>
+            </div>
+
+            <p className="mt-4 text-sm text-slate-400">
+              This delivery will be marked as cancelled and won't be posted.
+            </p>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => setCancelItem(null)}
+                disabled={isCancelling}
+                className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:border-slate-500 disabled:opacity-50"
+              >
+                Keep Scheduled
+              </button>
+              <button
+                onClick={handleCancel}
+                disabled={isCancelling}
+                className="rounded-full bg-red-500/20 px-4 py-2 text-sm font-semibold text-red-200 hover:bg-red-500/30 disabled:opacity-50"
+              >
+                {isCancelling ? "Cancelling..." : "Yes, Cancel"}
               </button>
             </div>
           </div>

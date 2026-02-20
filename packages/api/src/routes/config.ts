@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import { eq, inArray } from "drizzle-orm";
-import { appConfig } from "@watch-tower/db";
+import { eq, inArray, sql } from "drizzle-orm";
+import { appConfig, articles } from "@watch-tower/db";
 import { logger, imageTemplateSchema, DEFAULT_IMAGE_TEMPLATE } from "@watch-tower/shared";
 import type { ApiDeps } from "../server.js";
 
@@ -443,6 +443,16 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
 
     for (const { key, value } of updates) {
       await upsertTypedConfig(deps, key, value);
+    }
+
+    // When provider or model changes, immediately reset 'failed' translations
+    // so they get picked up on the next batch (15s) with the new config
+    // instead of waiting for the 10-minute maintenance cooldown.
+    if (provider !== undefined || model !== undefined) {
+      await deps.db
+        .update(articles)
+        .set({ translationStatus: sql`NULL` })
+        .where(sql`translation_status = 'failed'`);
     }
 
     logger.info("[config] translation settings updated");

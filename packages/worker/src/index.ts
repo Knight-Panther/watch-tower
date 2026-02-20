@@ -339,6 +339,7 @@ const main = async () => {
         distributionQueue: hasAnyPlatform ? distributionQueue : undefined,
         imageGenerationQueue,
         apiKeys: { googleAi: env.GOOGLE_AI_API_KEY, openai: env.OPENAI_API_KEY },
+        eventPublisher,
       })
     : null;
 

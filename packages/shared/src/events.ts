@@ -69,6 +69,13 @@ export type ArticlePostedEvent = {
   };
 };
 
+export type ArticleTranslatedEvent = {
+  type: "article:translated";
+  data: {
+    id: string;
+  };
+};
+
 export type SourceFetchedEvent = {
   type: "source:fetched";
   data: {
@@ -93,6 +100,7 @@ export type ServerEvent =
   | ArticleApprovedEvent
   | ArticleRejectedEvent
   | ArticlePostedEvent
+  | ArticleTranslatedEvent
   | SourceFetchedEvent
   | StatsUpdatedEvent;
 

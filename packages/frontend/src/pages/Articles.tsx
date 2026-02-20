@@ -11,6 +11,7 @@ import {
   getTranslationConfig,
   updateArticle,
   rejectArticle,
+  translateArticle,
   scheduleArticle,
   batchApproveArticles,
   batchRejectArticles,
@@ -121,7 +122,7 @@ export default function Articles() {
 
   useEffect(() => {
     const unsubscribe = subscribe(
-      ["article:scored", "article:approved", "article:rejected", "article:posted", "source:fetched"],
+      ["article:scored", "article:approved", "article:rejected", "article:posted", "article:translated", "source:fetched"],
       debouncedRefresh,
     );
     return unsubscribe;
@@ -137,8 +138,8 @@ export default function Articles() {
   const startEditing = (article: Article) => {
     setEditingId(article.id);
     if (postingLanguage === "ka") {
-      setEditTitle(article.title_ka || "");
-      setEditSummary(article.llm_summary_ka || "");
+      setEditTitle(article.title_ka || article.title || "");
+      setEditSummary(article.llm_summary_ka || article.llm_summary || "");
     } else {
       setEditTitle(article.title);
       setEditSummary(article.llm_summary || "");
@@ -221,6 +222,17 @@ export default function Articles() {
       loadArticles();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to reject";
+      toast.error(message);
+    }
+  };
+
+  const handleTranslate = async (article: Article) => {
+    try {
+      await translateArticle(article.id);
+      toast.success("Translation queued");
+      loadArticles();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to queue translation";
       toast.error(message);
     }
   };
@@ -544,8 +556,7 @@ export default function Articles() {
                   {filters.sort_by === "published_at" && (filters.sort_dir === "desc" ? "↓" : "↑")}
                 </th>
                 <th className="px-4 py-3 text-left font-medium text-slate-300">Source</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-300">Sector</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-300 max-w-md">
+                <th className="px-4 py-3 text-left font-medium text-slate-300">
                   Title / Summary
                 </th>
                 <th className="px-4 py-3 text-left font-medium text-slate-300">Status</th>
@@ -575,22 +586,27 @@ export default function Articles() {
                     {formatDate(article.published_at)}
                   </td>
                   <td className="px-4 py-3">
-                    <div className="max-w-[150px]">
-                      <p className="text-slate-200 truncate">{article.source_name || "Unknown"}</p>
-                      <p
-                        className="text-xs text-slate-500 truncate"
-                        title={article.source_url || ""}
-                      >
-                        {article.source_url}
-                      </p>
+                    <div className="max-w-[120px]">
+                      <p className="text-slate-200 text-sm truncate">{article.source_name || "Unknown"}</p>
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <span className="px-1.5 py-0.5 bg-slate-700/50 rounded text-xs text-slate-400">
+                          {article.sector_name || "-"}
+                        </span>
+                        {article.url && (
+                          <button
+                            onClick={() => navigator.clipboard.writeText(article.url)}
+                            className="p-0.5 text-slate-500 hover:text-slate-300 transition-colors"
+                            title="Copy article URL"
+                          >
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <span className="px-2 py-1 bg-slate-700/50 rounded text-xs text-slate-300">
-                      {article.sector_name || "-"}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 max-w-md">
                     {editingId === article.id ? (
                       <div className="space-y-2">
                         <input
@@ -631,7 +647,7 @@ export default function Articles() {
                                 href={safeHref(article.url) ?? "#"}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-slate-200 hover:text-white hover:underline font-medium line-clamp-1"
+                                className="text-slate-200 hover:text-white hover:underline font-medium text-sm"
                               >
                                 {article.title_ka}
                               </a>
@@ -640,38 +656,57 @@ export default function Articles() {
                                 href={safeHref(article.url) ?? "#"}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-slate-200 hover:text-white hover:underline font-medium line-clamp-1 italic opacity-60"
+                                className="text-slate-200 hover:text-white hover:underline font-medium text-sm"
                               >
                                 {article.title}
                               </a>
                             )}
+                            {/* Summary text (Georgian if translated, English fallback) */}
                             {article.translation_status === "translated" && article.llm_summary_ka ? (
-                              <p className="text-xs text-slate-400 mt-1 line-clamp-2">
+                              <p className="text-xs text-slate-400 mt-1">
                                 {article.llm_summary_ka}
                               </p>
-                            ) : article.translation_status === "translating" ? (
-                              <span className="text-xs text-amber-400 mt-1 inline-block">
-                                Translating...
-                              </span>
-                            ) : article.translation_status === "exhausted" ? (
-                              <span
-                                className="text-xs text-red-500 mt-1 inline-block"
-                                title={article.translation_error || "Max attempts reached"}
-                              >
-                                Translation exhausted
-                              </span>
-                            ) : article.translation_status === "failed" ? (
-                              <span
-                                className="text-xs text-red-400 mt-1 inline-block"
-                                title={article.translation_error || "Translation failed"}
-                              >
-                                Translation failed{article.translation_error ? `: ${article.translation_error.slice(0, 80)}` : ""}
-                              </span>
                             ) : article.llm_summary ? (
-                              <p className="text-xs text-slate-500 mt-1 line-clamp-2 italic opacity-60">
+                              <p className="text-xs text-slate-400 mt-1">
                                 {article.llm_summary}
                               </p>
                             ) : null}
+                            {/* Translation status badge (non-translated states) */}
+                            {article.translation_status && article.translation_status !== "translated" && (
+                              <span
+                                className={`inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                  article.translation_status === "queued"
+                                    ? "bg-cyan-500/15 text-cyan-400"
+                                    : article.translation_status === "translating"
+                                      ? "bg-amber-500/15 text-amber-400"
+                                      : article.translation_status === "failed"
+                                        ? "bg-red-500/15 text-red-400"
+                                        : article.translation_status === "exhausted"
+                                          ? "bg-red-500/15 text-red-500"
+                                          : "bg-slate-700/40 text-slate-400"
+                                }`}
+                                title={
+                                  article.translation_status === "failed" || article.translation_status === "exhausted"
+                                    ? article.translation_error || undefined
+                                    : undefined
+                                }
+                              >
+                                {article.translation_status === "queued" && (
+                                  <>
+                                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                    Translation queued
+                                  </>
+                                )}
+                                {article.translation_status === "translating" && (
+                                  <>
+                                    <svg className="w-2.5 h-2.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                                    Translating
+                                  </>
+                                )}
+                                {article.translation_status === "failed" && "Translation failed"}
+                                {article.translation_status === "exhausted" && "Translation exhausted"}
+                              </span>
+                            )}
                           </>
                         ) : (
                           <>
@@ -679,12 +714,12 @@ export default function Articles() {
                               href={safeHref(article.url) ?? "#"}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-slate-200 hover:text-white hover:underline font-medium line-clamp-1"
+                              className="text-slate-200 hover:text-white hover:underline font-medium text-sm"
                             >
                               {article.title}
                             </a>
                             {article.llm_summary && (
-                              <p className="text-xs text-slate-400 mt-1 line-clamp-2">
+                              <p className="text-xs text-slate-400 mt-1">
                                 {article.llm_summary}
                               </p>
                             )}
@@ -715,32 +750,53 @@ export default function Articles() {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    {article.pipeline_stage === "scored" &&
-                      article.importance_score !== null &&
-                      article.importance_score >= 3 && (
-                        <div className="flex gap-2">
+                    <div className="flex flex-col gap-1.5 items-center">
+                      {/* Schedule button (scored articles) */}
+                      {article.pipeline_stage === "scored" &&
+                        article.importance_score !== null &&
+                        article.importance_score >= 3 && (
                           <button
                             onClick={() => openScheduleModal(article)}
-                            className="px-2 py-1 bg-emerald-500/20 text-emerald-200 rounded text-xs hover:bg-emerald-500/30"
+                            className="px-2 py-1 bg-emerald-500/20 text-emerald-200 rounded text-xs hover:bg-emerald-500/30 w-full text-center"
                           >
                             Schedule
                           </button>
+                        )}
+                      {/* Repost button (posted articles) */}
+                      {article.pipeline_stage === "posted" && (
+                        <button
+                          onClick={() => openScheduleModal(article)}
+                          className="px-2 py-1 bg-blue-500/20 text-blue-200 rounded text-xs hover:bg-blue-500/30 w-full text-center"
+                        >
+                          Repost
+                        </button>
+                      )}
+                      {/* Translate button (Georgian mode) */}
+                      {postingLanguage === "ka" &&
+                        article.llm_summary &&
+                        ["scored", "approved", "posted"].includes(article.pipeline_stage) &&
+                        (!article.translation_status ||
+                          article.translation_status === "failed" ||
+                          article.translation_status === "exhausted") && (
+                          <button
+                            onClick={() => handleTranslate(article)}
+                            className="px-2 py-1 bg-cyan-500/20 text-cyan-200 rounded text-xs hover:bg-cyan-500/30 w-full text-center"
+                          >
+                            Translate
+                          </button>
+                        )}
+                      {/* Reject button at bottom (scored articles) */}
+                      {article.pipeline_stage === "scored" &&
+                        article.importance_score !== null &&
+                        article.importance_score >= 3 && (
                           <button
                             onClick={() => handleReject(article)}
-                            className="px-2 py-1 bg-red-500/20 text-red-200 rounded text-xs hover:bg-red-500/30"
+                            className="px-2 py-1 bg-red-500/20 text-red-200 rounded text-xs hover:bg-red-500/30 w-full text-center"
                           >
                             Reject
                           </button>
-                        </div>
-                      )}
-                    {article.pipeline_stage === "posted" && (
-                      <button
-                        onClick={() => openScheduleModal(article)}
-                        className="px-2 py-1 bg-blue-500/20 text-blue-200 rounded text-xs hover:bg-blue-500/30"
-                      >
-                        Repost
-                      </button>
-                    )}
+                        )}
+                    </div>
                   </td>
                 </tr>
               ))}

@@ -83,7 +83,8 @@ The current WHERE clause filters by `importance_score = ANY($scores)`, `created_
 UPDATE articles
 SET
   translation_status = 'translating',
-  translation_attempts = translation_attempts + 1
+  translation_attempts = translation_attempts + 1,
+  translated_at = NOW()          -- claim timestamp (overwritten on completion)
 WHERE id IN (
   SELECT id FROM articles
   WHERE (
@@ -112,16 +113,41 @@ RETURNING ...
 
 **Key changes:**
 - `OR translation_status = 'queued'` — bypasses score filter AND `enabledSince` backfill guard
+- `translated_at = NOW()` — stamps claim time so zombie reset has a reliable "how long ago was this claimed?" reference (see §4)
 - Priority ordering: queued articles first (user is watching the UI)
 - All shared guards remain: `llm_summary IS NOT NULL`, `title_ka IS NULL`, `scored_at IS NOT NULL`, `translation_attempts < 5`
 
-### 4. Maintenance Worker: No Changes Needed
+### 4. Maintenance Worker: Fix Zombie Reset Timestamp (CRITICAL)
 
-The maintenance zombie reset (`resetZombieTranslations` in `maintenance.ts`) only touches:
-- `translation_status = 'translating'` → resets to NULL after 10 min
-- `translation_status = 'failed'` → resets to NULL after `translation_retry_minutes`
+**File:** `packages/worker/src/processors/maintenance.ts` (line ~213-247)
 
-It does NOT touch `'queued'`, so manually queued articles persist safely until the translation worker picks them up. This is correct — `queued` is an explicit user intent and should not be auto-cleared.
+**Bug (found by Codex review):** The current zombie reset uses `created_at` to decide if a `translating` article is stuck:
+```sql
+-- CURRENT (broken for old articles)
+WHERE translation_status = 'translating'
+  AND created_at < ${staleThreshold}     -- staleThreshold = now() - 10 min
+```
+`created_at` reflects when the article was **ingested**, not when translation was claimed. For a 2-week-old article that was just manually queued and claimed 1 second ago, `created_at < (now - 10min)` is **always true** → maintenance immediately resets it to NULL, killing the in-progress translation.
+
+**Fix:** Change both zombie checks to use `translated_at` instead of `created_at`. The claim query (§3) now sets `translated_at = NOW()` on claim, so this accurately reflects "when translation started."
+
+```sql
+-- FIXED: use translated_at (set during claim)
+UPDATE articles
+SET translation_status = NULL
+WHERE translation_status = 'translating'
+  AND translated_at < ${staleThreshold}
+
+-- Same fix for failed reset
+UPDATE articles
+SET translation_status = NULL
+WHERE translation_status = 'failed'
+  AND translated_at < ${failedThreshold}
+```
+
+**Why this works:** `translated_at` is set to `NOW()` when the worker claims the article (§3), then overwritten with the actual completion time on success. If the worker crashes, `translated_at` stays at claim time, and after 10 minutes maintenance correctly identifies it as stuck. For old articles that were just claimed, `translated_at` = seconds ago → NOT less than the 10-min threshold → safe from zombie reset.
+
+**Note:** `'queued'` status is still NOT touched by maintenance. It safely waits for the worker.
 
 ### 5. Frontend: API Client Function
 
@@ -225,10 +251,12 @@ const handleTranslate = async (article: Article) => {
 **Risk:** After translation, the worker chains to distribution (image gen or direct). This is auto-posting.
 **Solution:** This is the intended behavior per the user's requirement ("treat it with the existing logic"). If auto-post platforms are enabled, the translated+approved article will be auto-posted. If the user doesn't want auto-posting, they should disable the auto-post toggles first.
 
-### Edge Case 9: Maintenance Zombie Reset Conflict
-**Scenario:** Article is `queued` for > 10 minutes (worker slow or down).
-**Risk:** Does maintenance reset `queued` to NULL?
-**Solution:** No. Maintenance only resets `translating` (after 10 min) and `failed` (after retry minutes). `queued` is not touched. The article safely waits for the worker.
+### Edge Case 9: Maintenance Zombie Reset vs Old Articles (CRITICAL FIX)
+**Scenario:** User manually translates a 2-week-old article. Worker claims it (`translating`). Maintenance runs 30s later.
+**Risk (original bug):** Zombie reset used `created_at` — old articles are immediately reset to NULL, killing in-progress translation. If the API call then fails, `failed` → NULL by maintenance, but score doesn't match auto-translate range → article is stuck.
+**Solution:** Claim query now sets `translated_at = NOW()`. Zombie reset checks `translated_at` instead of `created_at`. This accurately reflects "how long has this been claimed?" regardless of article age. See §4 for full fix.
+
+**Note:** `queued` status is still NOT touched by maintenance — only `translating` and `failed` are reset.
 
 ### Edge Case 10: Worker Picks Up `queued` Article, Translation Fails
 **Scenario:** Manual translation attempt fails (API error).
@@ -252,15 +280,16 @@ const handleTranslate = async (article: Article) => {
 | # | File | Change |
 |---|------|--------|
 | 1 | `packages/api/src/routes/articles.ts` | Add `POST /articles/:id/translate` endpoint |
-| 2 | `packages/worker/src/processors/translation.ts` | Modify claim query WHERE clause + add priority ordering |
-| 3 | `packages/frontend/src/api.ts` | Add `translateArticle()` function |
-| 4 | `packages/frontend/src/pages/Articles.tsx` | Add "Translate" button + `queued` status display |
+| 2 | `packages/worker/src/processors/translation.ts` | Modify claim query: add `queued` path + set `translated_at = NOW()` on claim + priority ordering |
+| 3 | `packages/worker/src/processors/maintenance.ts` | Fix zombie reset: `created_at` → `translated_at` in both translating + failed checks |
+| 4 | `packages/frontend/src/api.ts` | Add `translateArticle()` function |
+| 5 | `packages/frontend/src/pages/Articles.tsx` | Add "Translate" button + `queued` status display |
 
-**No schema migration needed.** The `translation_status` column is a text field — `"queued"` is just a new string value.
+**No schema migration needed.** The `translation_status` column is a text field — `"queued"` is just a new string value. `translated_at` already exists.
 
 **No new BullMQ jobs needed.** The existing repeatable `translation-batch` job (every 15s) picks up `queued` articles via the modified claim query.
 
-**No changes to:** maintenance.ts, distribution.ts, llm-brain.ts, image-generation.ts, or any downstream worker. They all handle translated articles the same way regardless of how the translation was triggered.
+**No changes to:** distribution.ts, llm-brain.ts, image-generation.ts, or any downstream worker. They all handle translated articles the same way regardless of how the translation was triggered.
 
 ---
 

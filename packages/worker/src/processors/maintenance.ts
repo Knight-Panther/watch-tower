@@ -214,11 +214,13 @@ const resetZombieTranslations = async (db: Database) => {
   const staleThreshold = new Date(Date.now() - 10 * 60 * 1000);
 
   // Reset stuck 'translating' → NULL (allows re-claim)
+  // Uses translated_at (set to NOW() during claim) instead of created_at,
+  // so old articles that were just claimed are not incorrectly reset.
   const translatingResult = await db.execute(sql`
     UPDATE articles
     SET translation_status = NULL
     WHERE translation_status = 'translating'
-      AND created_at < ${staleThreshold}
+      AND (translated_at < ${staleThreshold} OR translated_at IS NULL)
     RETURNING id
   `);
   if (translatingResult.rows.length > 0) {
@@ -236,7 +238,7 @@ const resetZombieTranslations = async (db: Database) => {
     UPDATE articles
     SET translation_status = NULL
     WHERE translation_status = 'failed'
-      AND created_at < ${failedThreshold}
+      AND (translated_at < ${failedThreshold} OR translated_at IS NULL)
     RETURNING id
   `);
   if (failedResult.rows.length > 0) {
@@ -327,6 +329,7 @@ const rescueOrphanedApprovedArticles = async (db: Database, distributionQueue?: 
             AND approved_at IS NOT NULL
             AND approved_at < ${staleThreshold}
             AND title_ka IS NOT NULL
+            AND llm_summary_ka IS NOT NULL
             AND id NOT IN (
               SELECT article_id FROM post_deliveries
               WHERE status NOT IN ('cancelled')
@@ -616,15 +619,20 @@ const processScheduledPosts = async (
         .where(eq(appConfig.key, "posting_language"));
       const postingLanguage = (langRow?.value as string) ?? "en";
 
-      // Georgian mode: check translation is available
+      // Georgian mode: cancel delivery for untranslated articles.
+      // Article will be re-queued for distribution automatically after translation completes.
       if (postingLanguage === "ka" && (!article.titleKa || !article.llmSummaryKa)) {
         logger.warn(
           { deliveryId: delivery.id, articleId: delivery.articleId },
-          "[post-scheduler] Georgian mode but no translation — marking failed",
+          "[post-scheduler] Georgian mode: article not yet translated — cancelling delivery. " +
+            "Will auto-post after translation completes.",
         );
         await db
           .update(postDeliveries)
-          .set({ status: "failed", errorMessage: "No Georgian translation available" })
+          .set({
+            status: "cancelled",
+            errorMessage: "Cancelled: Georgian translation required. Will auto-post after translation.",
+          })
           .where(eq(postDeliveries.id, delivery.id));
         continue;
       }

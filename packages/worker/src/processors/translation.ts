@@ -11,6 +11,7 @@ import {
 } from "@watch-tower/shared";
 import type { Database } from "@watch-tower/db";
 import { appConfig, llmTelemetry } from "@watch-tower/db";
+import type { EventPublisher } from "../events.js";
 import {
   translateWithGemini,
   translateWithOpenAI,
@@ -23,6 +24,7 @@ type TranslationDeps = {
   distributionQueue?: Queue;
   imageGenerationQueue?: Queue;
   apiKeys?: { googleAi?: string; openai?: string };
+  eventPublisher?: EventPublisher;
 };
 
 type TranslationConfig = {
@@ -100,6 +102,7 @@ export const createTranslationWorker = ({
   distributionQueue,
   imageGenerationQueue,
   apiKeys,
+  eventPublisher,
 }: TranslationDeps) => {
   return new Worker(
     QUEUE_TRANSLATION,
@@ -135,17 +138,27 @@ export const createTranslationWorker = ({
         UPDATE articles
         SET
           translation_status = 'translating',
-          translation_attempts = translation_attempts + 1
+          translation_attempts = translation_attempts + 1,
+          translated_at = NOW()
         WHERE id IN (
           SELECT id FROM articles
-          WHERE importance_score = ANY(${`{${scoreList.join(",")}}`}::smallint[])
-            AND (translation_status IS NULL OR translation_status = 'failed')
+          WHERE (
+            -- Normal auto-translation path (score-based)
+            (
+              importance_score = ANY(${`{${scoreList.join(",")}}`}::smallint[])
+              AND (translation_status IS NULL OR translation_status = 'failed')
+              AND created_at > ${enabledSince}
+            )
+            -- Manual translate path (user-requested, bypass score + backfill filters)
+            OR translation_status = 'queued'
+          )
             AND llm_summary IS NOT NULL
             AND title_ka IS NULL
             AND scored_at IS NOT NULL
-            AND created_at > ${enabledSince}
             AND translation_attempts < ${MAX_TRANSLATION_ATTEMPTS}
-          ORDER BY created_at ASC
+          ORDER BY
+            CASE WHEN translation_status = 'queued' THEN 0 ELSE 1 END,
+            created_at ASC
           LIMIT 10
           FOR UPDATE SKIP LOCKED
         )
@@ -256,6 +269,11 @@ export const createTranslationWorker = ({
           `);
           translated++;
           logger.info({ articleId: article.id }, "[translation] completed");
+
+          await eventPublisher?.publish({
+            type: "article:translated",
+            data: { id: article.id },
+          });
 
           // Collect telemetry
           if (result!.usage) {

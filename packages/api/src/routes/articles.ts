@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { eq, and, gte, lte, inArray, desc, asc, sql, count } from "drizzle-orm";
-import { articles, rssSources, sectors, postDeliveries } from "@watch-tower/db";
+import { articles, rssSources, sectors, postDeliveries, appConfig } from "@watch-tower/db";
 import type { ApiDeps } from "../server.js";
 
 export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
@@ -506,6 +506,92 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       platforms,
     };
   });
+
+  // POST /articles/:id/translate - Queue manual Georgian translation
+  app.post<{ Params: { id: string } }>(
+    "/articles/:id/translate",
+    { preHandler: deps.requireApiKey },
+    async (request, reply) => {
+      const { id } = request.params;
+
+      // Check Georgian mode is active
+      const [langRow] = await deps.db
+        .select({ value: appConfig.value })
+        .from(appConfig)
+        .where(eq(appConfig.key, "posting_language"));
+      const postingLanguage = (langRow?.value as string) ?? "en";
+
+      if (postingLanguage !== "ka") {
+        return reply.code(400).send({ error: "Georgian mode is not active" });
+      }
+
+      // Fetch article
+      const [article] = await deps.db
+        .select({
+          id: articles.id,
+          llmSummary: articles.llmSummary,
+          pipelineStage: articles.pipelineStage,
+          translationStatus: articles.translationStatus,
+        })
+        .from(articles)
+        .where(eq(articles.id, id));
+
+      if (!article) {
+        return reply.code(404).send({ error: "Article not found" });
+      }
+
+      if (!article.llmSummary) {
+        return reply.code(400).send({ error: "Article has not been scored yet" });
+      }
+
+      const validStages = ["scored", "approved", "posted"];
+      if (!validStages.includes(article.pipelineStage)) {
+        return reply.code(400).send({
+          error: `Article must be in scored, approved, or posted stage (current: ${article.pipelineStage})`,
+        });
+      }
+
+      if (article.translationStatus === "queued") {
+        return reply.code(409).send({ error: "Translation already queued" });
+      }
+      if (article.translationStatus === "translating") {
+        return reply.code(409).send({ error: "Translation already in progress" });
+      }
+      if (article.translationStatus === "translated") {
+        return reply.code(409).send({ error: "Article already translated" });
+      }
+
+      // Atomic update: set queued + reset attempts for fresh start
+      // Status guard in WHERE prevents TOCTOU race — if worker already claimed
+      // or completed between the SELECT and this UPDATE, 0 rows match → 409
+      const [updated] = await deps.db
+        .update(articles)
+        .set({
+          translationStatus: "queued",
+          translationAttempts: 0,
+          translationError: null,
+          titleKa: null,
+          llmSummaryKa: null,
+        })
+        .where(
+          and(
+            eq(articles.id, id),
+            sql`llm_summary IS NOT NULL`,
+            sql`(translation_status IS NULL OR translation_status IN ('failed', 'exhausted'))`,
+          ),
+        )
+        .returning({ id: articles.id, translationStatus: articles.translationStatus });
+
+      if (!updated) {
+        return reply.code(409).send({ error: "Translation status changed, please refresh" });
+      }
+
+      return {
+        id: updated.id,
+        translation_status: updated.translationStatus,
+      };
+    },
+  );
 
   // DELETE /articles/:id/schedule - Cancel scheduled delivery
   app.delete<{

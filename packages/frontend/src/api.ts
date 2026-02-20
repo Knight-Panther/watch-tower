@@ -603,6 +603,20 @@ export const rejectArticle = async (
   return res.json();
 };
 
+export const translateArticle = async (
+  id: string,
+): Promise<{ id: string; translation_status: string }> => {
+  const res = await fetch(`${API_URL}/articles/${id}/translate`, {
+    method: "POST",
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to queue translation");
+  }
+  return res.json();
+};
+
 export const batchApproveArticles = async (
   ids: string[],
 ): Promise<{ updated: number; ids: string[] }> => {

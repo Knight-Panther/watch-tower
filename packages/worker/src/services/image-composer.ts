@@ -72,7 +72,35 @@ export async function composeNewsCard(
   const titleAreaLeft = (template.titlePosition.x / 100) * width;
   const titleY = (template.titlePosition.y / 100) * height;
   const maxWidth = (template.titleMaxWidth / 100) * width;
-  const fontSize = template.titleFontSize;
+
+  // Auto font sizing: shrink font until title fits in available vertical space
+  const BOTTOM_MARGIN = 20; // px margin from image bottom edge
+  const MIN_FONT_SIZE = 24;
+  const availableHeight = height - titleY - BOTTOM_MARGIN - (template.backdropEnabled ? template.backdropPadding * 2 : 0);
+
+  let fontSize = template.titleFontSize;
+  let lines: string[] = [];
+  let lineHeight = fontSize * 1.35;
+
+  while (fontSize >= MIN_FONT_SIZE) {
+    ctx.font = `bold ${fontSize}px "${template.titleFontFamily}", sans-serif`;
+    ctx.textBaseline = "top";
+    ctx.textAlign = "left";
+    lines = wrapText(ctx, georgianTitle, maxWidth);
+    lineHeight = fontSize * 1.35;
+    const totalTextHeight = lines.length * lineHeight;
+    if (totalTextHeight <= availableHeight) break;
+    fontSize -= 2;
+  }
+
+  // Safety: if even at minimum font size the text overflows, truncate lines
+  if (fontSize < MIN_FONT_SIZE) fontSize = MIN_FONT_SIZE;
+  const maxLines = Math.max(1, Math.floor(availableHeight / lineHeight));
+  if (lines.length > maxLines) {
+    lines = lines.slice(0, maxLines);
+    // Add ellipsis to last visible line
+    lines[maxLines - 1] = lines[maxLines - 1].replace(/\s*$/, "…");
+  }
 
   // Compute the actual canvas fillText x coordinate based on alignment.
   // Canvas textAlign "center" centers AT the x coordinate, "right" ends AT x.
@@ -83,15 +111,6 @@ export async function composeNewsCard(
   } else if (template.titleAlignment === "right") {
     textDrawX = titleAreaLeft + maxWidth; // right edge of the text area
   }
-
-  // Set font for text measurement (use "left" align for wrapping)
-  ctx.font = `bold ${fontSize}px "${template.titleFontFamily}", sans-serif`;
-  ctx.textBaseline = "top";
-
-  // Word wrap the title (always measure with left align for accurate wrapping)
-  ctx.textAlign = "left";
-  const lines = wrapText(ctx, georgianTitle, maxWidth);
-  const lineHeight = fontSize * 1.35;
 
   // 4. Draw semi-transparent backdrop behind title
   if (template.backdropEnabled && lines.length > 0) {

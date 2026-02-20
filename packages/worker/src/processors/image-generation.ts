@@ -32,15 +32,18 @@ type ImageGenConfig = {
   size: string;
   prompt: string;
   template: ImageTemplateConfig;
+  postingLanguage: string;
 };
 
 type ClaimedArticle = {
   id: string;
   title: string;
   titleKa: string | null;
+  llmSummaryKa: string | null;
   llmSummary: string | null;
   importanceScore: number | null;
   pipelineStage: string;
+  translationStatus: string | null;
 };
 
 // ─── Config Reader ──────────────────────────────────────────────────────────
@@ -53,6 +56,7 @@ async function getImageGenConfig(db: Database): Promise<ImageGenConfig> {
     "image_generation_size",
     "image_generation_prompt",
     "image_template",
+    "posting_language",
   ];
 
   const rows = await db
@@ -69,6 +73,7 @@ async function getImageGenConfig(db: Database): Promise<ImageGenConfig> {
     size: (m.get("image_generation_size") as string) ?? "1024x1536",
     prompt: (m.get("image_generation_prompt") as string) ?? "",
     template: (m.get("image_template") as ImageTemplateConfig) ?? DEFAULT_IMAGE_TEMPLATE,
+    postingLanguage: (m.get("posting_language") as string) ?? "en",
   };
 }
 
@@ -122,9 +127,11 @@ export const createImageGenerationWorker = ({
             id: articles.id,
             title: articles.title,
             titleKa: articles.titleKa,
+            llmSummaryKa: articles.llmSummaryKa,
             llmSummary: articles.llmSummary,
             importanceScore: articles.importanceScore,
             pipelineStage: articles.pipelineStage,
+            translationStatus: articles.translationStatus,
           })
           .from(articles)
           .where(eq(articles.id, specificArticleId))
@@ -162,9 +169,11 @@ export const createImageGenerationWorker = ({
             id: articles.id,
             title: articles.title,
             titleKa: articles.titleKa,
+            llmSummaryKa: articles.llmSummaryKa,
             llmSummary: articles.llmSummary,
             importanceScore: articles.importanceScore,
             pipelineStage: articles.pipelineStage,
+            translationStatus: articles.translationStatus,
           })
           .from(articles)
           .where(
@@ -196,6 +205,33 @@ export const createImageGenerationWorker = ({
 
       if (articlesToProcess.length === 0) {
         return { processed: 0, reason: "no_articles_pending" };
+      }
+
+      // Georgian mode guard: skip untranslated articles to avoid wasting image generation costs.
+      // Images overlay the Georgian title, so generating without translation is pointless.
+      if (config.postingLanguage === "ka") {
+        const before = articlesToProcess.length;
+        const skipped: string[] = [];
+        articlesToProcess = articlesToProcess.filter((a) => {
+          if (!a.titleKa || !a.llmSummaryKa) {
+            skipped.push(a.id.slice(0, 8));
+            return false;
+          }
+          return true;
+        });
+        if (skipped.length > 0) {
+          logger.debug(
+            { skipped: skipped.length, articleIds: skipped },
+            "[image-gen] Georgian mode: skipping untranslated articles",
+          );
+        }
+        if (articlesToProcess.length === 0) {
+          return {
+            processed: 0,
+            reason: "all_articles_awaiting_georgian_translation",
+            skippedCount: before,
+          };
+        }
       }
 
       logger.info(
