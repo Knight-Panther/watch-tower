@@ -201,6 +201,35 @@ export const createLinkedInProvider = (config: LinkedInConfig): SocialProvider =
           }
 
           const postId = response.headers.get("x-restli-id") || "";
+
+          // Auto-comment source URL on image posts (keeps post text clean)
+          if (request.sourceUrl && postId) {
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+            try {
+              const activityUrn = postId.startsWith("urn:")
+                ? postId
+                : `urn:li:ugcPost:${postId}`;
+              await fetchWithTimeout(
+                `${LINKEDIN_API_BASE}/socialActions/${encodeURIComponent(activityUrn)}/comments`,
+                {
+                  method: "POST",
+                  headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                    "Content-Type": "application/json",
+                    "X-Restli-Protocol-Version": "2.0.0",
+                  },
+                  body: JSON.stringify({
+                    actor: authorUrn,
+                    message: { text: request.sourceUrl },
+                  }),
+                },
+                timeoutMs,
+              );
+            } catch {
+              // Comment failure is non-critical — post itself succeeded
+            }
+          }
+
           return {
             platform: "linkedin",
             postId,

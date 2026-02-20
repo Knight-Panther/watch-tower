@@ -364,13 +364,34 @@ export default function Home(props: HomeProps) {
                     className={`h-2 w-2 flex-shrink-0 rounded-full ${healthDot}`}
                     title={healthTitle}
                   />
-                  <div className="min-w-0">
+                  <div className="min-w-0 max-w-[340px]">
                     <p className="text-sm font-semibold truncate">
                       {source.name ?? "Untitled source"}
                     </p>
-                    <p className="text-xs text-slate-400 truncate" title={source.url}>
-                      {source.url}
-                    </p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-xs text-slate-500 truncate" title={source.url}>
+                        {(() => {
+                          try {
+                            const u = new URL(source.url);
+                            return u.hostname;
+                          } catch {
+                            return source.url;
+                          }
+                        })()}
+                      </p>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigator.clipboard.writeText(source.url);
+                          const btn = e.currentTarget;
+                          btn.textContent = "✓";
+                          setTimeout(() => { btn.textContent = "Copy URL"; }, 1200);
+                        }}
+                        className="flex-shrink-0 rounded border border-slate-700 px-1.5 py-0.5 text-[10px] text-slate-400 hover:border-slate-500 hover:text-slate-200 transition"
+                      >
+                        Copy URL
+                      </button>
+                    </div>
                   </div>
                 </div>
                 <div className="flex items-end gap-3 ml-auto flex-shrink-0">

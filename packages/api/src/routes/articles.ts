@@ -76,7 +76,7 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
 
     if (search) {
       conditions.push(
-        sql`(${articles.title} ILIKE ${`%${search}%`} OR ${articles.llmSummary} ILIKE ${`%${search}%`})`,
+        sql`(${articles.title} ILIKE ${`%${search}%`} OR ${articles.llmSummary} ILIKE ${`%${search}%`} OR ${articles.titleKa} ILIKE ${`%${search}%`} OR ${articles.llmSummaryKa} ILIKE ${`%${search}%`})`,
       );
     }
 

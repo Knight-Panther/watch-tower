@@ -410,8 +410,8 @@ export default function PostTemplates() {
                 </button>
               </div>
 
-              {/* Auto-Comment URL (Facebook only — posts source link as first comment) */}
-              {template.showImage && selectedAccount?.platform === "facebook" && (
+              {/* Auto-Comment URL (Facebook & LinkedIn — posts source link as first comment) */}
+              {template.showImage && (selectedAccount?.platform === "facebook" || selectedAccount?.platform === "linkedin") && (
                 <div className="ml-4 border-l-2 border-slate-700 pl-4">
                   <div className="flex items-center justify-between rounded-xl border border-slate-700 bg-slate-950 px-4 py-3">
                     <div>
