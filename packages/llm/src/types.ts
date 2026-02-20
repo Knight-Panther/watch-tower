@@ -2,6 +2,7 @@ export type ScoringRequest = {
   articleId: string;
   title: string;
   contentSnippet: string | null;
+  categories?: string[]; // RSS <category> tags for scoring context
   sectorName?: string;
   promptTemplate?: string; // Legacy: single merged prompt (backward compat)
   systemPrompt?: string; // New: stable instructions (role, rubric, examples, format)

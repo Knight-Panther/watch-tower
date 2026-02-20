@@ -46,7 +46,7 @@ Build Watch Tower into a reliable intelligence tool for personal use, then sell 
 
 ---
 
-### P1: Score Reasoning — Persist What's Already Generated
+### P1: Score Reasoning — Persist What's Already Generated ✅ DONE
 
 **Problem:** Scores are 1-5 with no visible reasoning. You (or clients) ask "why did this get a 3?" and there's no answer in the dashboard.
 
@@ -71,11 +71,11 @@ Build Watch Tower into a reliable intelligence tool for personal use, then sell 
 
 ---
 
-### P2: Pre-Filter + RSS Enrichment — Hard Reject Before LLM (Cost Gate + Scoring Quality)
+### P2: Pre-Filter + RSS Enrichment — Hard Reject Before LLM (Cost Gate + Scoring Quality) ✅ DONE
 
 This priority has two parts: (A) enrich what we capture from RSS feeds at ingest time, and (B) use that richer data to hard-reject junk before it reaches the LLM.
 
-#### P2-A: RSS Field Enrichment (Ingest-Level)
+#### P2-A: RSS Field Enrichment (Ingest-Level) ✅ DONE
 
 **Problem:** We currently capture only `title` + `contentSnippet` (500 chars, HTML-stripped) from RSS feeds. Two valuable fields are available but ignored:
 
@@ -108,7 +108,7 @@ This priority has two parts: (A) enrich what we capture from RSS feeds at ingest
 **Effort:** Small — 5 surgical changes across 3 files
 **Impact:** High — single biggest quality uplift for scoring accuracy
 
-#### P2-B: Hard Reject Before LLM (Cost Gate)
+#### P2-B: Hard Reject Before LLM (Cost Gate) ✅ DONE
 
 **Problem:** Every article reaching the LLM costs money. The existing `ignore` list in `scoring_config` is a soft hint — it tells the LLM to "de-prioritize" but articles still get scored and billed.
 
@@ -155,7 +155,7 @@ This priority has two parts: (A) enrich what we capture from RSS feeds at ingest
 
 ---
 
-#### P2-C: Scoring Prompt Enrichment (LLM Brain)
+#### P2-C: Scoring Prompt Enrichment (LLM Brain) ✅ DONE
 
 **Problem:** The LLM prompt currently receives only `title` and `content_snippet` per article. With P2-A enrichment, two new signals are available that improve scoring accuracy.
 
@@ -174,7 +174,7 @@ This priority has two parts: (A) enrich what we capture from RSS feeds at ingest
 
 ---
 
-### P3: Keyword/Entity Alerts — "Ping Me When X Happens"
+### P3: Keyword/Entity Alerts — "Ping Me When X Happens" ✅ DONE
 
 **Problem:** Everything is score-based. The tool can't answer: "tell me immediately when anyone mentions [CompanyX]."
 
@@ -222,7 +222,7 @@ This priority has two parts: (A) enrich what we capture from RSS feeds at ingest
 
 ---
 
-### P4: Daily Digest — The Product's Front Door
+### P4: Daily Digest — The Product's Front Door ✅ DONE
 
 **Problem:** Most people won't open the dashboard daily. Without a push delivery, the tool is invisible. The digest is what clients interact with — if it reads like an analyst wrote it, they keep paying. If it reads like an RSS dump, they cancel.
 
@@ -364,7 +364,7 @@ Example with 40×score-3, 25×score-4, 10×score-5, max=15:
 
 ---
 
-### P5: Source Quality Dashboard — Operator Tool
+### P5: Source Quality Dashboard — Operator Tool ✅ DONE
 
 **Problem:** When managing sources for clients, you need to quickly identify which sources produce signal vs noise.
 
@@ -623,14 +623,14 @@ Before implementing ANY priority (P1-P7), follow this exact sequence. Do NOT ski
 ```
 Phase 1: Core quality (use it yourself, prove value)
 ──────────────────────────────────────────────────
-1. P1: Persist score reasoning           (~2 hours — 4 code changes)
-2. P2: RSS enrichment + pre-filter       (~1.5 days — ingest enrichment, hard reject, prompt update)
-3. P5: Source quality dashboard           (~1 day)
+1. [DONE] P1: Persist score reasoning           (~2 hours — 4 code changes)
+2. [DONE] P2: RSS enrichment + pre-filter       (~1.5 days — ingest enrichment, hard reject, prompt update)
+3. [DONE] P5: Source quality dashboard           (~1 day)
 
 Phase 2: Client-facing features
 ──────────────────────────────────────────────────
-4. P3: Keyword alerts → Telegram          (~2-3 days)
-5. P4: Daily digest + role/tone system     (~3-4 days — digest engine, LLM prompt, role customization, UI config)
+4. [DONE] P3: Keyword alerts → Telegram          (~2-3 days)
+5. [DONE] P4: Daily digest + role/tone system     (~3-4 days — digest engine, LLM prompt, role customization, UI config)
 6. Deployment template + scripts          (~1 day)
 
 ─── Ready to sell managed instances ───

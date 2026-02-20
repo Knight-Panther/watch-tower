@@ -110,7 +110,10 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
           url: articles.url,
           content_snippet: articles.contentSnippet,
           llm_summary: articles.llmSummary,
+          score_reasoning: articles.scoreReasoning,
+          rejection_reason: articles.rejectionReason,
           importance_score: articles.importanceScore,
+          article_categories: articles.articleCategories,
           pipeline_stage: articles.pipelineStage,
           published_at: articles.publishedAt,
           created_at: articles.createdAt,
@@ -166,7 +169,10 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
           url: articles.url,
           content_snippet: articles.contentSnippet,
           llm_summary: articles.llmSummary,
+          score_reasoning: articles.scoreReasoning,
+          rejection_reason: articles.rejectionReason,
           importance_score: articles.importanceScore,
+          article_categories: articles.articleCategories,
           scoring_model: articles.scoringModel,
           pipeline_stage: articles.pipelineStage,
           is_semantic_duplicate: articles.isSemanticDuplicate,
@@ -308,7 +314,7 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
 
       const [updated] = await deps.db
         .update(articles)
-        .set({ pipelineStage: "rejected" })
+        .set({ pipelineStage: "rejected", rejectionReason: "manual" })
         .where(eq(articles.id, id))
         .returning();
 
@@ -385,7 +391,7 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
 
     const updated = await deps.db
       .update(articles)
-      .set({ pipelineStage: "rejected" })
+      .set({ pipelineStage: "rejected", rejectionReason: "manual" })
       .where(inArray(articles.id, ids))
       .returning({ id: articles.id });
 

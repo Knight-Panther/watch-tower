@@ -33,7 +33,7 @@ export const fetchFeedSecurely = async (
       Accept: "application/rss+xml, application/xml, text/xml",
     },
     customFields: {
-      item: [],
+      item: [["content:encoded", "contentEncoded"]],
     },
   });
 

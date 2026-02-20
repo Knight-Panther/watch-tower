@@ -140,6 +140,21 @@ export default function ScheduleModal({ article, postingLanguage, onClose, onSch
           </>
         ) : (
           <>
+            {/* Score reasoning (if available) */}
+            {article.score_reasoning && (
+              <div className="mt-3 rounded-xl border border-slate-800 bg-slate-800/40 px-4 py-3">
+                <p className="text-xs font-medium text-slate-400 mb-1">
+                  Score Reasoning
+                  {article.importance_score !== null && (
+                    <span className="ml-2 px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 font-bold">
+                      {article.importance_score}
+                    </span>
+                  )}
+                </p>
+                <p className="text-sm text-slate-300 leading-relaxed">{article.score_reasoning}</p>
+              </div>
+            )}
+
             {/* Article title */}
             <div className="mt-4">
               <label className="block text-sm font-medium text-slate-400 mb-1">Title</label>

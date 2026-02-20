@@ -70,6 +70,7 @@ export const articles = pgTable(
     url: text("url").notNull().unique(),
     title: text("title").notNull(),
     contentSnippet: text("content_snippet"),
+    articleCategories: text("article_categories").array(),
     publishedAt: timestamp("published_at", { withTimezone: true }),
     pipelineStage: text("pipeline_stage").notNull().default("ingested"),
     // Semantic dedup fields
@@ -81,6 +82,8 @@ export const articles = pgTable(
     // LLM scoring fields
     importanceScore: smallint("importance_score"),
     llmSummary: text("llm_summary"),
+    scoreReasoning: text("score_reasoning"),
+    rejectionReason: text("rejection_reason"),
     scoringModel: text("scoring_model"),
     // Georgian translation fields
     titleKa: text("title_ka"),
@@ -309,3 +312,41 @@ export const allowedDomains = pgTable("allowed_domains", {
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ─── Alert Rules (P3: Keyword Alerts → Telegram) ────────────────────────────
+
+export const alertRules = pgTable(
+  "alert_rules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    keywords: text("keywords").array().notNull(),
+    minScore: smallint("min_score").notNull().default(1),
+    telegramChatId: text("telegram_chat_id").notNull(),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("idx_alert_rules_active").on(table.active)],
+);
+
+export const alertDeliveries = pgTable(
+  "alert_deliveries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ruleId: uuid("rule_id")
+      .notNull()
+      .references(() => alertRules.id, { onDelete: "cascade" }),
+    articleId: uuid("article_id")
+      .notNull()
+      .references(() => articles.id, { onDelete: "cascade" }),
+    matchedKeyword: text("matched_keyword").notNull(),
+    status: text("status").notNull().default("sent"),
+    errorMessage: text("error_message"),
+    sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("idx_alert_deliveries_unique").on(table.ruleId, table.articleId),
+    index("idx_alert_deliveries_rule").on(table.ruleId),
+  ],
+);

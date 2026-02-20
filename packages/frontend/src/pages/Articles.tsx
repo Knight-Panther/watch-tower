@@ -725,6 +725,20 @@ export default function Articles() {
                             )}
                           </>
                         )}
+                        {article.article_categories && article.article_categories.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {article.article_categories.slice(0, 5).map((cat, i) => (
+                              <span key={i} className="px-1.5 py-0.5 bg-slate-700/50 rounded text-[10px] text-slate-400">
+                                {cat}
+                              </span>
+                            ))}
+                            {article.article_categories.length > 5 && (
+                              <span className="px-1.5 py-0.5 text-[10px] text-slate-500">
+                                +{article.article_categories.length - 5}
+                              </span>
+                            )}
+                          </div>
+                        )}
                         <button
                           onClick={() => startEditing(article)}
                           className="absolute top-0 right-0 opacity-0 group-hover:opacity-100 transition-opacity px-1.5 py-0.5 bg-slate-700/80 text-slate-300 rounded text-xs hover:bg-slate-600"
@@ -741,13 +755,26 @@ export default function Articles() {
                     >
                       {article.pipeline_stage}
                     </span>
+                    {article.pipeline_stage === "rejected" && article.rejection_reason && (
+                      <p className="mt-1 text-[10px] text-red-400/70 max-w-[140px] truncate" title={article.rejection_reason}>
+                        {article.rejection_reason}
+                      </p>
+                    )}
                   </td>
                   <td className="px-4 py-3">
-                    <span
-                      className={`px-2 py-1 rounded text-xs font-bold ${getScoreBadgeClass(article.importance_score)}`}
-                    >
-                      {article.importance_score ?? "-"}
-                    </span>
+                    <div className="group/score relative inline-block">
+                      <span
+                        className={`px-2 py-1 rounded text-xs font-bold ${getScoreBadgeClass(article.importance_score)} ${article.score_reasoning ? "cursor-help" : ""}`}
+                      >
+                        {article.importance_score ?? "-"}
+                      </span>
+                      {article.score_reasoning && (
+                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-300 shadow-xl opacity-0 pointer-events-none group-hover/score:opacity-100 group-hover/score:pointer-events-auto transition-opacity z-20">
+                          <p className="font-medium text-slate-200 mb-1">Score Reasoning</p>
+                          <p className="leading-relaxed">{article.score_reasoning}</p>
+                        </div>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-col gap-1.5 items-center">

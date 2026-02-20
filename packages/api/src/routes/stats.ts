@@ -1,10 +1,11 @@
 import type { FastifyInstance } from "fastify";
-import { eq, and, gte, desc, count, inArray } from "drizzle-orm";
+import { eq, and, gte, desc, count, inArray, isNotNull } from "drizzle-orm";
 import { rssSources, articles, feedFetchRuns, sectors } from "@watch-tower/db";
 import type { ApiDeps } from "../server.js";
 
 const CACHE_KEY_OVERVIEW = "stats:overview";
 const CACHE_KEY_SOURCES = "stats:sources";
+const CACHE_KEY_SOURCE_QUALITY = "stats:source-quality";
 const CACHE_TTL_SECONDS = 10;
 
 export const registerStatsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
@@ -209,6 +210,76 @@ export const registerStatsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
 
     // Cache result
     await deps.redis.setex(CACHE_KEY_SOURCES, CACHE_TTL_SECONDS, JSON.stringify(result));
+    return result;
+  });
+
+  app.get("/stats/source-quality", { preHandler: deps.requireApiKey }, async () => {
+    const cached = await deps.redis.get(CACHE_KEY_SOURCE_QUALITY);
+    if (cached) return JSON.parse(cached);
+
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    // Score distribution per source over last 30 days
+    const rows = await deps.db
+      .select({
+        sourceId: articles.sourceId,
+        score: articles.importanceScore,
+        cnt: count(),
+      })
+      .from(articles)
+      .where(
+        and(
+          isNotNull(articles.importanceScore),
+          isNotNull(articles.sourceId),
+          gte(articles.scoredAt, cutoff),
+        ),
+      )
+      .groupBy(articles.sourceId, articles.importanceScore);
+
+    // Aggregate per source
+    const bySource = new Map<
+      string,
+      { dist: Record<number, number>; total: number; sum: number; signal: number }
+    >();
+
+    for (const row of rows) {
+      if (!row.sourceId || row.score == null) continue;
+      let entry = bySource.get(row.sourceId);
+      if (!entry) {
+        entry = { dist: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }, total: 0, sum: 0, signal: 0 };
+        bySource.set(row.sourceId, entry);
+      }
+      const c = Number(row.cnt);
+      entry.dist[row.score] = c;
+      entry.total += c;
+      entry.sum += row.score * c;
+      if (row.score >= 4) entry.signal += c;
+    }
+
+    const result: Record<
+      string,
+      {
+        distribution: Record<number, number>;
+        total: number;
+        avg_score: number;
+        signal_ratio: number;
+      }
+    > = {};
+
+    for (const [sourceId, entry] of bySource) {
+      result[sourceId] = {
+        distribution: entry.dist,
+        total: entry.total,
+        avg_score: Math.round((entry.sum / entry.total) * 100) / 100,
+        signal_ratio: Math.round((entry.signal / entry.total) * 100),
+      };
+    }
+
+    await deps.redis.setex(
+      CACHE_KEY_SOURCE_QUALITY,
+      CACHE_TTL_SECONDS,
+      JSON.stringify(result),
+    );
     return result;
   });
 };

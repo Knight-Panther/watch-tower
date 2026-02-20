@@ -1,4 +1,5 @@
 import { Worker, Queue } from "bullmq";
+import type { Redis } from "ioredis";
 import { sql, eq, inArray } from "drizzle-orm";
 import {
   QUEUE_LLM_BRAIN,
@@ -16,6 +17,7 @@ import { llmTelemetry, appConfig } from "@watch-tower/db";
 import type { LLMProvider, ScoringRequest, ScoringResult } from "@watch-tower/llm";
 import { calculateLLMCost } from "@watch-tower/llm";
 import type { EventPublisher } from "../events.js";
+import { checkAndFireAlerts } from "./alert-processor.js";
 
 /**
  * Check if ANY platform has auto-posting enabled in app_config.
@@ -55,14 +57,27 @@ type LLMBrainDeps = {
   autoRejectThreshold: number;
   batchSize?: number;
   distributionQueue?: Queue;
+  redis?: Redis;
+  telegramConfig?: { botToken: string; defaultChatId: string };
 };
 
 const DEFAULT_BATCH_SIZE = 10;
+
+/**
+ * Case-insensitive word boundary match. Prevents "AI" matching "FAIRY".
+ * Shared between pre-filter reject logic and alert keyword matching.
+ */
+export const matchesKeyword = (text: string, keyword: string): boolean => {
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`\\b${escaped}\\b`, "i");
+  return regex.test(text);
+};
 
 type ClaimedArticle = {
   id: string;
   title: string;
   contentSnippet: string | null;
+  articleCategories: string[] | null;
   sectorId: string | null;
   sectorName: string | null;
 };
@@ -83,6 +98,8 @@ export const createLLMBrainWorker = ({
   autoRejectThreshold,
   batchSize = DEFAULT_BATCH_SIZE,
   distributionQueue,
+  redis,
+  telegramConfig,
 }: LLMBrainDeps) => {
   return new Worker(
     QUEUE_LLM_BRAIN,
@@ -105,6 +122,7 @@ export const createLLMBrainWorker = ({
           id,
           title,
           content_snippet as "contentSnippet",
+          article_categories as "articleCategories",
           sector_id as "sectorId"
       `);
 
@@ -220,14 +238,107 @@ export const createLLMBrainWorker = ({
 
       logger.info(`[llm-brain] claimed ${articles.length} articles for scoring`);
 
-      // 2. Build scoring requests with sector-specific prompts
+      // 2a. PRE-FILTER: Hard reject articles matching reject_keywords before LLM (cost gate)
+      const preFilterRejects: { id: string; reason: string }[] = [];
+      const passedArticles: ClaimedArticle[] = [];
+
+      for (const article of articles) {
+        const rules = article.sectorId ? sectorRules.get(article.sectorId) : undefined;
+        const config = rules?.config;
+        const parsed = config && typeof config === "object" && Object.keys(config).length > 0
+          ? scoringConfigSchema.safeParse(config)
+          : null;
+        const rejectKeywords = parsed?.success ? parsed.data.rejectKeywords : [];
+
+        if (rejectKeywords.length === 0) {
+          passedArticles.push(article);
+          continue;
+        }
+
+        let rejected = false;
+        for (const keyword of rejectKeywords) {
+          // Check title
+          if (matchesKeyword(article.title, keyword)) {
+            preFilterRejects.push({
+              id: article.id,
+              reason: `pre-filter: keyword '${keyword}' matched in title`,
+            });
+            rejected = true;
+            break;
+          }
+          // Check categories
+          if (article.articleCategories?.some((cat) => matchesKeyword(cat, keyword))) {
+            preFilterRejects.push({
+              id: article.id,
+              reason: `pre-filter: keyword '${keyword}' matched in categories`,
+            });
+            rejected = true;
+            break;
+          }
+          // Check content snippet
+          if (article.contentSnippet && matchesKeyword(article.contentSnippet, keyword)) {
+            preFilterRejects.push({
+              id: article.id,
+              reason: `pre-filter: keyword '${keyword}' matched in content_snippet`,
+            });
+            rejected = true;
+            break;
+          }
+        }
+
+        if (!rejected) {
+          passedArticles.push(article);
+        }
+      }
+
+      // Bulk reject pre-filtered articles
+      if (preFilterRejects.length > 0) {
+        const rejectIds = preFilterRejects.map((r) => r.id);
+        const rejectIdsLiteral = `{${rejectIds.join(",")}}`;
+        const escapeRejectReason = (s: string) =>
+          `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+        const rejectReasonsLiteral = `{${preFilterRejects.map((r) => escapeRejectReason(r.reason)).join(",")}}`;
+
+        await db.execute(sql`
+          UPDATE articles AS a
+          SET
+            pipeline_stage = 'rejected',
+            rejection_reason = bulk.reason
+          FROM (
+            SELECT
+              UNNEST(${rejectIdsLiteral}::uuid[]) AS id,
+              UNNEST(${rejectReasonsLiteral}::text[]) AS reason
+          ) AS bulk
+          WHERE a.id = bulk.id
+        `);
+
+        logger.info(
+          `[llm-brain] pre-filter rejected ${preFilterRejects.length} articles`,
+        );
+
+        // Publish rejection events
+        for (const reject of preFilterRejects) {
+          await eventPublisher.publish({
+            type: "article:rejected",
+            data: { id: reject.id },
+          });
+        }
+      }
+
+      if (passedArticles.length === 0) {
+        logger.debug("[llm-brain] all articles pre-filtered, no scoring needed");
+        return;
+      }
+
+      // 2b. Build scoring requests with sector-specific prompts
       // Uses compile-on-read: structured config (system/user) > legacy prompt > default
-      const requests: ScoringRequest[] = articles.map((a) => {
+      const requests: ScoringRequest[] = passedArticles.map((a) => {
         const resolved = resolvePrompt(a.sectorId, a.sectorName);
         return {
           articleId: a.id,
           title: a.title,
           contentSnippet: a.contentSnippet,
+          categories: a.articleCategories ?? undefined,
           sectorName: a.sectorName ?? undefined,
           ...(resolved.systemPrompt
             ? { systemPrompt: resolved.systemPrompt }
@@ -299,6 +410,8 @@ export const createLLMBrainWorker = ({
           id: string;
           score: number;
           summary: string | null;
+          reasoning: string | null;
+          rejectionReason: string | null;
           stage: string;
           approvedAt: Date | null;
         };
@@ -306,16 +419,26 @@ export const createLLMBrainWorker = ({
           const thresholds = getThresholds(r.articleId);
           let stage: string;
           let approvedAt: Date | null = null;
+          let rejectionReason: string | null = null;
 
           if (r.score >= thresholds.approve) {
             stage = "approved";
             approvedAt = now;
           } else if (r.score <= thresholds.reject) {
             stage = "rejected";
+            rejectionReason = `llm-score: ${r.score}`;
           } else {
             stage = "scored";
           }
-          return { id: r.articleId, score: r.score, summary: r.summary ?? null, stage, approvedAt };
+          return {
+            id: r.articleId,
+            score: r.score,
+            summary: r.summary ?? null,
+            reasoning: r.reasoning ?? null,
+            rejectionReason,
+            stage,
+            approvedAt,
+          };
         });
 
         // Bulk UPDATE using UNNEST (PostgreSQL array functions) - single query for all articles
@@ -329,6 +452,11 @@ export const createLLMBrainWorker = ({
           return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
         };
         const summariesLiteral = `{${updates.map((u) => escapeSummary(u.summary)).join(",")}}`;
+        // Escape reasoning for PostgreSQL text[] (same pattern as summaries)
+        const escapeReasoning = escapeSummary;
+        const reasoningsLiteral = `{${updates.map((u) => escapeReasoning(u.reasoning)).join(",")}}`;
+        const escapeText = escapeSummary;
+        const rejectionReasonsLiteral = `{${updates.map((u) => escapeText(u.rejectionReason)).join(",")}}`;
         const stagesLiteral = `{${updates.map((u) => u.stage).join(",")}}`;
         const approvedAtsLiteral = `{${updates.map((u) => u.approvedAt?.toISOString() ?? "NULL").join(",")}}`;
 
@@ -337,6 +465,8 @@ export const createLLMBrainWorker = ({
           SET
             importance_score = bulk.score,
             llm_summary = bulk.summary,
+            score_reasoning = bulk.reasoning,
+            rejection_reason = bulk.rejection_reason,
             scoring_model = ${scoringModel},
             scored_at = ${now},
             approved_at = bulk.approved_at,
@@ -346,6 +476,8 @@ export const createLLMBrainWorker = ({
               UNNEST(${idsLiteral}::uuid[]) AS id,
               UNNEST(${scoresLiteral}::int[]) AS score,
               UNNEST(${summariesLiteral}::text[]) AS summary,
+              UNNEST(${reasoningsLiteral}::text[]) AS reasoning,
+              UNNEST(${rejectionReasonsLiteral}::text[]) AS rejection_reason,
               UNNEST(${stagesLiteral}::text[]) AS stage,
               UNNEST(${approvedAtsLiteral}::timestamptz[]) AS approved_at
           ) AS bulk
@@ -467,6 +599,26 @@ export const createLLMBrainWorker = ({
             });
           }
         }
+
+        // 5b. ALERT CHECK: Check scored articles against active keyword alert rules
+        if (redis && telegramConfig) {
+          try {
+            const alertArticles = successes.map((r) => {
+              const claimed = articles.find((a) => a.id === r.articleId)!;
+              return {
+                articleId: r.articleId,
+                title: claimed.title,
+                llmSummary: r.summary ?? null,
+                articleCategories: claimed.articleCategories,
+                score: r.score,
+              };
+            });
+            await checkAndFireAlerts({ db, redis, telegramConfig, articles: alertArticles });
+          } catch (alertErr) {
+            // Alert failures must never interrupt the scoring pipeline
+            logger.error("[llm-brain] alert check failed, continuing", alertErr);
+          }
+        }
       }
 
       // 6. Mark failures with 'scoring_failed' stage (don't reset to embedded — prevents infinite loop)
@@ -493,8 +645,9 @@ export const createLLMBrainWorker = ({
       }
       const review = successes.length - approved - rejected;
 
+      const preFiltered = preFilterRejects.length;
       logger.info(
-        `[llm-brain] batch: ${approved} approved, ${rejected} rejected, ${review} for review, ${failures.length} failed`,
+        `[llm-brain] batch: ${preFiltered} pre-filtered, ${approved} approved, ${rejected} rejected, ${review} for review, ${failures.length} failed`,
       );
     },
     { connection, concurrency: 1 }, // Low concurrency to respect rate limits

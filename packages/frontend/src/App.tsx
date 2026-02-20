@@ -27,9 +27,11 @@ import {
   updateSector,
   getStatsOverview,
   getStatsSources,
+  getSourceQuality,
   updateSource,
   type StatsOverview,
   type StatsSource,
+  type SourceQuality,
   getTelemetrySummary,
   getTelemetryByProvider,
   getTelemetryByOperation,
@@ -52,6 +54,8 @@ import ScoringRules from "./pages/ScoringRules";
 import MediaChannelControl from "./pages/MediaChannelControl";
 import ImageTemplate from "./pages/ImageTemplate";
 import SiteRules from "./pages/SiteRules";
+import Alerts from "./pages/Alerts";
+import DigestSettings from "./pages/DigestSettings";
 import {
   ServerEventsProvider,
   useServerEventsContext,
@@ -139,6 +143,7 @@ export default function App() {
   const [confirmSectorDelete, setConfirmSectorDelete] = useState<Sector | null>(null);
   const [statsOverview, setStatsOverview] = useState<StatsOverview | null>(null);
   const [statsSources, setStatsSources] = useState<StatsSource[]>([]);
+  const [sourceQuality, setSourceQuality] = useState<Record<string, SourceQuality>>({});
   const [statsError, setStatsError] = useState<string | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   // Telemetry state
@@ -740,9 +745,14 @@ export default function App() {
     setStatsLoading(true);
     setStatsError(null);
     try {
-      const [overview, sourcesData] = await Promise.all([getStatsOverview(), getStatsSources()]);
+      const [overview, sourcesData, qualityData] = await Promise.all([
+        getStatsOverview(),
+        getStatsSources(),
+        getSourceQuality().catch(() => ({})),
+      ]);
       setStatsOverview(overview);
       setStatsSources(sourcesData);
+      setSourceQuality(qualityData);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load monitoring stats";
       setStatsError(message);
@@ -822,6 +832,7 @@ export default function App() {
               sources={sources}
               sectors={sectors}
               statsLookup={statsLookup}
+              sourceQuality={sourceQuality}
               activeCount={activeCount}
               isLoading={isLoading}
               error={error}
@@ -884,6 +895,8 @@ export default function App() {
         <Route path="/media-channels" element={<MediaChannelControl />} />
         <Route path="/image-template" element={<ImageTemplate />} />
         <Route path="/site-rules" element={<SiteRules />} />
+        <Route path="/alerts" element={<Alerts />} />
+        <Route path="/digest" element={<DigestSettings />} />
         <Route
           path="/settings"
           element={

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { Sector, Source, StatsSource, ProviderHealthResult } from "../api";
+import type { Sector, Source, StatsSource, ProviderHealthResult, SourceQuality } from "../api";
 import { checkProviderHealth } from "../api";
 import Spinner from "../components/Spinner";
 import ApiHealthModal from "../components/ApiHealthModal";
@@ -8,6 +8,7 @@ type HomeProps = {
   sources: Source[];
   sectors: Sector[];
   statsLookup: Map<string, StatsSource>;
+  sourceQuality: Record<string, SourceQuality>;
   activeCount: number;
   isLoading: boolean;
   error: string | null;
@@ -325,6 +326,7 @@ export default function Home(props: HomeProps) {
         <div className="mt-4 grid gap-3">
           {filteredSources.map((source) => {
             const stats = props.statsLookup.get(source.id);
+            const quality = props.sourceQuality[source.id];
             const healthStatus = stats?.is_stale
               ? "stale"
               : stats?.last_run?.status === "error"
@@ -348,6 +350,16 @@ export default function Home(props: HomeProps) {
                   : healthStatus === "stale"
                     ? "Stale - no recent updates"
                     : "No fetch data yet";
+
+            // Signal ratio badge color
+            const signalColor = !quality
+              ? "text-slate-500"
+              : quality.signal_ratio >= 40
+                ? "text-emerald-400"
+                : quality.signal_ratio >= 15
+                  ? "text-amber-400"
+                  : "text-red-400";
+
             return (
               <div
                 key={source.id}
@@ -393,6 +405,49 @@ export default function Home(props: HomeProps) {
                       </button>
                     </div>
                   </div>
+                  {quality && quality.total > 0 && (
+                    <div className="flex items-center gap-2 ml-2 flex-shrink-0">
+                      <div
+                        className="group relative flex items-center gap-1.5"
+                        title={`Signal: ${quality.signal_ratio}% (${quality.total} scored, avg ${quality.avg_score})`}
+                      >
+                        <span className={`text-xs font-semibold ${signalColor}`}>
+                          {quality.signal_ratio}%
+                        </span>
+                        <div className="flex h-2.5 w-20 overflow-hidden rounded-full bg-slate-800">
+                          {[1, 2, 3, 4, 5].map((score) => {
+                            const pct =
+                              quality.total > 0
+                                ? ((quality.distribution[score] ?? 0) / quality.total) * 100
+                                : 0;
+                            if (pct === 0) return null;
+                            const colors: Record<number, string> = {
+                              1: "bg-red-500",
+                              2: "bg-orange-400",
+                              3: "bg-amber-400",
+                              4: "bg-emerald-400",
+                              5: "bg-emerald-300",
+                            };
+                            return (
+                              <div
+                                key={score}
+                                className={colors[score]}
+                                style={{ width: `${pct}%` }}
+                              />
+                            );
+                          })}
+                        </div>
+                        <span className="text-[10px] text-slate-500">{quality.total}</span>
+                        <div className="pointer-events-none absolute -top-16 left-1/2 z-10 hidden -translate-x-1/2 rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-[10px] text-slate-300 shadow-lg group-hover:block whitespace-nowrap">
+                          {[5, 4, 3, 2, 1].map((s) => (
+                            <div key={s}>
+                              Score {s}: {quality.distribution[s] ?? 0}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-end gap-3 ml-auto flex-shrink-0">
                   <div className="flex flex-col gap-1">

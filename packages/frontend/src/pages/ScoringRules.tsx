@@ -16,6 +16,7 @@ import {
 const DEFAULT_CONFIG: ScoringConfig = {
   priorities: [],
   ignore: [],
+  rejectKeywords: [],
   score1: "Not newsworthy (press releases, minor updates, promotional content)",
   score2: "Low importance (routine news, minor developments)",
   score3: "Moderate importance (notable but not urgent)",
@@ -50,6 +51,7 @@ export default function ScoringRules() {
   // Tag input state
   const [priorityInput, setPriorityInput] = useState("");
   const [ignoreInput, setIgnoreInput] = useState("");
+  const [rejectKeywordInput, setRejectKeywordInput] = useState("");
 
   // Modal state
   const [showResetModal, setShowResetModal] = useState(false);
@@ -125,23 +127,25 @@ export default function ScoringRules() {
   };
 
   // Tag management
-  const addTag = (type: "priorities" | "ignore", value: string) => {
+  const addTag = (type: "priorities" | "ignore" | "rejectKeywords", value: string) => {
     const trimmed = value.trim();
     if (!trimmed) return;
     if (config[type].includes(trimmed)) {
       toast.error("Tag already exists");
       return;
     }
-    if (config[type].length >= 20) {
-      toast.error("Maximum 20 tags allowed");
+    const maxTags = type === "rejectKeywords" ? 50 : 20;
+    if (config[type].length >= maxTags) {
+      toast.error(`Maximum ${maxTags} tags allowed`);
       return;
     }
     updateConfig(type, [...config[type], trimmed]);
     if (type === "priorities") setPriorityInput("");
-    else setIgnoreInput("");
+    else if (type === "ignore") setIgnoreInput("");
+    else setRejectKeywordInput("");
   };
 
-  const removeTag = (type: "priorities" | "ignore", index: number) => {
+  const removeTag = (type: "priorities" | "ignore" | "rejectKeywords", index: number) => {
     updateConfig(
       type,
       config[type].filter((_, i) => i !== index)
@@ -336,6 +340,51 @@ export default function ScoringRules() {
                 />
                 <button
                   onClick={() => addTag("ignore", ignoreInput)}
+                  className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:border-slate-500"
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+
+            {/* Hard Reject Keywords */}
+            <div className="rounded-2xl border border-orange-500/20 bg-slate-900/40 p-5">
+              <h2 className="text-lg font-semibold text-orange-200">Reject Before Scoring</h2>
+              <p className="mt-1 text-sm text-slate-400">
+                Articles matching these keywords or categories skip LLM entirely (saves cost).
+                Uses word-boundary matching to avoid false positives.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {config.rejectKeywords.map((tag, i) => (
+                  <span
+                    key={i}
+                    className="flex items-center gap-1 rounded-full bg-orange-500/20 px-3 py-1 text-sm text-orange-200"
+                  >
+                    {tag}
+                    <button
+                      onClick={() => removeTag("rejectKeywords", i)}
+                      className="ml-1 text-orange-300 hover:text-orange-100"
+                    >
+                      x
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <div className="mt-3 flex gap-2">
+                <input
+                  value={rejectKeywordInput}
+                  onChange={(e) => setRejectKeywordInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addTag("rejectKeywords", rejectKeywordInput);
+                    }
+                  }}
+                  placeholder="Add keyword (e.g., Sponsored, Press Release)..."
+                  className="flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
+                />
+                <button
+                  onClick={() => addTag("rejectKeywords", rejectKeywordInput)}
                   className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:border-slate-500"
                 >
                   Add

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { eq, inArray, sql } from "drizzle-orm";
 import { appConfig, articles } from "@watch-tower/db";
-import { logger, imageTemplateSchema, DEFAULT_IMAGE_TEMPLATE } from "@watch-tower/shared";
+import { logger, imageTemplateSchema, DEFAULT_IMAGE_TEMPLATE, JOB_DAILY_DIGEST } from "@watch-tower/shared";
 import type { ApiDeps } from "../server.js";
 
 const CONSTRAINTS = {
@@ -555,5 +555,178 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     await upsertTypedConfig(deps, "image_template", parsed.data);
     logger.info("[config] image template updated");
     return parsed.data;
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Daily Digest Settings
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  app.get("/config/digest", { preHandler: deps.requireApiKey }, async () => {
+    const keys = [
+      "digest_enabled",
+      "digest_time",
+      "digest_timezone",
+      "digest_days",
+      "digest_min_score",
+      "digest_language",
+      "digest_system_prompt",
+      "digest_telegram_chat_id",
+      "digest_telegram_enabled",
+      "digest_facebook_enabled",
+      "digest_linkedin_enabled",
+      "digest_provider",
+      "digest_model",
+      "digest_translation_provider",
+      "digest_translation_model",
+      "digest_translation_prompt",
+      "last_digest_sent_at",
+      "posting_language",
+      "translation_provider",
+      "translation_model",
+    ];
+
+    const rows = await deps.db
+      .select({ key: appConfig.key, value: appConfig.value })
+      .from(appConfig)
+      .where(inArray(appConfig.key, keys));
+
+    const m = new Map(rows.map((r) => [r.key, r.value]));
+    const postingLanguage = (m.get("posting_language") as string) ?? "en";
+    const globalTransProvider = (m.get("translation_provider") as string) ?? "gemini";
+    const globalTransModel = (m.get("translation_model") as string) ?? "gemini-2.5-flash";
+
+    return {
+      enabled: m.get("digest_enabled") === true || m.get("digest_enabled") === "true" ? true : false,
+      time: (m.get("digest_time") as string) ?? "08:00",
+      timezone: (m.get("digest_timezone") as string) ?? "UTC",
+      days: Array.isArray(m.get("digest_days")) ? m.get("digest_days") : [1, 2, 3, 4, 5, 6, 7],
+      minScore: Number(m.get("digest_min_score")) || 3,
+      language: (m.get("digest_language") as string) ?? postingLanguage,
+      systemPrompt: (m.get("digest_system_prompt") as string) ?? "",
+      telegramChatId: String(m.get("digest_telegram_chat_id") ?? ""),
+      telegramEnabled: m.get("digest_telegram_enabled") === true || m.get("digest_telegram_enabled") === "true" || !m.has("digest_telegram_enabled"),
+      facebookEnabled: m.get("digest_facebook_enabled") === true || m.get("digest_facebook_enabled") === "true" ? true : false,
+      linkedinEnabled: m.get("digest_linkedin_enabled") === true || m.get("digest_linkedin_enabled") === "true" ? true : false,
+      provider: (m.get("digest_provider") as string) ?? "claude",
+      model: (m.get("digest_model") as string) ?? "",
+      translationProvider: (m.get("digest_translation_provider") as string) ?? globalTransProvider,
+      translationModel: (m.get("digest_translation_model") as string) ?? globalTransModel,
+      translationPrompt: (m.get("digest_translation_prompt") as string) ?? "",
+      lastDigestSentAt: (m.get("last_digest_sent_at") as string) ?? null,
+    };
+  });
+
+  app.patch<{
+    Body: {
+      enabled?: boolean;
+      time?: string;
+      timezone?: string;
+      days?: number[];
+      minScore?: number;
+      language?: string;
+      systemPrompt?: string;
+      telegramChatId?: string;
+      telegramEnabled?: boolean;
+      facebookEnabled?: boolean;
+      linkedinEnabled?: boolean;
+      provider?: string;
+      model?: string;
+      translationProvider?: string;
+      translationModel?: string;
+      translationPrompt?: string;
+    };
+  }>("/config/digest", { preHandler: deps.requireApiKey }, async (request, reply) => {
+    const body = request.body ?? {};
+
+    if (body.enabled !== undefined && typeof body.enabled !== "boolean") {
+      return reply.code(400).send({ error: "enabled must be a boolean" });
+    }
+    if (body.time !== undefined && !/^\d{2}:\d{2}$/.test(body.time)) {
+      return reply.code(400).send({ error: "time must be HH:MM format" });
+    }
+    if (body.timezone !== undefined) {
+      try {
+        Intl.DateTimeFormat(undefined, { timeZone: body.timezone });
+      } catch {
+        return reply.code(400).send({ error: "Invalid IANA timezone" });
+      }
+    }
+    if (body.days !== undefined) {
+      if (!Array.isArray(body.days) || body.days.some((d) => d < 1 || d > 7)) {
+        return reply.code(400).send({ error: "days must be array of numbers 1-7" });
+      }
+    }
+    if (body.minScore !== undefined && (body.minScore < 1 || body.minScore > 5)) {
+      return reply.code(400).send({ error: "minScore must be 1-5" });
+    }
+    if (body.language !== undefined && !["en", "ka"].includes(body.language)) {
+      return reply.code(400).send({ error: "language must be 'en' or 'ka'" });
+    }
+    if (body.systemPrompt !== undefined && body.systemPrompt.length > 2000) {
+      return reply.code(400).send({ error: "systemPrompt must be 2000 characters or less" });
+    }
+    if (body.provider !== undefined && !["claude", "openai", "deepseek"].includes(body.provider)) {
+      return reply.code(400).send({ error: "provider must be 'claude', 'openai', or 'deepseek'" });
+    }
+    if (body.model !== undefined && body.model.length > 100) {
+      return reply.code(400).send({ error: "model must be 100 characters or less" });
+    }
+    if (body.translationProvider !== undefined && !["gemini", "openai"].includes(body.translationProvider)) {
+      return reply.code(400).send({ error: "translationProvider must be 'gemini' or 'openai'" });
+    }
+    if (body.translationModel !== undefined && body.translationModel.length > 100) {
+      return reply.code(400).send({ error: "translationModel must be 100 characters or less" });
+    }
+    if (body.translationPrompt !== undefined && body.translationPrompt.length > 1000) {
+      return reply.code(400).send({ error: "translationPrompt must be 1000 characters or less" });
+    }
+
+    const updates: { key: string; value: unknown }[] = [];
+    if (body.enabled !== undefined) updates.push({ key: "digest_enabled", value: body.enabled });
+    if (body.time !== undefined) updates.push({ key: "digest_time", value: body.time });
+    if (body.timezone !== undefined) updates.push({ key: "digest_timezone", value: body.timezone });
+    if (body.days !== undefined) updates.push({ key: "digest_days", value: body.days });
+    if (body.minScore !== undefined) updates.push({ key: "digest_min_score", value: body.minScore });
+    if (body.language !== undefined) updates.push({ key: "digest_language", value: body.language });
+    if (body.systemPrompt !== undefined)
+      updates.push({ key: "digest_system_prompt", value: body.systemPrompt });
+    if (body.telegramChatId !== undefined)
+      updates.push({ key: "digest_telegram_chat_id", value: body.telegramChatId });
+    if (body.telegramEnabled !== undefined)
+      updates.push({ key: "digest_telegram_enabled", value: body.telegramEnabled });
+    if (body.facebookEnabled !== undefined)
+      updates.push({ key: "digest_facebook_enabled", value: body.facebookEnabled });
+    if (body.linkedinEnabled !== undefined)
+      updates.push({ key: "digest_linkedin_enabled", value: body.linkedinEnabled });
+    if (body.provider !== undefined) updates.push({ key: "digest_provider", value: body.provider });
+    if (body.model !== undefined) updates.push({ key: "digest_model", value: body.model });
+    if (body.translationProvider !== undefined)
+      updates.push({ key: "digest_translation_provider", value: body.translationProvider });
+    if (body.translationModel !== undefined)
+      updates.push({ key: "digest_translation_model", value: body.translationModel });
+    if (body.translationPrompt !== undefined)
+      updates.push({ key: "digest_translation_prompt", value: body.translationPrompt });
+
+    for (const { key, value } of updates) {
+      await upsertTypedConfig(deps, key, value);
+    }
+
+    logger.info("[config] digest settings updated");
+    return { success: true };
+  });
+
+  app.post("/config/digest/test", { preHandler: deps.requireApiKey }, async (_request, reply) => {
+    try {
+      await deps.maintenanceQueue.add(
+        JOB_DAILY_DIGEST,
+        { isTest: true },
+        { jobId: `digest-test-${Date.now()}` },
+      );
+      return { queued: true, message: "Test digest queued. Check Telegram in ~30 seconds." };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error(`[config] failed to queue test digest: ${msg}`);
+      return reply.code(500).send({ error: "Failed to queue test digest" });
+    }
   });
 };

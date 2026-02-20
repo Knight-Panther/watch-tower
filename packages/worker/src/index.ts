@@ -202,6 +202,14 @@ const main = async () => {
 
   const primaryApiKey = getApiKeyForProvider(env.LLM_PROVIDER);
 
+  // API keys bag for digest (digest reads its own provider/model from config)
+  const apiKeys = {
+    anthropic: env.ANTHROPIC_API_KEY,
+    openai: env.OPENAI_API_KEY,
+    deepseek: env.DEEPSEEK_API_KEY,
+    googleAi: env.GOOGLE_AI_API_KEY,
+  };
+
   // Social platform configs (shared by maintenance and distribution workers)
   const telegramConfig =
     env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID
@@ -259,6 +267,7 @@ const main = async () => {
     rateLimiter,
     eventPublisher,
     r2Storage: r2Storage ?? undefined,
+    apiKeys,
   });
 
   // Semantic dedup worker (only if embeddings enabled)
@@ -314,6 +323,9 @@ const main = async () => {
         autoRejectThreshold: env.LLM_AUTO_REJECT_THRESHOLD,
         // Pass distribution queue if any social platform is configured
         distributionQueue: hasAnyPlatform ? distributionQueue : undefined,
+        // Alert system — keyword alerts send Telegram notifications after scoring
+        redis,
+        telegramConfig,
       })
     : null;
 

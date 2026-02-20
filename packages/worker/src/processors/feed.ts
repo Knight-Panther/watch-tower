@@ -17,7 +17,7 @@ const securityEnv = securityEnvSchema.parse(process.env);
 const MAX_FEED_SIZE_BYTES = securityEnv.MAX_FEED_SIZE_MB * 1024 * 1024;
 const FEED_TIMEOUT_MS = 15000;
 
-const truncateSnippet = (text: string | undefined, maxLen = 500) => {
+const truncateSnippet = (text: string | undefined, maxLen = 1500) => {
   if (!text) return null;
   const cleaned = text.replace(/<[^>]*>/g, "").trim();
   return cleaned.length > maxLen ? cleaned.slice(0, maxLen) + "..." : cleaned;
@@ -126,12 +126,24 @@ export const createIngestWorker = ({ connection, db, eventPublisher }: IngestDep
           const publishedMs = new Date(published).getTime();
           if (Number.isNaN(publishedMs) || publishedMs < cutoff) return null;
 
+          // Prefer content:encoded (richer) over contentSnippet (short)
+          const rawContent =
+            (item as Record<string, unknown>).contentEncoded as string | undefined ??
+            item.contentSnippet ??
+            item.content;
+
+          // Capture RSS <category> tags (already parsed by rss-parser)
+          const categories = Array.isArray(item.categories) && item.categories.length > 0
+            ? item.categories.map((c: string) => c.trim()).filter(Boolean).slice(0, 20)
+            : null;
+
           return {
             sourceId,
             sectorId: sectorId ?? null,
             url: link,
             title: item.title ?? "Untitled",
-            contentSnippet: truncateSnippet(item.contentSnippet ?? item.content),
+            contentSnippet: truncateSnippet(rawContent),
+            articleCategories: categories,
             publishedAt: new Date(published),
             pipelineStage: "ingested" as const,
           };

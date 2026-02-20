@@ -73,9 +73,14 @@ export function buildScoringUserMessage(
   title: string,
   content: string,
   sectorName: string,
+  categories?: string[],
 ): string {
+  const categoriesLine =
+    categories && categories.length > 0
+      ? `\nCategories: ${categories.join(", ")}`
+      : "";
   return `Sector: ${sectorName}
-Article Title: ${title}
+Article Title: ${title}${categoriesLine}
 Article Content: ${content || "No content available — score based on title only."}`;
 }
 

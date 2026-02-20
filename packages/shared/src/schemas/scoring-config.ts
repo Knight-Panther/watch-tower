@@ -20,6 +20,8 @@ export const scoringConfigSchema = z.object({
   // Scoring guidance - what to prioritize or ignore
   priorities: z.array(z.string().min(1).max(100)).max(20).default([]),
   ignore: z.array(z.string().min(1).max(100)).max(20).default([]),
+  // Hard reject keywords - articles matching these skip LLM entirely (cost gate)
+  rejectKeywords: z.array(z.string().min(1).max(100)).max(50).default([]),
 
   // Score definitions - what each level (1-5) means (concrete signals, not vague labels)
   score1: z

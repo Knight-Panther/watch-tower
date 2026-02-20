@@ -11,6 +11,8 @@ const navItems = [
   { to: "/media-channels", label: "Media Channels" },
   { to: "/image-template", label: "Image Template" },
   { to: "/site-rules", label: "Restrictions" },
+  { to: "/alerts", label: "Alerts" },
+  { to: "/digest", label: "Daily Digest" },
   { to: "/settings", label: "DB/Telemetry" },
 ];
 

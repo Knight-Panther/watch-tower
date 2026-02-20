@@ -59,6 +59,7 @@ export class OpenAILLMProvider implements LLMProvider {
         request.title,
         truncatedContent,
         request.sectorName ?? "General",
+        request.categories,
       );
       messages.push({ role: "user", content: userMessage });
     } else {

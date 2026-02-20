@@ -43,6 +43,7 @@ export class ClaudeLLMProvider implements LLMProvider {
         request.title,
         truncatedContent,
         request.sectorName ?? "General",
+        request.categories,
       );
     } else {
       // Legacy: single merged prompt

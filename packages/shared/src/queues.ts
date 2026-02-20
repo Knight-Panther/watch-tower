@@ -17,6 +17,7 @@ export const JOB_MAINTENANCE_SCHEDULE = "maintenance-schedule";
 export const JOB_PLATFORM_HEALTH_CHECK = "platform-health-check";
 export const JOB_TRANSLATION_BATCH = "translation-batch";
 export const JOB_IMAGE_GENERATE = "image-generate";
+export const JOB_DAILY_DIGEST = "daily-digest";
 
 // Auto-post stagger delay (45s between posts to avoid bot-spam appearance)
 export const AUTO_POST_STAGGER_MS = 45_000;

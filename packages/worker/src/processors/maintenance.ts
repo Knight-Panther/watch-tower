@@ -7,6 +7,7 @@ import {
   JOB_MAINTENANCE_CLEANUP,
   JOB_MAINTENANCE_SCHEDULE,
   JOB_PLATFORM_HEALTH_CHECK,
+  JOB_DAILY_DIGEST,
   QUEUE_MAINTENANCE,
   logger,
   getDefaultTemplate,
@@ -43,6 +44,7 @@ import {
   isPlatformHealthy,
   updateLastPostAt,
 } from "../utils/platform-health.js";
+import { compileAndSendDigest } from "./digest.js";
 
 type MaintenanceDeps = {
   connection: { host: string; port: number };
@@ -59,6 +61,7 @@ type MaintenanceDeps = {
   rateLimiter: RateLimiter;
   eventPublisher?: EventPublisher;
   r2Storage?: R2Storage;
+  apiKeys: { anthropic?: string; openai?: string; deepseek?: string; googleAi?: string };
 };
 
 const getConfigBoolean = async (db: Database, key: string, fallback: boolean) => {
@@ -78,6 +81,77 @@ const getConfigNumber = async (db: Database, key: string, fallback: number) => {
   if (!row) return fallback;
   const num = Number(row.value);
   return Number.isNaN(num) ? fallback : num;
+};
+
+const getConfigString = async (db: Database, key: string, fallback: string) => {
+  const [row] = await db
+    .select({ value: appConfig.value })
+    .from(appConfig)
+    .where(eq(appConfig.key, key));
+  if (!row) return fallback;
+  return String(row.value) || fallback;
+};
+
+/**
+ * Check if it's time to send the daily digest.
+ * Uses Intl.DateTimeFormat for timezone handling (supports DST automatically).
+ */
+const checkDigestDue = async (db: Database): Promise<boolean> => {
+  const enabled = await getConfigBoolean(db, "digest_enabled", false);
+  if (!enabled) return false;
+
+  const time = await getConfigString(db, "digest_time", "08:00");
+  const timezone = await getConfigString(db, "digest_timezone", "UTC");
+
+  // Read digest_days from JSONB
+  const [daysRow] = await db
+    .select({ value: appConfig.value })
+    .from(appConfig)
+    .where(eq(appConfig.key, "digest_days"));
+  const days: number[] = Array.isArray(daysRow?.value) ? (daysRow.value as number[]) : [1, 2, 3, 4, 5, 6, 7];
+
+  // Get current time in configured timezone
+  const now = new Date();
+  let currentTime: string;
+  try {
+    currentTime = new Intl.DateTimeFormat("en-GB", {
+      timeZone: timezone,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(now);
+  } catch {
+    logger.warn({ timezone }, "[digest] invalid timezone, using UTC");
+    currentTime = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "UTC",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(now);
+  }
+
+  // Get day-of-week in configured timezone (ISO: 1=Mon...7=Sun)
+  const dayStr = new Intl.DateTimeFormat("en-US", { timeZone: timezone, weekday: "short" }).format(now);
+  const dayMap: Record<string, number> = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
+  const isoDay = dayMap[dayStr] ?? 0;
+  if (!days.includes(isoDay)) return false;
+
+  // Check time match with 2-minute tolerance
+  const [targetH, targetM] = time.split(":").map(Number);
+  const [currentH, currentM] = currentTime.split(":").map(Number);
+  const targetMinutes = targetH * 60 + targetM;
+  const currentMinutes = currentH * 60 + currentM;
+  const diff = Math.abs(currentMinutes - targetMinutes);
+  if (diff > 2 && diff < 1438) return false; // 1438 = 1440-2 for midnight wrap
+
+  // Idempotency: skip if last digest was within 1 hour
+  const lastSent = await getConfigString(db, "last_digest_sent_at", "");
+  if (lastSent) {
+    const lastSentTime = new Date(lastSent).getTime();
+    if (!Number.isNaN(lastSentTime) && Date.now() - lastSentTime < 60 * 60 * 1000) return false;
+  }
+
+  return true;
 };
 
 const runScheduledIngests = async (db: Database, ingestQueue: Queue, force = false) => {
@@ -806,6 +880,7 @@ export const createMaintenanceWorker = ({
   rateLimiter,
   eventPublisher,
   r2Storage,
+  apiKeys,
 }: MaintenanceDeps) => {
   // Create providers at startup (only for configured platforms)
   const providers: PlatformProviders = {
@@ -938,6 +1013,40 @@ export const createMaintenanceWorker = ({
         await runScheduledIngests(db, ingestQueue, job.data?.force === true);
         // Process any scheduled posts that are due
         await processScheduledPosts(db, providers, rateLimiter, eventPublisher);
+
+        // Check if daily digest is due
+        try {
+          const digestDue = await checkDigestDue(db);
+          if (digestDue) {
+            await maintenanceQueue.add(
+              JOB_DAILY_DIGEST,
+              { isTest: false },
+              { jobId: `digest-${Date.now()}` },
+            );
+            logger.info("[scheduler] queued daily digest");
+          }
+        } catch (err) {
+          logger.error("[scheduler] digest check failed", err);
+        }
+
+        return;
+      }
+
+      if (job.name === JOB_DAILY_DIGEST) {
+        const isTest = job.data?.isTest === true;
+        logger.info(`[digest] starting ${isTest ? "test" : "scheduled"} digest`);
+        const result = await compileAndSendDigest(
+          { db, telegramConfig, facebookConfig, linkedinConfig, apiKeys },
+          { isTest },
+        );
+        if (result.sent) {
+          logger.info(
+            { articles: result.articleCount, messages: result.messageCount },
+            `[digest] ${isTest ? "test" : "scheduled"} digest sent`,
+          );
+        } else {
+          logger.info("[digest] skipped (no qualifying articles or disabled)");
+        }
         return;
       }
 

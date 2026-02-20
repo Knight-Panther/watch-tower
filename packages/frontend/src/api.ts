@@ -336,6 +336,24 @@ export const getStatsSources = async (): Promise<StatsSource[]> => {
   return res.json();
 };
 
+export type SourceQuality = {
+  distribution: Record<number, number>;
+  total: number;
+  avg_score: number;
+  signal_ratio: number;
+};
+
+export const getSourceQuality = async (): Promise<Record<string, SourceQuality>> => {
+  const res = await fetch(`${API_URL}/stats/source-quality`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load source quality");
+  }
+  return res.json();
+};
+
 export type Constraints = {
   feedItemsTtl: { min: number; max: number; unit: string };
   fetchRunsTtl: { min: number; max: number; unit: string };
@@ -488,7 +506,10 @@ export type Article = {
   url: string;
   content_snippet: string | null;
   llm_summary: string | null;
+  score_reasoning: string | null;
+  rejection_reason: string | null;
   importance_score: number | null;
+  article_categories: string[] | null;
   pipeline_stage: string;
   published_at: string | null;
   created_at: string;
@@ -834,6 +855,7 @@ export const getScheduledStats = async (): Promise<ScheduledStats> => {
 export type ScoringConfig = {
   priorities: string[];
   ignore: string[];
+  rejectKeywords: string[];
   score1: string;
   score2: string;
   score3: string;
@@ -1544,4 +1566,159 @@ export const updateImageTemplate = async (template: ImageTemplateConfig2): Promi
     body: JSON.stringify(template),
   });
   if (!res.ok) throw new Error("Failed to update image template");
+};
+
+// ─── Alert Rules ─────────────────────────────────────────────────────────────
+
+export type AlertRule = {
+  id: string;
+  name: string;
+  keywords: string[];
+  min_score: number;
+  telegram_chat_id: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+  total_deliveries: number;
+  sent_count: number;
+  last_triggered_at: string | null;
+};
+
+export type AlertDelivery = {
+  id: string;
+  article_id: string;
+  matched_keyword: string;
+  status: "sent" | "failed" | "skipped";
+  sent_at: string;
+  article_title: string | null;
+};
+
+export type AlertRuleDetail = Omit<AlertRule, "total_deliveries" | "sent_count" | "last_triggered_at"> & {
+  recent_deliveries: AlertDelivery[];
+};
+
+export const listAlertRules = async (): Promise<AlertRule[]> => {
+  const res = await fetch(`${API_URL}/alerts`, { headers: authHeaders });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load alert rules");
+  }
+  return res.json();
+};
+
+export const getAlertRule = async (id: string): Promise<AlertRuleDetail> => {
+  const res = await fetch(`${API_URL}/alerts/${id}`, { headers: authHeaders });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load alert rule");
+  }
+  return res.json();
+};
+
+export const createAlertRule = async (payload: {
+  name: string;
+  keywords: string[];
+  min_score?: number;
+  telegram_chat_id: string;
+  active?: boolean;
+}): Promise<AlertRule> => {
+  const res = await fetch(`${API_URL}/alerts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to create alert rule");
+  }
+  return res.json();
+};
+
+export const updateAlertRule = async (
+  id: string,
+  payload: {
+    name?: string;
+    keywords?: string[];
+    min_score?: number;
+    telegram_chat_id?: string;
+    active?: boolean;
+  },
+): Promise<AlertRule> => {
+  const res = await fetch(`${API_URL}/alerts/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to update alert rule");
+  }
+  return res.json();
+};
+
+export const deleteAlertRule = async (id: string): Promise<void> => {
+  const res = await fetch(`${API_URL}/alerts/${id}`, {
+    method: "DELETE",
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to delete alert rule");
+  }
+};
+
+// ─── Digest Config ───────────────────────────────────────────────────────────
+
+export type DigestConfig = {
+  enabled: boolean;
+  time: string;
+  timezone: string;
+  days: number[];
+  minScore: number;
+  language: string;
+  systemPrompt: string;
+  telegramChatId: string;
+  telegramEnabled: boolean;
+  facebookEnabled: boolean;
+  linkedinEnabled: boolean;
+  provider: string;
+  model: string;
+  translationProvider: string;
+  translationModel: string;
+  translationPrompt: string;
+  lastDigestSentAt: string | null;
+};
+
+export const getDigestConfig = async (): Promise<DigestConfig> => {
+  const res = await fetch(`${API_URL}/config/digest`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) throw new Error("Failed to load digest config");
+  return res.json();
+};
+
+export const updateDigestConfig = async (
+  config: Partial<Omit<DigestConfig, "lastDigestSentAt">>,
+): Promise<void> => {
+  const res = await fetch(`${API_URL}/config/digest`, {
+    method: "PATCH",
+    headers: { ...authHeaders, "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to update digest config");
+  }
+};
+
+export const sendTestDigest = async (): Promise<{ queued: boolean; message: string }> => {
+  const res = await fetch(`${API_URL}/config/digest/test`, {
+    method: "POST",
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to send test digest");
+  }
+  return res.json();
 };
