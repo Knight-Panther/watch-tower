@@ -1,12 +1,14 @@
 import type { FastifyInstance } from "fastify";
-import { eq, and, gte, desc, count, inArray, isNotNull } from "drizzle-orm";
+import { eq, and, gte, desc, count, inArray, isNotNull, sql } from "drizzle-orm";
 import { rssSources, articles, feedFetchRuns, sectors } from "@watch-tower/db";
 import type { ApiDeps } from "../server.js";
 
 const CACHE_KEY_OVERVIEW = "stats:overview";
 const CACHE_KEY_SOURCES = "stats:sources";
 const CACHE_KEY_SOURCE_QUALITY = "stats:source-quality";
+const CACHE_KEY_ANALYTICS = "stats:analytics";
 const CACHE_TTL_SECONDS = 10;
+const ANALYTICS_CACHE_TTL = 10;
 
 export const registerStatsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
   app.get("/stats/overview", { preHandler: deps.requireApiKey }, async () => {
@@ -280,6 +282,120 @@ export const registerStatsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       CACHE_TTL_SECONDS,
       JSON.stringify(result),
     );
+    return result;
+  });
+
+  // ─── Analytics (P7 Feedback Loop) ──────────────────────────────────────────
+
+  app.get("/stats/analytics", { preHandler: deps.requireApiKey }, async () => {
+    const cached = await deps.redis.get(CACHE_KEY_ANALYTICS);
+    if (cached) return JSON.parse(cached);
+
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    // 1. Score distribution (count per score 1-5)
+    const scoreDistRows = await deps.db
+      .select({
+        score: articles.importanceScore,
+        cnt: count(),
+      })
+      .from(articles)
+      .where(and(isNotNull(articles.importanceScore), gte(articles.scoredAt, cutoff)))
+      .groupBy(articles.importanceScore);
+
+    const scoreDistribution: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    for (const r of scoreDistRows) {
+      if (r.score != null) scoreDistribution[r.score] = Number(r.cnt);
+    }
+
+    // 2. Approval rate by score level
+    const approvalRows = await deps.db.execute(sql`
+      SELECT
+        importance_score as score,
+        pipeline_stage as stage,
+        COUNT(*)::int as cnt
+      FROM articles
+      WHERE importance_score IS NOT NULL
+        AND scored_at >= ${cutoff}
+        AND pipeline_stage IN ('approved', 'rejected', 'posted', 'scored')
+      GROUP BY importance_score, pipeline_stage
+      ORDER BY importance_score
+    `);
+
+    // 3. Rejection breakdown
+    const rejectionRows = await deps.db.execute(sql`
+      SELECT
+        CASE
+          WHEN rejection_reason LIKE 'pre-filter:%' THEN 'pre-filter'
+          WHEN rejection_reason LIKE 'llm-score:%' THEN 'llm-score'
+          WHEN rejection_reason = 'manual' THEN 'manual'
+          ELSE 'other'
+        END as rejection_type,
+        COUNT(*)::int as cnt
+      FROM articles
+      WHERE pipeline_stage = 'rejected'
+        AND rejection_reason IS NOT NULL
+        AND created_at >= ${cutoff}
+      GROUP BY 1
+    `);
+
+    // 4. Source value ranking (min 3 articles, top 20)
+    const sourceRankRows = await deps.db.execute(sql`
+      SELECT
+        a.source_id,
+        s.name as source_name,
+        COUNT(*)::int as total_scored,
+        ROUND(AVG(a.importance_score)::numeric, 2)::float as avg_score,
+        ROUND(
+          COUNT(*) FILTER (WHERE a.pipeline_stage IN ('approved', 'posted'))::numeric /
+          NULLIF(COUNT(*), 0) * 100, 0
+        )::int as approved_pct,
+        ROUND(
+          COUNT(*) FILTER (WHERE a.importance_score >= 4)::numeric /
+          NULLIF(COUNT(*), 0) * 100, 0
+        )::int as signal_ratio
+      FROM articles a
+      LEFT JOIN rss_sources s ON a.source_id = s.id
+      WHERE a.importance_score IS NOT NULL
+        AND a.scored_at >= ${cutoff}
+        AND a.source_id IS NOT NULL
+      GROUP BY a.source_id, s.name
+      HAVING COUNT(*) >= 3
+      ORDER BY signal_ratio DESC
+      LIMIT 20
+    `);
+
+    // 5. Sector performance
+    const sectorRows = await deps.db.execute(sql`
+      SELECT
+        a.sector_id,
+        sec.name as sector_name,
+        COUNT(*)::int as total,
+        ROUND(AVG(a.importance_score)::numeric, 2)::float as avg_score,
+        ROUND(
+          COUNT(*) FILTER (WHERE a.pipeline_stage IN ('approved', 'posted'))::numeric /
+          NULLIF(COUNT(*), 0) * 100, 0
+        )::int as approved_pct,
+        COUNT(*) FILTER (WHERE a.importance_score >= 4)::int as signal_count
+      FROM articles a
+      LEFT JOIN sectors sec ON a.sector_id = sec.id
+      WHERE a.importance_score IS NOT NULL
+        AND a.scored_at >= ${cutoff}
+        AND a.sector_id IS NOT NULL
+      GROUP BY a.sector_id, sec.name
+      ORDER BY avg_score DESC
+    `);
+
+    const result = {
+      period_days: 30,
+      score_distribution: scoreDistribution,
+      approval_by_score: (approvalRows as { rows: unknown[] }).rows ?? approvalRows,
+      rejection_breakdown: (rejectionRows as { rows: unknown[] }).rows ?? rejectionRows,
+      source_ranking: (sourceRankRows as { rows: unknown[] }).rows ?? sourceRankRows,
+      sector_performance: (sectorRows as { rows: unknown[] }).rows ?? sectorRows,
+    };
+
+    await deps.redis.setex(CACHE_KEY_ANALYTICS, ANALYTICS_CACHE_TTL, JSON.stringify(result));
     return result;
   });
 };

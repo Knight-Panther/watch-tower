@@ -15,20 +15,22 @@ import {
   setAutoApproveThreshold as setAutoApproveThresholdApi,
   getAutoRejectThreshold,
   setAutoRejectThreshold as setAutoRejectThresholdApi,
+  getSimilarityThreshold,
+  setSimilarityThreshold as setSimilarityThresholdApi,
   type AllowedDomain,
   type SecurityConfig,
   type TranslationConfig,
 } from "../api";
 import Spinner from "../components/Spinner";
 
-type TabId = "domains" | "limits" | "api" | "emergency" | "thresholds" | "translation";
+type TabId = "domains" | "limits" | "api" | "emergency" | "thresholds" | "translation" | "dedup";
 
 export default function SiteRules() {
   // URL-based tab state
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
   const activeTab: TabId =
-    tabParam === "limits" || tabParam === "api" || tabParam === "emergency" || tabParam === "thresholds" || tabParam === "translation"
+    tabParam === "limits" || tabParam === "api" || tabParam === "emergency" || tabParam === "thresholds" || tabParam === "translation" || tabParam === "dedup"
       ? tabParam
       : "domains";
 
@@ -61,6 +63,12 @@ export default function SiteRules() {
   const [rejectThreshold, setRejectThreshold] = useState(2);
   const [isApproveLoading, setIsApproveLoading] = useState(false);
   const [isRejectLoading, setIsRejectLoading] = useState(false);
+
+  // Dedup threshold state
+  const [dedupThreshold, setDedupThreshold] = useState(0.65);
+  const [dedupSavedValue, setDedupSavedValue] = useState<number | null>(null);
+  const [dedupSource, setDedupSource] = useState<"database" | "default">("default");
+  const [dedupSaving, setDedupSaving] = useState(false);
 
   // Load domains
   const loadDomains = useCallback(async () => {
@@ -126,6 +134,18 @@ export default function SiteRules() {
     }
   }, []);
 
+  // Load dedup threshold
+  const loadDedupThreshold = useCallback(async () => {
+    try {
+      const { value, source } = await getSimilarityThreshold();
+      setDedupThreshold(value);
+      setDedupSavedValue(value);
+      setDedupSource(source);
+    } catch {
+      // Non-critical, env fallback is fine
+    }
+  }, []);
+
   // Initial load
   useEffect(() => {
     loadDomains();
@@ -133,7 +153,8 @@ export default function SiteRules() {
     loadKillSwitch();
     loadTranslationConfig();
     loadThresholds();
-  }, [loadDomains, loadSecurityConfig, loadKillSwitch, loadTranslationConfig, loadThresholds]);
+    loadDedupThreshold();
+  }, [loadDomains, loadSecurityConfig, loadKillSwitch, loadTranslationConfig, loadThresholds, loadDedupThreshold]);
 
   // Add domain
   const handleAddDomain = async () => {
@@ -209,7 +230,7 @@ export default function SiteRules() {
     try {
       await setAutoRejectThresholdApi(newValue);
       setRejectThreshold(newValue);
-      toast.success(`Auto-reject threshold set to ${newValue}`);
+      toast.success(newValue === 0 ? "Auto-reject disabled" : `Auto-reject threshold set to ${newValue}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to update threshold";
       toast.error(message);
@@ -236,6 +257,7 @@ export default function SiteRules() {
           { id: "api", label: "API Security" },
           { id: "emergency", label: "Emergency Controls" },
           { id: "thresholds", label: "Score Thresholds" },
+          { id: "dedup", label: "Dedup Sensitivity" },
           { id: "translation", label: "Translation" },
         ].map((tab) => (
           <button
@@ -495,17 +517,20 @@ API_RATE_LIMIT_PER_MINUTE=200`}
                 <div>
                   <p className="font-medium text-slate-200">Auto-Reject</p>
                   <p className="mt-0.5 text-xs text-slate-500">
-                    Articles scoring &le; this are auto-rejected
+                    {rejectThreshold === 0
+                      ? "Disabled — all scored articles go to manual review"
+                      : "Articles scoring \u2264 this are auto-rejected"}
                   </p>
                 </div>
                 <select
                   value={rejectThreshold}
                   onChange={(e) => handleRejectChange(Number(e.target.value))}
                   disabled={isRejectLoading}
-                  className={`w-16 rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-sm text-slate-200 outline-none focus:border-slate-500 ${isRejectLoading ? "opacity-50" : ""}`}
+                  className={`w-20 rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-sm text-slate-200 outline-none focus:border-slate-500 ${isRejectLoading ? "opacity-50" : ""}`}
                 >
+                  <option value={0}>OFF</option>
                   {[1, 2, 3, 4].map((v) => (
-                    <option key={v} value={v} disabled={v >= approveThreshold}>
+                    <option key={v} value={v} disabled={approveThreshold !== 0 && v >= approveThreshold}>
                       {v}
                     </option>
                   ))}
@@ -744,6 +769,105 @@ API_RATE_LIMIT_PER_MINUTE=200`}
                 {emergencyStop ? "Posting Halted" : "Normal Operation"}
               </span>
             </div>
+          </div>
+        </section>
+      )}
+      {/* Dedup Sensitivity Tab */}
+      {activeTab === "dedup" && (
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+          <h2 className="text-lg font-semibold">Dedup Sensitivity</h2>
+          <p className="mt-1 text-sm text-slate-400">
+            Controls how similar two articles must be to count as duplicates. Higher values mean
+            stricter matching (only near-identical articles are deduped). Lower values are more
+            aggressive (loosely related articles may also be deduped).
+          </p>
+
+          <div className="mt-6 rounded-xl border border-slate-700 bg-slate-950/70 p-5">
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-sm text-slate-300">Similarity Threshold</span>
+              <span className="text-2xl font-semibold text-slate-100">
+                {Math.round(dedupThreshold * 100)}%
+              </span>
+            </div>
+
+            <input
+              type="range"
+              min="50"
+              max="95"
+              step="5"
+              value={Math.round(dedupThreshold * 100)}
+              onChange={(e) => setDedupThreshold(Number(e.target.value) / 100)}
+              className="w-full accent-cyan-500"
+            />
+
+            <div className="flex justify-between text-[10px] text-slate-500 mt-1">
+              <span>50% — Aggressive (catches loosely related)</span>
+              <span>95% — Strict (only near-identical)</span>
+            </div>
+
+            <div className="mt-3 text-xs text-slate-400">
+              {dedupThreshold < 0.65 && (
+                <p className="text-amber-400">
+                  Very aggressive — related but different articles may be incorrectly deduped.
+                </p>
+              )}
+              {dedupThreshold >= 0.65 && dedupThreshold < 0.8 && (
+                <p>Moderate — good balance between catching duplicates and preserving unique content.</p>
+              )}
+              {dedupThreshold >= 0.8 && dedupThreshold < 0.9 && (
+                <p>Recommended range — only substantially similar articles are deduped.</p>
+              )}
+              {dedupThreshold >= 0.9 && (
+                <p className="text-amber-400">
+                  Very strict — only near-identical articles will be deduped. Some duplicates may slip through.
+                </p>
+              )}
+            </div>
+
+            <button
+              onClick={async () => {
+                setDedupSaving(true);
+                try {
+                  await setSimilarityThresholdApi(dedupThreshold);
+                  setDedupSavedValue(dedupThreshold);
+                  setDedupSource("database");
+                  toast.success(`Threshold set to ${Math.round(dedupThreshold * 100)}%`);
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : "Failed to save");
+                } finally {
+                  setDedupSaving(false);
+                }
+              }}
+              disabled={dedupSaving}
+              className="mt-4 w-full rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-cyan-500 disabled:opacity-50"
+            >
+              {dedupSaving ? "Saving..." : "Save Threshold"}
+            </button>
+          </div>
+
+          {dedupSavedValue != null && (
+            <div className={`mt-4 flex items-center gap-2 rounded-xl border px-4 py-3 ${dedupSource === "database" ? "border-slate-700 bg-slate-950/50" : "border-amber-800/50 bg-amber-950/20"}`}>
+              <span className={`h-2 w-2 rounded-full ${dedupSource === "database" ? "bg-emerald-500" : "bg-amber-500"}`} />
+              <span className="text-xs text-slate-400">
+                {dedupSource === "database" ? (
+                  <>Worker using: <span className="font-medium text-slate-200">{Math.round(dedupSavedValue * 100)}%</span> <span className="text-slate-500">(saved in database)</span></>
+                ) : (
+                  <>Worker using: <span className="font-medium text-amber-200">{Math.round(dedupSavedValue * 100)}%</span> <span className="text-amber-400">(fallback — not yet saved to database)</span></>
+                )}
+                {dedupThreshold !== dedupSavedValue && (
+                  <span className="ml-2 text-amber-400">(unsaved slider: {Math.round(dedupThreshold * 100)}%)</span>
+                )}
+              </span>
+            </div>
+          )}
+
+          <div className="mt-4 rounded-xl border border-amber-800/50 bg-amber-950/20 p-4">
+            <p className="text-sm font-medium text-amber-200">Important</p>
+            <p className="mt-1 text-xs text-amber-200/70">
+              Changes affect new articles only. Previously deduped articles will not be
+              re-evaluated. The new threshold takes effect on the next dedup batch without
+              requiring a worker restart.
+            </p>
           </div>
         </section>
       )}

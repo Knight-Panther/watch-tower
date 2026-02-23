@@ -58,6 +58,10 @@ const DIGEST_MODELS: Record<string, { value: string; label: string }[]> = {
     { value: "deepseek-chat", label: "DeepSeek Chat" },
     { value: "deepseek-reasoner", label: "DeepSeek Reasoner" },
   ],
+  gemini: [
+    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+    { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+  ],
 };
 
 const TRANSLATION_MODELS: Record<string, { value: string; label: string }[]> = {
@@ -451,6 +455,7 @@ export default function DigestSettings() {
               <option value="claude">Claude (Anthropic)</option>
               <option value="openai">OpenAI</option>
               <option value="deepseek">DeepSeek</option>
+              <option value="gemini">Gemini (Google AI)</option>
             </select>
           </div>
 

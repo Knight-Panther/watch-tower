@@ -318,12 +318,12 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     { preHandler: deps.requireApiKey },
     async (request, reply) => {
       const { value } = request.body ?? {};
-      if (!Number.isFinite(value) || value < 1 || value > 5) {
-        return reply.code(400).send({ error: "value must be a number between 1 and 5" });
+      if (!Number.isFinite(value) || value < 0 || value > 5) {
+        return reply.code(400).send({ error: "value must be a number between 0 and 5 (0 = OFF)" });
       }
-      // Validate: reject must be < approve (skip when approve is OFF)
+      // Validate: reject must be < approve (skip when either is OFF)
       const approveThreshold = await getConfigValue(deps, "auto_approve_threshold", 5);
-      if (approveThreshold !== 0 && value >= approveThreshold) {
+      if (approveThreshold !== 0 && value !== 0 && value >= approveThreshold) {
         return reply.code(400).send({
           error: `Auto-reject threshold (${value}) must be less than auto-approve threshold (${approveThreshold})`,
         });
@@ -665,8 +665,8 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     if (body.systemPrompt !== undefined && body.systemPrompt.length > 2000) {
       return reply.code(400).send({ error: "systemPrompt must be 2000 characters or less" });
     }
-    if (body.provider !== undefined && !["claude", "openai", "deepseek"].includes(body.provider)) {
-      return reply.code(400).send({ error: "provider must be 'claude', 'openai', or 'deepseek'" });
+    if (body.provider !== undefined && !["claude", "openai", "deepseek", "gemini"].includes(body.provider)) {
+      return reply.code(400).send({ error: "provider must be 'claude', 'openai', 'deepseek', or 'gemini'" });
     }
     if (body.model !== undefined && body.model.length > 100) {
       return reply.code(400).send({ error: "model must be 100 characters or less" });
@@ -729,4 +729,34 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       return reply.code(500).send({ error: "Failed to queue test digest" });
     }
   });
+
+  // ─── Dedup Sensitivity ────────────────────────────────────────────────────────
+
+  app.get("/config/similarity-threshold", { preHandler: deps.requireApiKey }, async () => {
+    const [row] = await deps.db
+      .select({ value: appConfig.value })
+      .from(appConfig)
+      .where(eq(appConfig.key, "similarity_threshold"));
+    const stored = row ? Number(row.value) : null;
+    return {
+      value: stored ?? 0.65,
+      source: stored != null ? "database" : "default",
+    };
+  });
+
+  app.patch<{ Body: { value: number } }>(
+    "/config/similarity-threshold",
+    { preHandler: deps.requireApiKey },
+    async (request, reply) => {
+      const { value } = request.body ?? {};
+      if (value === undefined || !Number.isFinite(value) || value < 0.5 || value > 0.99) {
+        return reply
+          .code(400)
+          .send({ error: "Threshold must be a number between 0.50 and 0.99" });
+      }
+      const rounded = Math.round(value * 100) / 100;
+      await upsertConfig(deps, "similarity_threshold", rounded);
+      return { value: rounded };
+    },
+  );
 };

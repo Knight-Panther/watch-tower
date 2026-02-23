@@ -47,6 +47,26 @@ export const createSemanticDedupWorker = ({
     async (job) => {
       if (job.name !== JOB_SEMANTIC_BATCH) return;
 
+      // Read threshold from DB per job (allows changes via UI without restart)
+      let effectiveThreshold = similarityThreshold;
+      try {
+        const thresholdRows = await db.execute(
+          sql`SELECT value FROM app_config WHERE key = 'similarity_threshold'`,
+        );
+        const row = (thresholdRows as { rows: Record<string, unknown>[] }).rows?.[0];
+        if (row?.value != null) {
+          const parsed = Number(row.value);
+          if (!Number.isNaN(parsed) && parsed >= 0.5 && parsed <= 0.99) {
+            effectiveThreshold = parsed;
+          }
+        }
+      } catch (err) {
+        logger.warn(
+          `[semantic-dedup] failed to read similarity_threshold from DB, using env fallback ${similarityThreshold}`,
+          err,
+        );
+      }
+
       // 1. CLAIM articles atomically using FOR UPDATE SKIP LOCKED
       // This prevents multiple workers from processing the same articles
       // and uses 'embedding' as intermediate stage to prevent stuck rows
@@ -70,7 +90,10 @@ export const createSemanticDedupWorker = ({
         return;
       }
 
-      logger.info(`[semantic-dedup] claimed ${claimedArticles.length} articles`);
+      const thresholdSource = effectiveThreshold !== similarityThreshold ? "db" : "env";
+      logger.info(
+        `[semantic-dedup] claimed ${claimedArticles.length} articles, threshold: ${effectiveThreshold} (source: ${thresholdSource}, distance: ${(1 - effectiveThreshold).toFixed(2)})`,
+      );
 
       // 2. Filter out empty/short content that would produce poor embeddings
       const validArticles: ClaimedArticle[] = [];
@@ -204,7 +227,7 @@ export const createSemanticDedupWorker = ({
         // Check for similar articles - now includes 'embedding' stage with embeddings
         // Uses UUID tie-breaker for same-timestamp articles
         const similar = await findSimilarArticles(db, embedding, {
-          threshold: 1 - similarityThreshold, // Convert similarity to distance
+          threshold: 1 - effectiveThreshold, // Convert similarity to distance
           limit: 1,
           excludeIds: [article.id],
           maxAgeDays: 30,

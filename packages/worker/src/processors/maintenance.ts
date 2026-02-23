@@ -136,13 +136,14 @@ const checkDigestDue = async (db: Database): Promise<boolean> => {
   const isoDay = dayMap[dayStr] ?? 0;
   if (!days.includes(isoDay)) return false;
 
-  // Check time match with 2-minute tolerance
+  // Check time match: fire at target or up to 2 minutes AFTER (forward-only)
   const [targetH, targetM] = time.split(":").map(Number);
   const [currentH, currentM] = currentTime.split(":").map(Number);
   const targetMinutes = targetH * 60 + targetM;
   const currentMinutes = currentH * 60 + currentM;
-  const diff = Math.abs(currentMinutes - targetMinutes);
-  if (diff > 2 && diff < 1438) return false; // 1438 = 1440-2 for midnight wrap
+  // Forward difference: how many minutes past the target are we?
+  const forwardDiff = (currentMinutes - targetMinutes + 1440) % 1440;
+  if (forwardDiff > 2) return false; // Only fire 0-2 min after target, never before
 
   // Idempotency: skip if last digest was within 1 hour
   const lastSent = await getConfigString(db, "last_digest_sent_at", "");
@@ -802,8 +803,7 @@ const processScheduledPosts = async (
         template,
       );
 
-      const sourceUrl =
-        template.autoCommentUrl && imageUrl ? article.url : undefined;
+      const sourceUrl = template.autoCommentUrl ? article.url : undefined;
       const postResult = await provider.post({ text, imageUrl, sourceUrl });
 
       if (!postResult.success) {

@@ -45,7 +45,7 @@ export const registerSectorRoutes = (app: FastifyInstance, deps: ApiDeps) => {
         .values({
           name,
           slug: slugify(name),
-          defaultMaxAgeDays: default_max_age_days ?? 5,
+          defaultMaxAgeDays: default_max_age_days ?? 1,
         })
         .returning({
           id: sectors.id,

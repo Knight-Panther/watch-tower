@@ -80,6 +80,8 @@ const OPERATION_LABELS: Record<string, string> = {
   embed_batch: "Embeddings",
   translate: "Translation",
   image_generation: "Image Generation",
+  digest_summary: "Digest Summary",
+  digest_translation: "Digest Translation",
 };
 
 const formatOperation = (op: string): string =>

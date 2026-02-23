@@ -285,6 +285,8 @@ export default function Articles() {
       sector_id: undefined,
       source_id: undefined,
       status: undefined,
+      rejection_type: undefined,
+      category: undefined,
       search: undefined,
       min_score: undefined,
       max_score: undefined,
@@ -297,6 +299,8 @@ export default function Articles() {
     !!filters.sector_id ||
     !!filters.source_id ||
     !!filters.status ||
+    !!filters.rejection_type ||
+    !!filters.category ||
     !!filters.search ||
     filters.min_score !== undefined ||
     filters.max_score !== undefined ||
@@ -429,7 +433,13 @@ export default function Articles() {
           {/* Status filter */}
           <select
             value={filters.status || ""}
-            onChange={(e) => handleFilterChange("status", e.target.value)}
+            onChange={(e) => {
+              const val = e.target.value;
+              handleFilterChange("status", val);
+              if (val !== "rejected") {
+                handleFilterChange("rejection_type", undefined);
+              }
+            }}
             className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
           >
             <option value="">All Statuses</option>
@@ -439,6 +449,21 @@ export default function Articles() {
               </option>
             ))}
           </select>
+
+          {/* Rejection type sub-filter (shown when status = rejected) */}
+          {filters.status === "rejected" && (
+            <select
+              value={filters.rejection_type || ""}
+              onChange={(e) => handleFilterChange("rejection_type", e.target.value)}
+              className="rounded-xl border border-orange-800/50 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-orange-600"
+              title="Filter by rejection source"
+            >
+              <option value="">All Rejected</option>
+              <option value="pre-filter">Pre-filtered (keyword match)</option>
+              <option value="llm-score">LLM Rejected (low score)</option>
+              <option value="manual">Manual Rejection</option>
+            </select>
+          )}
 
           {/* Search */}
           <input
@@ -497,6 +522,20 @@ export default function Articles() {
             className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600 [color-scheme:dark]"
             placeholder="To date"
           />
+          {/* Active category filter indicator */}
+          {filters.category && (
+            <div className="col-span-full flex items-center gap-2 rounded-xl border border-cyan-800/50 bg-cyan-950/20 px-4 py-2">
+              <span className="text-xs text-cyan-300">
+                Category: <strong>{filters.category}</strong>
+              </span>
+              <button
+                onClick={() => handleFilterChange("category", undefined)}
+                className="rounded px-1.5 py-0.5 text-xs text-cyan-400 hover:bg-cyan-900/30 hover:text-cyan-200 transition"
+              >
+                Clear
+              </button>
+            </div>
+          )}
         </div>
       </section>
 
@@ -728,7 +767,12 @@ export default function Articles() {
                         {article.article_categories && article.article_categories.length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-1">
                             {article.article_categories.slice(0, 5).map((cat, i) => (
-                              <span key={i} className="px-1.5 py-0.5 bg-slate-700/50 rounded text-[10px] text-slate-400">
+                              <span
+                                key={i}
+                                onClick={() => handleFilterChange("category", cat)}
+                                className="px-1.5 py-0.5 bg-slate-700/50 rounded text-[10px] text-slate-400 cursor-pointer hover:bg-slate-600 hover:text-slate-200 transition-colors"
+                                title={`Filter articles by "${cat}"`}
+                              >
                                 {cat}
                               </span>
                             ))}

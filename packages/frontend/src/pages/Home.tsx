@@ -49,6 +49,9 @@ type HomeProps = {
 };
 
 export default function Home(props: HomeProps) {
+  const [sortBy, setSortBy] = useState<"default" | "signal-best" | "signal-worst" | "name">(
+    "default",
+  );
   const [healthModalOpen, setHealthModalOpen] = useState(false);
   const [healthLoading, setHealthLoading] = useState(false);
   const [healthResults, setHealthResults] = useState<ProviderHealthResult[] | null>(null);
@@ -78,7 +81,7 @@ export default function Home(props: HomeProps) {
       (!Number.isNaN(maxAgeFilter) && maxAgeFilter >= 1 && maxAgeFilter <= 15);
     const searchQuery = props.filters.search.trim().toLowerCase();
 
-    return props.sources.filter((source) => {
+    const filtered = props.sources.filter((source) => {
       if (props.filters.sectorId && source.sector_id !== props.filters.sectorId) {
         return false;
       }
@@ -86,7 +89,7 @@ export default function Home(props: HomeProps) {
         return true;
       }
       if (maxAgeFilter !== null) {
-        const effectiveMaxAge = source.max_age_days ?? source.sectors?.default_max_age_days ?? 5;
+        const effectiveMaxAge = source.max_age_days ?? source.sectors?.default_max_age_days ?? 1;
         if (effectiveMaxAge !== maxAgeFilter) {
           return false;
         }
@@ -99,7 +102,23 @@ export default function Home(props: HomeProps) {
       }
       return true;
     });
-  }, [props.sources, props.filters]);
+
+    if (sortBy === "name") {
+      return [...filtered].sort((a, b) =>
+        (a.name ?? a.url).localeCompare(b.name ?? b.url),
+      );
+    }
+    if (sortBy === "signal-best" || sortBy === "signal-worst") {
+      return [...filtered].sort((a, b) => {
+        const qa = props.sourceQuality[a.id];
+        const qb = props.sourceQuality[b.id];
+        const ra = qa?.signal_ratio ?? -1;
+        const rb = qb?.signal_ratio ?? -1;
+        return sortBy === "signal-best" ? rb - ra : ra - rb;
+      });
+    }
+    return filtered;
+  }, [props.sources, props.filters, props.sourceQuality, sortBy]);
 
   return (
     <>
@@ -295,6 +314,17 @@ export default function Home(props: HomeProps) {
             </span>
           </h2>
           <div className="flex items-center gap-3">
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+              className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-300 outline-none"
+              title="Sort sources by signal quality or name"
+            >
+              <option value="default">Default order</option>
+              <option value="signal-best">Best signal first</option>
+              <option value="signal-worst">Worst signal first</option>
+              <option value="name">Name A-Z</option>
+            </select>
             {props.selectedCount > 0 ? (
               <span className="text-xs text-slate-400">{props.selectedCount} selected</span>
             ) : null}
@@ -376,7 +406,7 @@ export default function Home(props: HomeProps) {
                     className={`h-2 w-2 flex-shrink-0 rounded-full ${healthDot}`}
                     title={healthTitle}
                   />
-                  <div className="min-w-0 max-w-[340px]">
+                  <div className="w-[160px] flex-shrink-0">
                     <p className="text-sm font-semibold truncate">
                       {source.name ?? "Untitled source"}
                     </p>
@@ -405,49 +435,60 @@ export default function Home(props: HomeProps) {
                       </button>
                     </div>
                   </div>
-                  {quality && quality.total > 0 && (
-                    <div className="flex items-center gap-2 ml-2 flex-shrink-0">
-                      <div
-                        className="group relative flex items-center gap-1.5"
-                        title={`Signal: ${quality.signal_ratio}% (${quality.total} scored, avg ${quality.avg_score})`}
-                      >
-                        <span className={`text-xs font-semibold ${signalColor}`}>
+                  {quality && quality.total > 0 && (() => {
+                    const barColors: Record<number, string> = {
+                      1: "bg-red-500", 2: "bg-orange-400", 3: "bg-amber-400", 4: "bg-emerald-400", 5: "bg-emerald-300",
+                    };
+                    const textColors: Record<number, string> = {
+                      1: "text-red-400", 2: "text-orange-400", 3: "text-amber-400", 4: "text-emerald-400", 5: "text-emerald-300",
+                    };
+                    const segments = [1, 2, 3, 4, 5]
+                      .map((s) => ({ score: s, count: quality.distribution[s] ?? 0 }))
+                      .filter((s) => s.count > 0);
+                    return (
+                    <div className="ml-2 flex-shrink-0 self-center">
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={`w-8 text-right text-xs font-semibold tabular-nums ${signalColor}`}
+                          title="Signal ratio — percentage of articles that scored 4 or 5 (high-value). Green means 40%+ are high-value, amber means 15-39%, red means under 15%."
+                        >
                           {quality.signal_ratio}%
                         </span>
-                        <div className="flex h-2.5 w-20 overflow-hidden rounded-full bg-slate-800">
-                          {[1, 2, 3, 4, 5].map((score) => {
-                            const pct =
-                              quality.total > 0
-                                ? ((quality.distribution[score] ?? 0) / quality.total) * 100
-                                : 0;
-                            if (pct === 0) return null;
-                            const colors: Record<number, string> = {
-                              1: "bg-red-500",
-                              2: "bg-orange-400",
-                              3: "bg-amber-400",
-                              4: "bg-emerald-400",
-                              5: "bg-emerald-300",
-                            };
-                            return (
+                        <div className="w-44" title="Score distribution bar — each colored segment represents a score level (1 to 5, left to right). Wider segments mean more articles at that score. Red/orange = low scores, green = high scores.">
+                          <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-slate-800">
+                            {segments.map(({ score, count }) => (
                               <div
                                 key={score}
-                                className={colors[score]}
-                                style={{ width: `${pct}%` }}
+                                className={barColors[score]}
+                                style={{ width: `${(count / quality.total) * 100}%` }}
                               />
-                            );
-                          })}
+                            ))}
+                          </div>
+                          <div className="flex w-full mt-0.5">
+                            {segments.map(({ score, count }) => (
+                              <div
+                                key={score}
+                                className={`text-center text-[9px] leading-tight ${textColors[score]}`}
+                                style={{ width: `${(count / quality.total) * 100}%` }}
+                              >
+                                {(count / quality.total) >= 0.08 ? `${score}:${count}` : count}
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                        <span className="text-[10px] text-slate-500">{quality.total}</span>
-                        <div className="pointer-events-none absolute -top-16 left-1/2 z-10 hidden -translate-x-1/2 rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-[10px] text-slate-300 shadow-lg group-hover:block whitespace-nowrap">
-                          {[5, 4, 3, 2, 1].map((s) => (
-                            <div key={s}>
-                              Score {s}: {quality.distribution[s] ?? 0}
-                            </div>
-                          ))}
-                        </div>
+                        <span className="w-6 text-right text-[10px] tabular-nums text-slate-500" title="Total number of articles scored from this source in the last 30 days.">{quality.total}</span>
+                        {quality.signal_ratio < 10 && quality.total >= 30 && (
+                          <span
+                            className="rounded bg-red-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-red-400"
+                            title="This source produces less than 10% high-value articles (score 4+) over 30+ scored articles. Consider disabling it or adjusting its sector."
+                          >
+                            Low signal
+                          </span>
+                        )}
                       </div>
                     </div>
-                  )}
+                    );
+                  })()}
                 </div>
                 <div className="flex items-end gap-3 ml-auto flex-shrink-0">
                   <div className="flex flex-col gap-1">
@@ -474,7 +515,7 @@ export default function Home(props: HomeProps) {
                     <input
                       value={
                         props.maxAgeDrafts[source.id] ??
-                        String(source.max_age_days ?? source.sectors?.default_max_age_days ?? 5)
+                        String(source.max_age_days ?? source.sectors?.default_max_age_days ?? 1)
                       }
                       onChange={(event) => props.onMaxAgeDraftChange(source.id, event.target.value)}
                       className="w-20 rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"

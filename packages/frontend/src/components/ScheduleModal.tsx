@@ -41,6 +41,7 @@ export default function ScheduleModal({ article, postingLanguage, onClose, onSch
   const [summary, setSummary] = useState(baseSummary);
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>(["telegram"]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [reasoningOpen, setReasoningOpen] = useState(false);
 
   const now = new Date();
   const [date, setDate] = useState(formatLocalDate(now));
@@ -140,18 +141,29 @@ export default function ScheduleModal({ article, postingLanguage, onClose, onSch
           </>
         ) : (
           <>
-            {/* Score reasoning (if available) */}
+            {/* Score reasoning (collapsible) */}
             {article.score_reasoning && (
-              <div className="mt-3 rounded-xl border border-slate-800 bg-slate-800/40 px-4 py-3">
-                <p className="text-xs font-medium text-slate-400 mb-1">
-                  Score Reasoning
-                  {article.importance_score !== null && (
-                    <span className="ml-2 px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 font-bold">
-                      {article.importance_score}
-                    </span>
-                  )}
-                </p>
-                <p className="text-sm text-slate-300 leading-relaxed">{article.score_reasoning}</p>
+              <div className="mt-3 rounded-xl border border-slate-800 bg-slate-800/40">
+                <button
+                  type="button"
+                  onClick={() => setReasoningOpen((v) => !v)}
+                  className="flex w-full items-center justify-between px-4 py-2.5 text-left"
+                >
+                  <span className="text-xs font-medium text-slate-400">
+                    Score Reasoning
+                    {article.importance_score !== null && (
+                      <span className="ml-2 px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 font-bold">
+                        {article.importance_score}
+                      </span>
+                    )}
+                  </span>
+                  <span className={`text-slate-500 text-xs transition-transform ${reasoningOpen ? "rotate-180" : ""}`}>
+                    ▼
+                  </span>
+                </button>
+                {reasoningOpen && (
+                  <p className="px-4 pb-3 text-sm text-slate-300 leading-relaxed">{article.score_reasoning}</p>
+                )}
               </div>
             )}
 

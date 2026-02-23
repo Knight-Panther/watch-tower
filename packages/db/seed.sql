@@ -43,7 +43,9 @@ INSERT INTO app_config (key, value, updated_at) VALUES
   ('image_generation_quality', '"medium"', NOW()),
   ('image_generation_size', '"1024x1536"', NOW()),
   ('image_generation_prompt', '""', NOW()),
-  ('image_template', '{"titlePosition":{"x":10,"y":70},"titleAlignment":"left","titleMaxWidth":80,"titleFontSize":42,"titleFontFamily":"Noto Sans Georgian","titleColor":"#FFFFFF","backdropEnabled":true,"backdropColor":"#000000B3","backdropPadding":24,"backdropBorderRadius":12,"watermarkPosition":{"x":85,"y":5},"watermarkScale":0.15}', NOW())
+  ('image_template', '{"titlePosition":{"x":10,"y":70},"titleAlignment":"left","titleMaxWidth":80,"titleFontSize":42,"titleFontFamily":"Noto Sans Georgian","titleColor":"#FFFFFF","backdropEnabled":true,"backdropColor":"#000000B3","backdropPadding":24,"backdropBorderRadius":12,"watermarkPosition":{"x":85,"y":5},"watermarkScale":0.15}', NOW()),
+  -- Dedup sensitivity (0.50-0.99, higher = stricter matching)
+  ('similarity_threshold', '0.65', NOW())
 ON CONFLICT (key) DO NOTHING;
 
 -- Seed default scoring rules for each sector

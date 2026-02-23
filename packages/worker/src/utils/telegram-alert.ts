@@ -55,7 +55,7 @@ export const sendTelegramAlert = async (
 
     if (!data.ok) {
       logger.warn(
-        { chatId, error: sanitizeError(data.description ?? "Unknown error") },
+        { chatId, error: sanitizeError(data.description ?? "Unknown error"), textLen: text.length },
         "[alert] telegram send failed",
       );
       return false;

@@ -13,6 +13,7 @@ const navItems = [
   { to: "/site-rules", label: "Restrictions" },
   { to: "/alerts", label: "Alerts" },
   { to: "/digest", label: "Daily Digest" },
+  { to: "/analytics", label: "Analytics" },
   { to: "/settings", label: "DB/Telemetry" },
 ];
 

@@ -48,7 +48,7 @@ export type DigestConfig = {
   telegramEnabled: boolean;
   facebookEnabled: boolean;
   linkedinEnabled: boolean;
-  provider: string; // "claude" | "openai" | "deepseek"
+  provider: string; // "claude" | "openai" | "deepseek" | "gemini"
   model: string;
   translationProvider: string; // "gemini" | "openai"
   translationModel: string;
@@ -101,6 +101,7 @@ export const DEFAULT_TRANSLATION_PROMPT =
   "Translate the following intelligence briefing to Georgian. " +
   "Be concise — do not expand or elaborate, match the original length. " +
   "Keep bullet point structure exactly as-is. " +
+  "Keep ALL source references like [#1], [#1, #3] EXACTLY as they appear — do not translate, remove, or modify them. " +
   "Keep ALL HTML tags (<b>, <a href>, etc.) and URLs completely unchanged. " +
   "Only translate the human-readable text. Output the translation only, nothing else.";
 
@@ -244,6 +245,10 @@ export const compileAndSendDigest = async (
     logger.info("[digest] no qualifying articles, skipping");
     return { sent: false, articleCount: 0, messageCount: 0 };
   }
+  logger.info(
+    { count: allArticles.length, firstTitle: allArticles[0]?.title?.slice(0, 80) },
+    "[digest] articles selected",
+  );
 
   // 6. Build article index for [#ID]→URL mapping
   const articleMap = new Map<number, DigestArticle>();
@@ -265,6 +270,10 @@ export const compileAndSendDigest = async (
     );
     if (llmResult) {
       llmBullets = llmResult.text;
+      logger.info(
+        { len: llmBullets.length, preview: llmBullets.slice(0, 200) },
+        "[digest] LLM bullets generated",
+      );
     } else {
       logger.warn("[digest] LLM call failed, using template-only fallback");
     }
@@ -292,11 +301,15 @@ export const compileAndSendDigest = async (
         config.translationPrompt,
         rawBullets,
       );
-      if (tr) {
+      if (tr && tr.text.trim().length > 0) {
         rawBullets = tr.text;
         translationResult = tr;
+        logger.info(
+          { len: rawBullets.length, preview: rawBullets.slice(0, 200) },
+          "[digest] translated to Georgian",
+        );
       } else {
-        logger.warn("[digest] translation failed, sending English");
+        logger.warn("[digest] translation returned empty or failed, sending English");
       }
     } else {
       logger.warn("[digest] no API key for translation provider, sending English");
@@ -304,31 +317,84 @@ export const compileAndSendDigest = async (
   }
 
   // 10. Pipeline stats
-  const stats = await queryPipelineStats(db, lookback);
+  const stats = await queryPipelineStats(db, lookback, config.minScore);
   const dateStr = formatDate(new Date(), config.timezone);
 
-  // 11. Deliver to each enabled platform
+  // 11. Build localized labels
+  const isKa = config.language === "ka";
+  const lblHeader = isKa ? "რა მოხდა დღეს" : "What Happened Today";
+  const lblPipeline = isKa ? "მილსადენი" : "Pipeline";
+  const lblScanned = isKa ? "სკანირებული" : "Scanned";
+  const lblScored = isKa ? "შეფასებული" : "Scored";
+  const lblScore = isKa ? "ქულა" : "Score";
+  const lblInDigest = isKa ? "დაიჯესტში" : "In digest";
+
+  // 12. Deliver to each enabled platform
   let anySent = false;
   let totalMessages = 0;
 
   // ── Telegram (HTML formatting) ──
   if (hasTelegram) {
-    const bodyHtml = llmBullets
-      ? mapRefsToLinks(cleanForTelegram(rawBullets), articleMap)
-      : buildFallbackBullets(allArticles as DigestArticle[]);
+    let bodyHtml: string;
+    if (!llmBullets) {
+      bodyHtml = buildFallbackBullets(allArticles as DigestArticle[]);
+    } else {
+      // Replace [#ID] refs with <a> links BEFORE escaping, so links stay valid HTML.
+      // 1. Map refs → placeholder tokens (won't be escaped)
+      const placeholders: string[] = [];
+      const withPlaceholders = rawBullets.replace(
+        /\[#(\d+(?:,\s*#\d+)*)\]/g,
+        (match, inner: string) => {
+          const ids = inner.split(/,\s*#/).map((s) => parseInt(s.replace("#", ""), 10));
+          const links = ids
+            .map((id) => {
+              const article = articleMap.get(id);
+              if (!article) return null;
+              return `<a href="${escapeUrl(article.url)}">src</a>`;
+            })
+            .filter(Boolean);
+          if (links.length === 0) return match;
+          const token = `\x00REF${placeholders.length}\x00`;
+          placeholders.push(`[${links.join(", ")}]`);
+          return token;
+        },
+      );
+      // 2. Escape the text (safe for Telegram HTML)
+      let escaped = cleanForTelegram(withPlaceholders);
+      // 3. Restore link placeholders (un-escaped HTML)
+      for (let i = 0; i < placeholders.length; i++) {
+        escaped = escaped.replace(`\x00REF${i}\x00`, placeholders[i]);
+      }
+      bodyHtml = escaped;
+    }
+
+    if (!bodyHtml.trim()) {
+      logger.warn("[digest] telegram body is empty after assembly, using fallback");
+      bodyHtml = buildFallbackBullets(allArticles as DigestArticle[]);
+    }
+
+    logger.info(
+      { bodyLen: bodyHtml.length, bodyPreview: bodyHtml.slice(0, 300) },
+      "[digest] telegram body assembled",
+    );
 
     const sections: string[] = [
-      `<b>\u{1F4CA} What Happened Today \u2014 ${cleanForTelegram(dateStr)}</b>`,
+      `<b>\u{1F4CA} ${cleanForTelegram(lblHeader)} \u2014 ${cleanForTelegram(dateStr)}</b>`,
       bodyHtml,
-      `<b>\u{1F4C8} Pipeline</b>\n` +
-        `Scanned: ${stats.totalIngested} | Scored: ${stats.passedFilters} | ` +
-        `Score 4+: ${stats.scoreFourPlus} | In digest: ${allArticles.length}`,
+      `<b>\u{1F4C8} ${cleanForTelegram(lblPipeline)}</b>\n` +
+        `${lblScanned}: ${stats.totalIngested} | ${lblScored}: ${stats.passedFilters} | ` +
+        `${lblScore} ${stats.minScore}+: ${stats.aboveThreshold} | ${lblInDigest}: ${allArticles.length}`,
     ];
 
     const messages = splitTelegramMessages(sections);
-    for (const msg of messages) {
-      const sent = await sendTelegramAlert(telegramConfig!.botToken, config.telegramChatId, msg);
+    for (let i = 0; i < messages.length; i++) {
+      logger.debug(
+        { msgIndex: i, msgLen: messages[i].length, preview: messages[i].slice(0, 300) },
+        "[digest] telegram message chunk",
+      );
+      const sent = await sendTelegramAlert(telegramConfig!.botToken, config.telegramChatId, messages[i]);
       if (sent) anySent = true;
+      else logger.warn({ msgIndex: i }, "[digest] telegram message failed to send");
       if (messages.length > 1) await new Promise((r) => setTimeout(r, 500));
     }
     totalMessages += messages.length;
@@ -339,9 +405,9 @@ export const compileAndSendDigest = async (
   if (hasFacebook) {
     try {
       const plainBody = formatPlainDigest(rawBullets, allArticles as DigestArticle[], !!llmBullets);
-      const fbText = `\u{1F4CA} What Happened Today \u2014 ${dateStr}\n\n${plainBody}\n\n` +
-        `\u{1F4C8} Scanned: ${stats.totalIngested} | Scored: ${stats.passedFilters} | ` +
-        `Score 4+: ${stats.scoreFourPlus} | In digest: ${allArticles.length}`;
+      const fbText = `\u{1F4CA} ${lblHeader} \u2014 ${dateStr}\n\n${plainBody}\n\n` +
+        `\u{1F4C8} ${lblScanned}: ${stats.totalIngested} | ${lblScored}: ${stats.passedFilters} | ` +
+        `${lblScore} ${stats.minScore}+: ${stats.aboveThreshold} | ${lblInDigest}: ${allArticles.length}`;
 
       const fb = createFacebookProvider(facebookConfig!);
       const result = await fb.post({ text: fbText });
@@ -358,13 +424,20 @@ export const compileAndSendDigest = async (
     }
   }
 
-  // ── LinkedIn (plain text) ──
+  // ── LinkedIn (plain text, 3000 char limit) ──
   if (hasLinkedin) {
     try {
       const plainBody = formatPlainDigest(rawBullets, allArticles as DigestArticle[], !!llmBullets);
-      const liText = `\u{1F4CA} What Happened Today \u2014 ${dateStr}\n\n${plainBody}\n\n` +
-        `\u{1F4C8} Scanned: ${stats.totalIngested} | Scored: ${stats.passedFilters} | ` +
-        `Score 4+: ${stats.scoreFourPlus} | In digest: ${allArticles.length}`;
+      const footer =
+        `\u{1F4C8} ${lblScanned}: ${stats.totalIngested} | ${lblScored}: ${stats.passedFilters} | ` +
+        `${lblScore} ${stats.minScore}+: ${stats.aboveThreshold} | ${lblInDigest}: ${allArticles.length}`;
+      const header = `\u{1F4CA} ${lblHeader} \u2014 ${dateStr}`;
+      // LinkedIn allows 3000 chars (personal) — truncate body to fit
+      const maxBody = 3000 - header.length - footer.length - 8; // 8 for \n\n separators
+      const truncBody = plainBody.length > maxBody
+        ? plainBody.slice(0, plainBody.lastIndexOf("\n", maxBody)) || plainBody.slice(0, maxBody)
+        : plainBody;
+      const liText = `${header}\n\n${truncBody}\n\n${footer}`;
 
       const li = createLinkedInProvider(linkedinConfig!);
       const result = await li.post({ text: liText });
@@ -458,6 +531,8 @@ const resolveApiKey = (provider: string, apiKeys: ApiKeys): string | undefined =
       return apiKeys.openai;
     case "deepseek":
       return apiKeys.deepseek;
+    case "gemini":
+      return apiKeys.googleAi;
     default:
       return undefined;
   }
@@ -509,6 +584,27 @@ const callLLM = async (
       };
     }
 
+    if (config.provider === "gemini") {
+      const client = new GoogleGenerativeAI(config.apiKey);
+      const genModel = client.getGenerativeModel({
+        model: config.model,
+        systemInstruction: systemPrompt,
+        generationConfig: { maxOutputTokens: 1200, temperature: 0.3 },
+      });
+
+      const result = await genModel.generateContent(userPrompt);
+      const response = result.response;
+      const text = response.text();
+      const usage = response.usageMetadata;
+
+      return {
+        text,
+        inputTokens: usage?.promptTokenCount ?? 0,
+        outputTokens: usage?.candidatesTokenCount ?? 0,
+        latencyMs: Date.now() - startTime,
+      };
+    }
+
     // OpenAI / DeepSeek (compatible API)
     const client = new OpenAI({
       apiKey: config.apiKey,
@@ -552,24 +648,6 @@ const buildUserPrompt = (allArticles: DigestArticle[], config: DigestConfig): st
   }
 
   return lines.join("\n");
-};
-
-// ─── [#ID]→URL post-processing ────────────────────────────────────────────────
-
-const mapRefsToLinks = (text: string, articleMap: Map<number, DigestArticle>): string => {
-  // Match patterns like [#1], [#1, #3], [#1, #3, #7]
-  return text.replace(/\[#(\d+(?:,\s*#\d+)*)\]/g, (match, inner: string) => {
-    const ids = inner.split(/,\s*#/).map((s) => parseInt(s.replace("#", ""), 10));
-    const links = ids
-      .map((id) => {
-        const article = articleMap.get(id);
-        if (!article) return null;
-        return `<a href="${escapeUrl(article.url)}">src</a>`;
-      })
-      .filter(Boolean);
-
-    return links.length > 0 ? `[${links.join(", ")}]` : match;
-  });
 };
 
 // ─── Template-only fallback (Telegram HTML) ──────────────────────────────────
@@ -678,10 +756,11 @@ const translateDigestText = async (
 type PipelineStats = {
   totalIngested: number;
   passedFilters: number;
-  scoreFourPlus: number;
+  aboveThreshold: number;
+  minScore: number;
 };
 
-const queryPipelineStats = async (db: Database, lookback: Date): Promise<PipelineStats> => {
+const queryPipelineStats = async (db: Database, lookback: Date, minScore: number): Promise<PipelineStats> => {
   const [totalRow] = await db
     .select({ cnt: count() })
     .from(articles)
@@ -695,12 +774,13 @@ const queryPipelineStats = async (db: Database, lookback: Date): Promise<Pipelin
   const [highRow] = await db
     .select({ cnt: count() })
     .from(articles)
-    .where(and(gte(articles.scoredAt, lookback), gte(articles.importanceScore, 4)));
+    .where(and(gte(articles.scoredAt, lookback), gte(articles.importanceScore, minScore)));
 
   return {
     totalIngested: totalRow?.cnt ?? 0,
     passedFilters: scoredRow?.cnt ?? 0,
-    scoreFourPlus: highRow?.cnt ?? 0,
+    aboveThreshold: highRow?.cnt ?? 0,
+    minScore,
   };
 };
 

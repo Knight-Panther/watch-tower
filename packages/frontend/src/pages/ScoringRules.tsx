@@ -63,7 +63,9 @@ export default function ScoringRules() {
         const data = await listSectors();
         setSectors(data);
         if (data.length > 0) {
-          setSelectedSectorId(data[0].id);
+          const saved = localStorage.getItem("scoringRules_sectorId");
+          const valid = saved && data.some((s) => s.id === saved);
+          setSelectedSectorId(valid ? saved : data[0].id);
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to load sectors";
@@ -156,7 +158,7 @@ export default function ScoringRules() {
   const handleSave = async () => {
     if (!selectedSectorId) return;
 
-    if (autoApprove !== 0 && autoReject >= autoApprove) {
+    if (autoApprove !== 0 && autoReject !== 0 && autoReject >= autoApprove) {
       toast.error("Auto-reject threshold must be less than auto-approve");
       return;
     }
@@ -229,7 +231,10 @@ export default function ScoringRules() {
             <label className="text-sm text-slate-400">Sector:</label>
             <select
               value={selectedSectorId}
-              onChange={(e) => setSelectedSectorId(e.target.value)}
+              onChange={(e) => {
+                setSelectedSectorId(e.target.value);
+                localStorage.setItem("scoringRules_sectorId", e.target.value);
+              }}
               className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
             >
               {sectors.map((s) => (
@@ -509,6 +514,7 @@ export default function ScoringRules() {
                     }}
                     className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200"
                   >
+                    <option value={0}>OFF</option>
                     {[1, 2, 3].map((n) => (
                       <option key={n} value={n}>
                         {n}

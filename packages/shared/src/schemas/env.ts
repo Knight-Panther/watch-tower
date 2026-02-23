@@ -61,7 +61,7 @@ const coreEnvSchema = z.object({
 
   // Auto-approve/reject thresholds
   LLM_AUTO_APPROVE_THRESHOLD: z.coerce.number().min(0).max(5).default(5),
-  LLM_AUTO_REJECT_THRESHOLD: z.coerce.number().min(1).max(5).default(2),
+  LLM_AUTO_REJECT_THRESHOLD: z.coerce.number().min(0).max(5).default(2),
 
   // Telegram distribution
   TELEGRAM_BOT_TOKEN: z

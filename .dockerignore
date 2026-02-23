@@ -1,7 +1,11 @@
 node_modules
-dist
-.git
+packages/*/node_modules
+packages/*/dist
 .env
 .env.*
-packages/frontend/node_modules
-packages/frontend/dist
+!.env.production.template
+.git
+.turbo
+backups
+NUL
+*.log

@@ -56,6 +56,7 @@ import ImageTemplate from "./pages/ImageTemplate";
 import SiteRules from "./pages/SiteRules";
 import Alerts from "./pages/Alerts";
 import DigestSettings from "./pages/DigestSettings";
+import Analytics from "./pages/Analytics";
 import {
   ServerEventsProvider,
   useServerEventsContext,
@@ -96,7 +97,7 @@ const emptySourceForm = {
   maxAgeDays: "",
   ingestIntervalMinutes: "",
 };
-const emptySectorForm = { name: "", defaultMaxAgeDays: "5" };
+const emptySectorForm = { name: "", defaultMaxAgeDays: "1" };
 
 export default function App() {
   const [sources, setSources] = useState<Source[]>([]);
@@ -334,7 +335,7 @@ export default function App() {
   const onSaveChanges = async (source: Source) => {
     const rawValue =
       maxAgeDrafts[source.id] ??
-      String(source.max_age_days ?? source.sectors?.default_max_age_days ?? 5);
+      String(source.max_age_days ?? source.sectors?.default_max_age_days ?? 1);
 
     const maMin = constraints?.maxAge.min ?? 1;
     const maMax = constraints?.maxAge.max ?? 15;
@@ -360,7 +361,7 @@ export default function App() {
       return;
     }
     const maxAgeChanged =
-      maxAgeValue !== (source.max_age_days ?? source.sectors?.default_max_age_days ?? 5);
+      maxAgeValue !== (source.max_age_days ?? source.sectors?.default_max_age_days ?? 1);
 
     const intMin = constraints?.interval.min ?? 1;
     const intMax = constraints?.interval.max ?? 4320;
@@ -897,6 +898,7 @@ export default function App() {
         <Route path="/site-rules" element={<SiteRules />} />
         <Route path="/alerts" element={<Alerts />} />
         <Route path="/digest" element={<DigestSettings />} />
+        <Route path="/analytics" element={<Analytics />} />
         <Route
           path="/settings"
           element={

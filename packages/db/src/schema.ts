@@ -38,7 +38,7 @@ export const sectors = pgTable("sectors", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull().unique(),
   slug: text("slug").notNull().unique(),
-  defaultMaxAgeDays: smallint("default_max_age_days").notNull().default(5),
+  defaultMaxAgeDays: smallint("default_max_age_days").notNull().default(1),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -69,6 +69,7 @@ export const articles = pgTable(
     sectorId: uuid("sector_id").references(() => sectors.id, { onDelete: "set null" }),
     url: text("url").notNull().unique(),
     title: text("title").notNull(),
+    author: text("author"),
     contentSnippet: text("content_snippet"),
     articleCategories: text("article_categories").array(),
     publishedAt: timestamp("published_at", { withTimezone: true }),

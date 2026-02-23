@@ -17,6 +17,8 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       date_from?: string;
       date_to?: string;
       search?: string;
+      rejection_type?: string;
+      category?: string;
       sort_by?: "published_at" | "importance_score" | "created_at";
       sort_dir?: "asc" | "desc";
     };
@@ -77,6 +79,23 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     if (search) {
       conditions.push(
         sql`(${articles.title} ILIKE ${`%${search}%`} OR ${articles.llmSummary} ILIKE ${`%${search}%`} OR ${articles.titleKa} ILIKE ${`%${search}%`} OR ${articles.llmSummaryKa} ILIKE ${`%${search}%`})`,
+      );
+    }
+
+    if (request.query.rejection_type) {
+      const rt = request.query.rejection_type;
+      if (rt === "pre-filter") {
+        conditions.push(sql`${articles.rejectionReason} LIKE 'pre-filter:%'`);
+      } else if (rt === "llm-score") {
+        conditions.push(sql`${articles.rejectionReason} LIKE 'llm-score:%'`);
+      } else if (rt === "manual") {
+        conditions.push(eq(articles.rejectionReason, "manual"));
+      }
+    }
+
+    if (request.query.category) {
+      conditions.push(
+        sql`${request.query.category} = ANY(${articles.articleCategories})`,
       );
     }
 

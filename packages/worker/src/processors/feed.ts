@@ -137,11 +137,15 @@ export const createIngestWorker = ({ connection, db, eventPublisher }: IngestDep
             ? item.categories.map((c: string) => c.trim()).filter(Boolean).slice(0, 20)
             : null;
 
+          // Capture author/creator (rss-parser exposes as creator or author)
+          const author = (item.creator ?? (item as Record<string, unknown>).author) as string | undefined;
+
           return {
             sourceId,
             sectorId: sectorId ?? null,
             url: link,
             title: item.title ?? "Untitled",
+            author: author?.trim() || null,
             contentSnippet: truncateSnippet(rawContent),
             articleCategories: categories,
             publishedAt: new Date(published),

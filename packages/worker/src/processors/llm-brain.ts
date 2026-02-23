@@ -75,7 +75,9 @@ export const matchesKeyword = (text: string, keyword: string): boolean => {
 
 type ClaimedArticle = {
   id: string;
+  url: string;
   title: string;
+  author: string | null;
   contentSnippet: string | null;
   articleCategories: string[] | null;
   sectorId: string | null;
@@ -120,7 +122,9 @@ export const createLLMBrainWorker = ({
         )
         RETURNING
           id,
+          url,
           title,
+          author,
           content_snippet as "contentSnippet",
           article_categories as "articleCategories",
           sector_id as "sectorId"
@@ -275,6 +279,24 @@ export const createLLMBrainWorker = ({
             rejected = true;
             break;
           }
+          // Check article URL path (catches /sponsored/, /partner/, /affiliate/ etc.)
+          if (matchesKeyword(article.url, keyword)) {
+            preFilterRejects.push({
+              id: article.id,
+              reason: `pre-filter: keyword '${keyword}' matched in url`,
+            });
+            rejected = true;
+            break;
+          }
+          // Check author
+          if (article.author && matchesKeyword(article.author, keyword)) {
+            preFilterRejects.push({
+              id: article.id,
+              reason: `pre-filter: keyword '${keyword}' matched in author`,
+            });
+            rejected = true;
+            break;
+          }
           // Check content snippet
           if (article.contentSnippet && matchesKeyword(article.contentSnippet, keyword)) {
             preFilterRejects.push({
@@ -393,10 +415,12 @@ export const createLLMBrainWorker = ({
         const article = articles.find((a) => a.id === articleId)!;
         const rules = article.sectorId ? sectorRules.get(article.sectorId) : undefined;
         const rawApprove = rules?.autoApprove ?? globalApprove;
+        const rawReject = rules?.autoReject ?? globalReject;
         return {
           // 0 means "OFF" — never auto-approve (6 is unreachable since scores are 1-5)
           approve: rawApprove === 0 ? 6 : rawApprove,
-          reject: rules?.autoReject ?? globalReject,
+          // 0 means "OFF" — never auto-reject (-1 is unreachable since scores are 1-5)
+          reject: rawReject === 0 ? -1 : rawReject,
         };
       };
 

@@ -139,14 +139,18 @@ export const registerScoringRulesRoutes = (app: FastifyInstance, deps: ApiDeps) 
     }
     if (
       !Number.isInteger(auto_reject_threshold) ||
-      auto_reject_threshold < 1 ||
+      auto_reject_threshold < 0 ||
       auto_reject_threshold > 5
     ) {
       return reply.code(400).send({
-        error: "auto_reject_threshold must be integer 1-5",
+        error: "auto_reject_threshold must be integer 0-5 (0 = OFF)",
       });
     }
-    if (auto_approve_threshold !== 0 && auto_reject_threshold >= auto_approve_threshold) {
+    if (
+      auto_approve_threshold !== 0 &&
+      auto_reject_threshold !== 0 &&
+      auto_reject_threshold >= auto_approve_threshold
+    ) {
       return reply.code(400).send({
         error: "auto_reject_threshold must be less than auto_approve_threshold",
       });

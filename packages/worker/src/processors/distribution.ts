@@ -382,8 +382,7 @@ export const createDistributionWorker = ({
             // Post to platform (attach image if template allows and image exists)
             const imageUrl =
               template.showImage && articleImage?.imageUrl ? articleImage.imageUrl : undefined;
-            const sourceUrl =
-              template.autoCommentUrl && imageUrl ? article.url : undefined;
+            const sourceUrl = template.autoCommentUrl ? article.url : undefined;
             const postResult = await provider!.post({ text, imageUrl, sourceUrl });
             results.push({
               platform: name,

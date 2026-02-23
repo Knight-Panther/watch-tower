@@ -20,7 +20,7 @@ Build Watch Tower into a reliable intelligence tool for personal use, then sell 
 | URL dedup | Production-ready | PostgreSQL UNIQUE, zero cost |
 | Semantic dedup (embeddings) | Production-ready | pgvector, global threshold, batch 50 |
 | LLM scoring + summarization | Production-ready | Multi-provider, fallback, batch 10 |
-| Score reasoning (LLM layer) | 40% done | Prompt requests it, Zod parses it, type accepts it — but NOT persisted to DB |
+| Score reasoning (LLM layer) | ✅ Done | Fully persisted to DB (`score_reasoning` column), returned by API, displayed in dashboard |
 | Scoring config system | Production-ready | Per-sector priorities, ignore lists, score definitions, few-shot examples, summary tone/style |
 | Multi-platform distribution | Production-ready | Telegram, Facebook, LinkedIn — rate limits, health checks, error recovery |
 | Pipeline reliability | Production-ready | Zombie recovery, self-healing jobs, atomic claims |
@@ -292,13 +292,15 @@ The role field absorbs what would otherwise be 4 separate dropdowns (tone, group
 | `digest_timezone` | `UTC` | Client timezone (IANA) |
 | `digest_days` | `[1,2,3,4,5,6,7]` | Which days to send (1=Mon...7=Sun). Default: every day. Business clients toggle off Sat/Sun |
 | `digest_min_score` | `3` | Minimum score for articles to qualify (1-5) |
-| `digest_max_articles` | `15` | Max featured articles per digest (5-30) |
-| `digest_include_reasoning` | `true` | Show P1 score reasoning per article |
+| ~~`digest_max_articles`~~ | ~~`15`~~ | **SUPERSEDED** — not implemented; all qualifying articles sent to LLM, `digest_min_score` controls volume naturally |
+| ~~`digest_include_reasoning`~~ | ~~`true`~~ | **SUPERSEDED** — not implemented; reasoning included in LLM context when available |
 | `digest_language` | `(follows posting_language)` | `en` or `ka` — controls article field selection AND LLM executive summary language. Defaults to global `posting_language` but can be overridden independently |
-| `digest_role` | `"Senior intelligence analyst providing a daily briefing on important developments"` | LLM persona — ALL customization lives here (max 300 chars) |
+| ~~`digest_role`~~ | ~~`"Senior intelligence analyst..."`~~ | **SUPERSEDED** — replaced by `digest_system_prompt` (free-text textarea, 2000 chars). More flexible than a 300-char role field. |
 | `digest_telegram_chat_id` | (from existing config) | Delivery target (can differ from social posting chat) |
 
 **Why 10, not 14:** Executive summary and stats are always included (they're the product — no reason to toggle off). Tone is part of the role field. Grouping is decided by the LLM thematically (smarter than mechanical score-tier grouping). Telegram is the only channel for now.
+
+> **Implementation note:** Production uses 7 active settings (not 10). `digest_max_articles`, `digest_include_reasoning`, and `digest_role` were superseded by `digest_system_prompt` (free-text) which absorbs role/tone customization. The implementation also added `digest_provider`, `digest_model`, `digest_translation_provider`, `digest_translation_model`, `digest_translation_prompt`, `digest_facebook_enabled`, `digest_linkedin_enabled` — expanding to 15+ config keys.
 
 **Language handling (`digest_language`):**
 - When `ka`: use `title_ka` / `llm_summary_ka` from DB for article entries; add "Write the executive summary in Georgian" to LLM system prompt
@@ -525,17 +527,19 @@ Default is 0.85, but the instance is currently set to 0.65. This means articles 
 - **Client access:** Dashboard URL with nginx basic auth (sufficient — you're the admin)
 - **Ceiling:** Manageable up to ~5 clients before ops overhead becomes painful
 
-**Needs building:**
-- `.env.template` with all vars documented (partially exists as `.env.example`)
-- Client setup script: `./setup-client.sh clientname` → provisions DB, runs migrations, seeds config
-- Deploy-all script: pushes updates to all client VPSes
-- Production docker-compose (API + worker + frontend + nginx)
-- Automated DB backup (pg_dump cron)
-- Health check monitoring (uptime robot or similar hitting `/api/health`)
+**Deployment toolkit (all built):**
+- ✅ `.env.production.template` with all vars documented + CHANGEME placeholders
+- ✅ `deploy/setup-client.sh clientname` → provisions DB, runs migrations, seeds config, sets up auth
+- ✅ `deploy/deploy.sh` → git pull, rebuild, rolling restart, health check
+- ✅ `deploy/deploy-all.sh` → pushes updates to all client instances
+- ✅ `docker-compose.prod.yml` (postgres + redis + API + worker + frontend + nginx)
+- ✅ `deploy/nginx/nginx.conf` (reverse proxy, basic auth, SSE support, SSL-ready)
+- ✅ `deploy/backup.sh` → pg_dump + gzip, keeps last 14, cron-ready
+- ✅ Dockerfiles: API (3-stage), Worker (3-stage + native deps), Frontend (Vite + nginx)
+- ⬜ Health check monitoring (uptime robot or similar hitting `/api/health`)
 
-**Currently exists:**
+**Also exists (dev):**
 - `docker-compose.yml` (dev only — PostgreSQL + Redis)
-- Dockerfiles for API and worker (multi-stage builds)
 - `.env.example` with documented vars
 
 ### Phase 2: SaaS (Only If Demand Proves It)
@@ -631,14 +635,14 @@ Phase 2: Client-facing features
 ──────────────────────────────────────────────────
 4. [DONE] P3: Keyword alerts → Telegram          (~2-3 days)
 5. [DONE] P4: Daily digest + role/tone system     (~3-4 days — digest engine, LLM prompt, role customization, UI config)
-6. Deployment template + scripts          (~1 day)
+6. [DONE] Deployment template + scripts          (~1 day)
 
 ─── Ready to sell managed instances ───
 
-Phase 3: Refinement (after first paying clients)
+Phase 3: Refinement
 ──────────────────────────────────────────────────
-7. P6: Global dedup threshold in DB        (~0.5 day — app_config key, worker read, UI slider)
-8. P7: Feedback loop analytics            (after 500+ scored articles)
+7. [IN PROGRESS] P6: Global dedup threshold in DB        (~0.5 day — app_config key, worker read, UI slider)
+8. [IN PROGRESS] P7: Feedback loop analytics            (approval patterns, scoring accuracy, source value)
 ```
 
 ---
@@ -647,11 +651,11 @@ Phase 3: Refinement (after first paying clients)
 
 Before approaching first client:
 
-- [ ] P1: Score reasoning visible in dashboard
-- [ ] P2: Keyword pre-filter active on at least one sector
-- [ ] P3: Keyword alerts delivering via Telegram
-- [ ] P4: Daily digest with client-specific analyst role delivering via Telegram
-- [ ] Deployment script: new client instance in <1 hour
+- [x] P1: Score reasoning visible in dashboard
+- [x] P2: Keyword pre-filter active on at least one sector
+- [x] P3: Keyword alerts delivering via Telegram
+- [x] P4: Daily digest with client-specific analyst role delivering via Telegram + Facebook + LinkedIn
+- [x] Deployment script: new client instance in <1 hour
 - [ ] Demo instance running with a compelling sector (e.g., "AI & Tech" or "Fintech")
 - [ ] Professional domain + SSL (not raw IP)
 - [ ] Landing page explaining the product (not the dashboard — a marketing page)
@@ -684,7 +688,8 @@ These were discussed and evaluated — kept here for future reference:
 |-------|--------|--------|
 | ~~Articles list shuffles on action~~ | ~~Annoying UX~~ | **FIXED** — tiebreaker sort in `articles.ts:98-102` |
 | ~~Translation UI visible in English mode~~ | ~~Confusing for English clients~~ | **FIXED** — conditional rendering via `posting_language` |
-| No deployment automation | Slow client setup | Dockerfiles exist, need production compose + setup script |
+| ~~Score reasoning not persisted~~ | ~~No visibility into scoring decisions~~ | **FIXED** — `score_reasoning` column, API, dashboard display |
+| ~~No deployment automation~~ | ~~Slow client setup~~ | **FIXED** — `docker-compose.prod.yml`, `setup-client.sh`, `deploy.sh`, `deploy-all.sh`, `backup.sh` |
 | No proper auth system (nginx basic auth) | Fine for managed instances, blocks SaaS | Defer until Phase 2 (SaaS) |
 | No onboarding flow | You do setup manually per client | Acceptable for Phase 1 (managed instances) |
 | No per-client cost tracking | Can't verify margins per client | Add LLM telemetry grouping by instance (low priority) |
@@ -750,16 +755,10 @@ Concrete UI additions/modifications needed for each priority item, mapped to exi
 - Telegram chat ID input (may differ from social posting chat)
 - Language selector: dropdown (`English` / `Georgian`). Defaults to global `posting_language`. Help text: "Controls article language and executive summary language. Independent from social posting language."
 - Min score threshold: dropdown (1-5, default 3)
-- Max articles per digest: slider (5-30, default 15)
-- Include score reasoning toggle (requires P1)
-- Analyst role: textarea (max 300 chars) — the LLM persona
-  - Placeholder: "Senior intelligence analyst providing a daily briefing on important developments"
-  - Help text: "Describe who the analyst is, who they're briefing, and what style to use. This shapes the entire digest."
-  - Preset buttons the operator can click to populate:
-    - "VC Analyst" → pre-fills VC-focused role text
-    - "PR Monitor" → pre-fills PR agency-focused role text
-    - "Market Intel" → pre-fills trading desk-focused role text
-    - "Corporate Strategy" → pre-fills strategy-focused role text
+- ~~Max articles per digest: slider (5-30, default 15)~~ — **SUPERSEDED**: all qualifying articles sent to LLM
+- ~~Include score reasoning toggle (requires P1)~~ — **SUPERSEDED**: reasoning always available in LLM context
+- System prompt: textarea (max 2000 chars) — replaces the planned `digest_role` field + 4 preset buttons. Free-text is more flexible than presets.
+  - ~~Preset buttons (VC Analyst, PR Monitor, Market Intel, Corporate Strategy)~~ — **SUPERSEDED**: operator writes full system prompt directly
 - "Send Test Digest" button — generates and delivers a digest immediately using current settings + today's articles. **Does NOT update `last_digest_sent_at`** (otherwise next real digest skips those articles)
 - Status line below settings: "Next digest: Tomorrow 08:00 (Asia/Tbilisi)" / "Last sent: today 08:01"
 
