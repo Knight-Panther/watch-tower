@@ -47,6 +47,10 @@ type SettingsProps = {
   postDeliveriesTtlError: string | null;
   onPostDeliveriesTtlChange: (value: string) => void;
   onSavePostDeliveriesTtl: () => void;
+  digestRunsTtlDays: string;
+  digestRunsTtlError: string | null;
+  onDigestRunsTtlChange: (value: string) => void;
+  onSaveDigestRunsTtl: () => void;
 };
 
 type TabId = "telemetry" | "cleanup";
@@ -122,6 +126,10 @@ export default function Settings({
   postDeliveriesTtlError,
   onPostDeliveriesTtlChange,
   onSavePostDeliveriesTtl,
+  digestRunsTtlDays,
+  digestRunsTtlError,
+  onDigestRunsTtlChange,
+  onSaveDigestRunsTtl,
 }: SettingsProps) {
   // URL-based tab state
   const [searchParams, setSearchParams] = useSearchParams();
@@ -560,6 +568,31 @@ export default function Settings({
               </span>
               {postDeliveriesTtlError ? (
                 <p className="w-full text-xs text-red-400">{postDeliveriesTtlError}</p>
+              ) : null}
+            </div>
+
+            {/* Digest Runs TTL */}
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="w-40 text-sm text-slate-300">Digest Runs TTL</label>
+              <input
+                value={digestRunsTtlDays}
+                onChange={(event) => onDigestRunsTtlChange(event.target.value)}
+                placeholder="1-90"
+                className="w-24 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-600"
+              />
+              <span className="text-sm text-slate-400">days</span>
+              <button
+                onClick={onSaveDigestRunsTtl}
+                disabled={!digestRunsTtlDays.trim()}
+                className="rounded-full border border-slate-700 px-3 py-1.5 text-sm text-slate-200 transition hover:border-slate-500 disabled:opacity-50"
+              >
+                Save
+              </button>
+              <span className="text-xs text-slate-500">
+                Digest history records retention.
+              </span>
+              {digestRunsTtlError ? (
+                <p className="w-full text-xs text-red-400">{digestRunsTtlError}</p>
               ) : null}
             </div>
           </div>

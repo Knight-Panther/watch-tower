@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import { eq, inArray, sql } from "drizzle-orm";
-import { appConfig, articles } from "@watch-tower/db";
+import { eq, inArray, sql, desc } from "drizzle-orm";
+import { appConfig, articles, digestRuns } from "@watch-tower/db";
 import { logger, imageTemplateSchema, DEFAULT_IMAGE_TEMPLATE, JOB_DAILY_DIGEST } from "@watch-tower/shared";
 import type { ApiDeps } from "../server.js";
 
@@ -12,6 +12,7 @@ const CONSTRAINTS = {
   llmTelemetryTtl: { min: 1, max: 60, unit: "days" },
   articleImagesTtl: { min: 1, max: 60, unit: "days" },
   postDeliveriesTtl: { min: 1, max: 60, unit: "days" },
+  digestRunsTtl: { min: 1, max: 90, unit: "days" },
 } as const;
 
 const getConfigValue = async (deps: ApiDeps, key: string, fallback: number) => {
@@ -195,6 +196,31 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
         });
       }
       await upsertConfig(deps, "post_deliveries_ttl_days", days);
+      return { days };
+    },
+  );
+
+  // Digest Runs TTL
+  app.get("/config/digest-runs-ttl", { preHandler: deps.requireApiKey }, async () => {
+    const days = await getConfigValue(deps, "digest_runs_ttl_days", 30);
+    return { days };
+  });
+
+  app.patch<{ Body: { days: number } }>(
+    "/config/digest-runs-ttl",
+    { preHandler: deps.requireApiKey },
+    async (request, reply) => {
+      const { days } = request.body ?? {};
+      if (
+        !Number.isFinite(days) ||
+        days < CONSTRAINTS.digestRunsTtl.min ||
+        days > CONSTRAINTS.digestRunsTtl.max
+      ) {
+        return reply.code(400).send({
+          error: `days must be a number between ${CONSTRAINTS.digestRunsTtl.min} and ${CONSTRAINTS.digestRunsTtl.max}`,
+        });
+      }
+      await upsertConfig(deps, "digest_runs_ttl_days", days);
       return { days };
     },
   );
@@ -579,6 +605,9 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       "digest_translation_provider",
       "digest_translation_model",
       "digest_translation_prompt",
+      "digest_image_telegram",
+      "digest_image_facebook",
+      "digest_image_linkedin",
       "last_digest_sent_at",
       "posting_language",
       "translation_provider",
@@ -612,6 +641,9 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       translationProvider: (m.get("digest_translation_provider") as string) ?? globalTransProvider,
       translationModel: (m.get("digest_translation_model") as string) ?? globalTransModel,
       translationPrompt: (m.get("digest_translation_prompt") as string) ?? "",
+      imageTelegram: m.get("digest_image_telegram") === true || m.get("digest_image_telegram") === "true" ? true : false,
+      imageFacebook: m.get("digest_image_facebook") === true || m.get("digest_image_facebook") === "true" ? true : false,
+      imageLinkedin: m.get("digest_image_linkedin") === true || m.get("digest_image_linkedin") === "true" ? true : false,
       lastDigestSentAt: (m.get("last_digest_sent_at") as string) ?? null,
     };
   });
@@ -634,6 +666,9 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       translationProvider?: string;
       translationModel?: string;
       translationPrompt?: string;
+      imageTelegram?: boolean;
+      imageFacebook?: boolean;
+      imageLinkedin?: boolean;
     };
   }>("/config/digest", { preHandler: deps.requireApiKey }, async (request, reply) => {
     const body = request.body ?? {};
@@ -706,6 +741,12 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       updates.push({ key: "digest_translation_model", value: body.translationModel });
     if (body.translationPrompt !== undefined)
       updates.push({ key: "digest_translation_prompt", value: body.translationPrompt });
+    if (body.imageTelegram !== undefined)
+      updates.push({ key: "digest_image_telegram", value: body.imageTelegram });
+    if (body.imageFacebook !== undefined)
+      updates.push({ key: "digest_image_facebook", value: body.imageFacebook });
+    if (body.imageLinkedin !== undefined)
+      updates.push({ key: "digest_image_linkedin", value: body.imageLinkedin });
 
     for (const { key, value } of updates) {
       await upsertTypedConfig(deps, key, value);
@@ -729,6 +770,33 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       return reply.code(500).send({ error: "Failed to queue test digest" });
     }
   });
+
+  // ─── Digest History ────────────────────────────────────────────────────────
+
+  app.get<{ Querystring: { limit?: string } }>(
+    "/config/digest/history",
+    { preHandler: deps.requireApiKey },
+    async (request) => {
+      const limit = Math.min(Math.max(Number(request.query.limit) || 30, 1), 100);
+      const rows = await deps.db
+        .select()
+        .from(digestRuns)
+        .orderBy(desc(digestRuns.sentAt))
+        .limit(limit);
+      return rows;
+    },
+  );
+
+  app.delete(
+    "/config/digest/history",
+    { preHandler: deps.requireApiKey },
+    async () => {
+      const result = await deps.db.delete(digestRuns);
+      const deleted = result.rowCount ?? 0;
+      logger.info({ deleted }, "[config] digest history cleared");
+      return { deleted };
+    },
+  );
 
   // ─── Dedup Sensitivity ────────────────────────────────────────────────────────
 

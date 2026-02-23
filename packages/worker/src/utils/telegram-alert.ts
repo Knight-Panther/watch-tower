@@ -27,6 +27,54 @@ export const cleanForTelegram = (text: string): string =>
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
 
+/**
+ * Send a photo to a Telegram chat via multipart/form-data (direct buffer upload).
+ * Used for digest cover images — no public URL needed.
+ */
+export const sendTelegramPhoto = async (
+  botToken: string,
+  chatId: string,
+  imageBuffer: Buffer,
+  filename = "digest-cover.webp",
+): Promise<boolean> => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+
+  try {
+    const form = new FormData();
+    form.append("chat_id", chatId);
+    form.append("photo", new Blob([new Uint8Array(imageBuffer)], { type: "image/webp" }), filename);
+
+    const response = await fetch(
+      `https://api.telegram.org/bot${botToken}/sendPhoto`,
+      { method: "POST", body: form, signal: controller.signal },
+    );
+
+    const data = (await response.json()) as { ok: boolean; description?: string };
+
+    if (!data.ok) {
+      logger.warn(
+        { chatId, error: sanitizeError(data.description ?? "Unknown error") },
+        "[alert] telegram sendPhoto failed",
+      );
+      return false;
+    }
+
+    return true;
+  } catch (err) {
+    const msg =
+      err instanceof Error
+        ? err.name === "AbortError"
+          ? `Timeout after ${DEFAULT_TIMEOUT_MS}ms`
+          : sanitizeError(err.message)
+        : "Unknown error";
+    logger.warn({ chatId, error: msg }, "[alert] telegram sendPhoto error");
+    return false;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
 export const sendTelegramAlert = async (
   botToken: string,
   chatId: string,

@@ -18,6 +18,8 @@ import {
   setArticleImagesTtl,
   getPostDeliveriesTtl,
   setPostDeliveriesTtl,
+  getDigestRunsTtl,
+  setDigestRunsTtl,
   listSectors,
   listSources,
   runIngest,
@@ -139,6 +141,8 @@ export default function App() {
   const [articleImagesTtlError, setArticleImagesTtlError] = useState<string | null>(null);
   const [postDeliveriesTtlDays, setPostDeliveriesTtlDays] = useState("");
   const [postDeliveriesTtlError, setPostDeliveriesTtlError] = useState<string | null>(null);
+  const [digestRunsTtlDays, setDigestRunsTtlDays] = useState("");
+  const [digestRunsTtlError, setDigestRunsTtlError] = useState<string | null>(null);
   const [sourceIntervalDrafts, setSourceIntervalDrafts] = useState<Record<string, string>>({});
   const [sectorMaxAgeDrafts, setSectorMaxAgeDrafts] = useState<Record<string, string>>({});
   const [confirmSectorDelete, setConfirmSectorDelete] = useState<Sector | null>(null);
@@ -183,6 +187,7 @@ export default function App() {
         llmTelemetryTtl,
         articleImagesTtl,
         postDeliveriesTtl,
+        digestRunsTtl,
       ] = await Promise.all([
         listSources(),
         listSectors(),
@@ -192,6 +197,7 @@ export default function App() {
         getLlmTelemetryTtl(),
         getArticleImagesTtl(),
         getPostDeliveriesTtl(),
+        getDigestRunsTtl(),
       ]);
       setSources(sourcesData);
       setSectors(sectorsData);
@@ -210,6 +216,7 @@ export default function App() {
       setLlmTelemetryTtlDays(String(llmTelemetryTtl));
       setArticleImagesTtlDays(String(articleImagesTtl));
       setPostDeliveriesTtlDays(String(postDeliveriesTtl));
+      setDigestRunsTtlDays(String(digestRunsTtl));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load sources";
       setError(message);
@@ -619,6 +626,27 @@ export default function App() {
     }
   };
 
+  const onSaveDigestRunsTtl = async () => {
+    const min = constraints?.digestRunsTtl?.min ?? 1;
+    const max = constraints?.digestRunsTtl?.max ?? 90;
+    const value = Number(digestRunsTtlDays);
+    if (Number.isNaN(value) || value < min || value > max) {
+      setDigestRunsTtlError(`TTL must be between ${min} and ${max} days`);
+      toast.error(`TTL must be between ${min} and ${max} days`);
+      return;
+    }
+    try {
+      const updated = await setDigestRunsTtl(value);
+      setDigestRunsTtlDays(String(updated));
+      setDigestRunsTtlError(null);
+      toast.success("Digest runs TTL updated");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update digest runs TTL";
+      setDigestRunsTtlError(message);
+      toast.error(message);
+    }
+  };
+
   const selectedCount = useMemo(
     () => Object.values(selectedIds).filter(Boolean).length,
     [selectedIds],
@@ -937,6 +965,10 @@ export default function App() {
               postDeliveriesTtlError={postDeliveriesTtlError}
               onPostDeliveriesTtlChange={setPostDeliveriesTtlDays}
               onSavePostDeliveriesTtl={onSavePostDeliveriesTtl}
+              digestRunsTtlDays={digestRunsTtlDays}
+              digestRunsTtlError={digestRunsTtlError}
+              onDigestRunsTtlChange={setDigestRunsTtlDays}
+              onSaveDigestRunsTtl={onSaveDigestRunsTtl}
             />
           }
         />

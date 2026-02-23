@@ -263,6 +263,32 @@ export const setPostDeliveriesTtl = async (days: number): Promise<number> => {
   return Number(data.days ?? days);
 };
 
+export const getDigestRunsTtl = async (): Promise<number> => {
+  const res = await fetch(`${API_URL}/config/digest-runs-ttl`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load digest runs TTL");
+  }
+  const data = await res.json();
+  return Number(data.days ?? 30);
+};
+
+export const setDigestRunsTtl = async (days: number): Promise<number> => {
+  const res = await fetch(`${API_URL}/config/digest-runs-ttl`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify({ days }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to update digest runs TTL");
+  }
+  const data = await res.json();
+  return Number(data.days ?? days);
+};
+
 export const updateSector = async (
   id: string,
   payload: { default_max_age_days?: number },
@@ -362,6 +388,7 @@ export type Constraints = {
   llmTelemetryTtl: { min: number; max: number; unit: string };
   articleImagesTtl: { min: number; max: number; unit: string };
   postDeliveriesTtl: { min: number; max: number; unit: string };
+  digestRunsTtl: { min: number; max: number; unit: string };
 };
 
 export const getConstraints = async (): Promise<Constraints> => {
@@ -1750,6 +1777,9 @@ export type DigestConfig = {
   translationProvider: string;
   translationModel: string;
   translationPrompt: string;
+  imageTelegram: boolean;
+  imageFacebook: boolean;
+  imageLinkedin: boolean;
   lastDigestSentAt: string | null;
 };
 
@@ -1784,5 +1814,40 @@ export const sendTestDigest = async (): Promise<{ queued: boolean; message: stri
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || "Failed to send test digest");
   }
+  return res.json();
+};
+
+// ─── Digest History ─────────────────────────────────────────────────────────
+
+export type DigestRun = {
+  id: string;
+  sentAt: string;
+  isTest: boolean;
+  language: string;
+  articleCount: number;
+  channels: string[];
+  channelResults: Record<string, string>;
+  provider: string;
+  model: string;
+  minScore: number;
+  statsScanned: number;
+  statsScored: number;
+  statsAboveThreshold: number;
+};
+
+export const getDigestHistory = async (limit = 30): Promise<DigestRun[]> => {
+  const res = await fetch(`${API_URL}/config/digest/history?limit=${limit}`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) throw new Error("Failed to load digest history");
+  return res.json();
+};
+
+export const clearDigestHistory = async (): Promise<{ deleted: number }> => {
+  const res = await fetch(`${API_URL}/config/digest/history`, {
+    method: "DELETE",
+    headers: authHeaders,
+  });
+  if (!res.ok) throw new Error("Failed to clear digest history");
   return res.json();
 };

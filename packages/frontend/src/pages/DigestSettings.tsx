@@ -5,7 +5,10 @@ import {
   getDigestConfig,
   updateDigestConfig,
   sendTestDigest,
+  getDigestHistory,
+  clearDigestHistory,
   type DigestConfig,
+  type DigestRun,
 } from "../api";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -77,7 +80,7 @@ const TRANSLATION_MODELS: Record<string, { value: string; label: string }[]> = {
 
 const DEFAULT_SYSTEM_PROMPT = `You are a senior intelligence analyst. Deliver a telegraphic daily briefing.
 
-You will receive today's scored article feed. Identify what matters, merge related stories, skip noise.
+You will receive today's scored article feed — it may contain 10 or 100+ articles. Your job is NOT to summarize every article. Your job is to FILTER ruthlessly and surface only what a decision-maker must know today.
 
 Output ONLY bullet points. Each bullet is ONE short sentence — what happened and a brief hint at why it matters. End with source [#IDs].
 
@@ -88,16 +91,96 @@ Rules:
 - ONE sentence per bullet. Maximum 30 words. No filler, no elaboration.
 - End each bullet with source references like [#1] or [#1, #3]
 - Merge related articles into one bullet
-- 5-15 bullets depending on the day
+- TARGET 7-12 bullets. Slow news day: 5-7. Major day: up to 12. NEVER exceed 12.
+- The number of bullets must NOT scale with input size — 30 articles and 100 articles should produce roughly the same number of bullets
+- Skip anything routine, incremental, or already well-known. Only surface genuine developments.
 - Most impactful first
 - Write in English`;
 
 const DEFAULT_TRANSLATION_PROMPT =
   "Translate the following intelligence briefing to Georgian. " +
-  "Be concise — do not expand or elaborate, match the original length. " +
+  "Be concise — do not expand or elaborate. Each bullet must stay ONE short sentence. " +
+  "Do not add words, explanations, or context that is not in the original. " +
   "Keep bullet point structure exactly as-is. " +
   "Keep ALL HTML tags (<b>, <a href>, etc.) and URLs completely unchanged. " +
   "Only translate the human-readable text. Output the translation only, nothing else.";
+
+// ─── LocalStorage collapse helpers ───────────────────────────────────────────
+
+const LS_PREFIX = "digestSettings_";
+const defaultOpen: Record<string, boolean> = {
+  prompt: false,
+  digestModel: false,
+  translationModel: false,
+  channels: false,
+  history: true,
+};
+
+function readCollapse(key: string): boolean {
+  try {
+    const v = localStorage.getItem(LS_PREFIX + key);
+    if (v !== null) return v === "1";
+  } catch { /* noop */ }
+  return defaultOpen[key] ?? false;
+}
+
+function writeCollapse(key: string, open: boolean) {
+  try {
+    localStorage.setItem(LS_PREFIX + key, open ? "1" : "0");
+  } catch { /* noop */ }
+}
+
+// ─── Collapsible section component ──────────────────────────────────────────
+
+function Collapsible({
+  storeKey,
+  title,
+  subtitle,
+  trailing,
+  children,
+}: {
+  storeKey: string;
+  title: string;
+  subtitle?: string;
+  trailing?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(() => readCollapse(storeKey));
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    writeCollapse(storeKey, next);
+  };
+
+  return (
+    <section className="rounded-2xl border border-slate-800 bg-slate-900/40">
+      <button
+        type="button"
+        onClick={toggle}
+        className="flex w-full items-center justify-between gap-3 p-5 text-left"
+      >
+        <div className="min-w-0">
+          <h2 className="text-lg font-semibold text-slate-100">{title}</h2>
+          {subtitle && <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p>}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {trailing}
+          <svg
+            className={`h-5 w-5 text-slate-500 transition-transform ${open ? "rotate-180" : ""}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+      </button>
+      {open && <div className="border-t border-slate-800 p-5 pt-4">{children}</div>}
+    </section>
+  );
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -122,8 +205,38 @@ export default function DigestSettings() {
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [history, setHistory] = useState<DigestRun[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
-  // Load config on mount
+  const loadHistory = async () => {
+    setHistoryLoading(true);
+    try {
+      const data = await getDigestHistory(30);
+      setHistory(data);
+    } catch { /* silent */ } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const [isClearing, setIsClearing] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+
+  const handleClearHistory = async () => {
+    setShowClearConfirm(false);
+    setIsClearing(true);
+    try {
+      const result = await clearDigestHistory();
+      setHistory([]);
+      toast.success(`Cleared ${result.deleted} digest history record${result.deleted === 1 ? "" : "s"}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to clear history";
+      toast.error(msg);
+    } finally {
+      setIsClearing(false);
+    }
+  };
+
+  // Load config + history on mount
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
@@ -141,6 +254,7 @@ export default function DigestSettings() {
       }
     };
     load();
+    loadHistory();
     return () => {
       cancelled = true;
     };
@@ -167,6 +281,9 @@ export default function DigestSettings() {
         translationProvider: config.translationProvider,
         translationModel: config.translationModel,
         translationPrompt: config.translationPrompt,
+        imageTelegram: config.imageTelegram,
+        imageFacebook: config.imageFacebook,
+        imageLinkedin: config.imageLinkedin,
       });
       toast.success("Digest settings saved");
     } catch (err) {
@@ -182,6 +299,8 @@ export default function DigestSettings() {
     try {
       const result = await sendTestDigest();
       toast.success(result.message);
+      // Refresh history after a delay to show the new run
+      setTimeout(loadHistory, 35_000);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to send test digest";
       toast.error(msg);
@@ -229,179 +348,200 @@ export default function DigestSettings() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* ── Header + Master Toggle ───────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-100">Daily Digest</h1>
-          <p className="mt-1 text-sm text-slate-400">
-            LLM-generated intelligence briefing delivered to Telegram.
-          </p>
+    <div className="space-y-5">
+      {/* ── Sticky Header ──────────────────────────────────────────────── */}
+      <div className="sticky top-[var(--nav-h,73px)] z-30 -mx-1 bg-slate-950/95 px-1 pb-4 pt-1 backdrop-blur-sm">
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold text-slate-100">Daily Digest</h1>
+            <p className="mt-0.5 text-sm text-slate-400">
+              LLM-generated intelligence briefing delivered to Telegram.
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              onClick={() => setConfig({ ...config, enabled: !config.enabled })}
+              className={[
+                "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                config.enabled
+                  ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50"
+                  : "bg-slate-700 text-slate-400 hover:bg-slate-600",
+              ].join(" ")}
+            >
+              {config.enabled ? "Enabled" : "Disabled"}
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={isSaving}
+              className="rounded-full bg-cyan-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-cyan-500 disabled:opacity-50"
+            >
+              {isSaving ? "Saving..." : "Save Settings"}
+            </button>
+            <button
+              onClick={handleTest}
+              disabled={isTesting}
+              className="rounded-full border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-300 transition-colors hover:border-slate-500 hover:text-slate-100 disabled:opacity-50"
+            >
+              {isTesting ? "Sending..." : "Send Test"}
+            </button>
+          </div>
         </div>
-        <button
-          onClick={() => setConfig({ ...config, enabled: !config.enabled })}
-          className={[
-            "shrink-0 rounded-full px-5 py-2.5 text-sm font-medium transition-colors",
-            config.enabled
-              ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50"
-              : "bg-slate-700 text-slate-400 hover:bg-slate-600",
-          ].join(" ")}
-        >
-          {config.enabled ? "Enabled" : "Disabled"}
-        </button>
       </div>
 
-      {/* ── Schedule ─────────────────────────────────────────────────────── */}
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
-        <h2 className="text-lg font-semibold text-slate-100">Schedule</h2>
-        <p className="mt-1 text-xs text-slate-500">
-          When to compile and deliver the digest.
-        </p>
+      {/* ── Schedule + Content — side by side ─────────────────────────── */}
+      <div className="grid gap-5 lg:grid-cols-2">
+        {/* Schedule */}
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+          <h2 className="text-lg font-semibold text-slate-100">Schedule</h2>
+          <p className="mt-0.5 text-xs text-slate-500">
+            When to compile and deliver the digest.
+          </p>
 
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          {/* Time */}
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-slate-400">
-              Delivery Time
-            </label>
-            <input
-              type="time"
-              value={config.time}
-              onChange={(e) => setConfig({ ...config, time: e.target.value })}
-              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
-            />
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            {/* Time */}
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-slate-400">
+                Delivery Time
+              </label>
+              <input
+                type="time"
+                value={config.time}
+                onChange={(e) => setConfig({ ...config, time: e.target.value })}
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
+              />
+            </div>
+
+            {/* Timezone */}
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-slate-400">
+                Timezone
+              </label>
+              <select
+                value={config.timezone}
+                onChange={(e) => setConfig({ ...config, timezone: e.target.value })}
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
+              >
+                {TIMEZONES.map((tz) => (
+                  <option key={tz} value={tz}>
+                    {tz.replace(/_/g, " ")}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
-          {/* Timezone */}
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-slate-400">
-              Timezone
+          {/* Active Days */}
+          <div className="mt-4">
+            <label className="mb-2 block text-xs font-medium text-slate-400">
+              Active Days
             </label>
-            <select
-              value={config.timezone}
-              onChange={(e) => setConfig({ ...config, timezone: e.target.value })}
-              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
-            >
-              {TIMEZONES.map((tz) => (
-                <option key={tz} value={tz}>
-                  {tz.replace(/_/g, " ")}
-                </option>
-              ))}
-            </select>
+            <div className="flex flex-wrap gap-2">
+              {DAYS.map((day) => {
+                const active = config.days.includes(day.value);
+                return (
+                  <button
+                    key={day.value}
+                    type="button"
+                    onClick={() => toggleDay(day.value)}
+                    className={[
+                      "rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors",
+                      active
+                        ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50"
+                        : "bg-slate-700 text-slate-400 hover:bg-slate-600",
+                    ].join(" ")}
+                  >
+                    {day.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        </section>
 
-        {/* Active Days */}
-        <div className="mt-4">
-          <label className="mb-2 block text-xs font-medium text-slate-400">
-            Active Days
-          </label>
-          <div className="flex flex-wrap gap-2">
-            {DAYS.map((day) => {
-              const active = config.days.includes(day.value);
-              return (
+        {/* Content */}
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+          <h2 className="text-lg font-semibold text-slate-100">Content</h2>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Which articles to include and how to present them.
+          </p>
+
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            {/* Min Score */}
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-slate-400">
+                Minimum Score
+              </label>
+              <select
+                value={config.minScore}
+                onChange={(e) => setConfig({ ...config, minScore: Number(e.target.value) })}
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
+              >
+                <option value={1}>1 — All scored</option>
+                <option value={2}>2 — Low+</option>
+                <option value={3}>3 — Medium+</option>
+                <option value={4}>4 — High+</option>
+                <option value={5}>5 — Critical only</option>
+              </select>
+              <p className="mt-1 text-xs text-slate-500">LLM reads all articles above this threshold</p>
+            </div>
+
+            {/* Language */}
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-slate-400">
+                Language
+              </label>
+              <div className="flex gap-2">
                 <button
-                  key={day.value}
                   type="button"
-                  onClick={() => toggleDay(day.value)}
+                  onClick={() => setConfig({ ...config, language: "en" })}
                   className={[
                     "rounded-full px-4 py-2 text-sm font-medium transition-colors",
-                    active
+                    config.language === "en"
                       ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50"
                       : "bg-slate-700 text-slate-400 hover:bg-slate-600",
                   ].join(" ")}
                 >
-                  {day.label}
+                  English
                 </button>
-              );
-            })}
-          </div>
-        </div>
-      </section>
-
-      {/* ── Content ──────────────────────────────────────────────────────── */}
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
-        <h2 className="text-lg font-semibold text-slate-100">Content</h2>
-        <p className="mt-1 text-xs text-slate-500">
-          Which articles to include and how to present them.
-        </p>
-
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          {/* Min Score */}
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-slate-400">
-              Minimum Score
-            </label>
-            <select
-              value={config.minScore}
-              onChange={(e) => setConfig({ ...config, minScore: Number(e.target.value) })}
-              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
-            >
-              <option value={1}>1 — All scored</option>
-              <option value={2}>2 — Low+</option>
-              <option value={3}>3 — Medium+</option>
-              <option value={4}>4 — High+</option>
-              <option value={5}>5 — Critical only</option>
-            </select>
-            <p className="mt-1 text-xs text-slate-500">LLM reads all articles above this threshold</p>
-          </div>
-
-          {/* Language */}
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-slate-400">
-              Language
-            </label>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setConfig({ ...config, language: "en" })}
-                className={[
-                  "rounded-full px-4 py-2 text-sm font-medium transition-colors",
-                  config.language === "en"
-                    ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50"
-                    : "bg-slate-700 text-slate-400 hover:bg-slate-600",
-                ].join(" ")}
-              >
-                English
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfig({ ...config, language: "ka" })}
-                className={[
-                  "rounded-full px-4 py-2 text-sm font-medium transition-colors",
-                  config.language === "ka"
-                    ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50"
-                    : "bg-slate-700 text-slate-400 hover:bg-slate-600",
-                ].join(" ")}
-              >
-                Georgian
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setConfig({ ...config, language: "ka" })}
+                  className={[
+                    "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                    config.language === "ka"
+                      ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50"
+                      : "bg-slate-700 text-slate-400 hover:bg-slate-600",
+                  ].join(" ")}
+                >
+                  Georgian
+                </button>
+              </div>
+              <p className="mt-1.5 text-xs text-slate-500">
+                English: digest in English | Georgian: translated after generation
+              </p>
             </div>
-            <p className="mt-1.5 text-xs text-slate-500">
-              English: digest in English | Georgian: digest translated to Georgian after generation
-            </p>
           </div>
-        </div>
-      </section>
+        </section>
+      </div>
 
-      {/* ── System Prompt ────────────────────────────────────────────────── */}
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-100">System Prompt</h2>
-            <p className="mt-1 text-xs text-slate-500">
-              Full LLM instruction sent with every digest. Controls role, output format, and style.
-            </p>
-          </div>
+      {/* ── System Prompt (collapsible) ──────────────────────────────── */}
+      <Collapsible
+        storeKey="prompt"
+        title="System Prompt"
+        subtitle="Full LLM instruction sent with every digest. Controls role, output format, and style."
+        trailing={
           <button
             type="button"
-            onClick={() => setConfig({ ...config, systemPrompt: DEFAULT_SYSTEM_PROMPT })}
-            className="shrink-0 rounded-full border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-400 transition-colors hover:border-slate-500 hover:text-slate-100"
+            onClick={(e) => {
+              e.stopPropagation();
+              setConfig({ ...config, systemPrompt: DEFAULT_SYSTEM_PROMPT });
+            }}
+            className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs font-medium text-slate-400 transition-colors hover:border-slate-500 hover:text-slate-100"
           >
             Reset Default
           </button>
-        </div>
-
+        }
+      >
         <textarea
           value={config.systemPrompt}
           onChange={(e) => {
@@ -411,7 +551,7 @@ export default function DigestSettings() {
           }}
           rows={12}
           placeholder="Enter the full system prompt for the digest LLM..."
-          className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 font-mono text-xs leading-relaxed text-slate-200 outline-none placeholder:text-slate-600 focus:border-slate-500"
+          className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 font-mono text-xs leading-relaxed text-slate-200 outline-none placeholder:text-slate-600 focus:border-slate-500"
         />
         <div className="mt-1 flex items-center justify-between">
           {!config.systemPrompt.trim() ? (
@@ -421,20 +561,17 @@ export default function DigestSettings() {
           ) : (
             <span />
           )}
-          <p className="text-xs text-slate-500">
-            {config.systemPrompt.length}/2000
-          </p>
+          <p className="text-xs text-slate-500">{config.systemPrompt.length}/2000</p>
         </div>
-      </section>
+      </Collapsible>
 
-      {/* ── AI Model ──────────────────────────────────────────────────────── */}
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
-        <h2 className="text-lg font-semibold text-slate-100">Digest AI Model</h2>
-        <p className="mt-1 text-xs text-slate-500">
-          LLM used to analyze articles and generate the digest briefing.
-        </p>
-
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+      {/* ── Digest AI Model (collapsible) ────────────────────────────── */}
+      <Collapsible
+        storeKey="digestModel"
+        title="Digest AI Model"
+        subtitle="LLM used to analyze articles and generate the digest briefing."
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label className="mb-1.5 block text-xs font-medium text-slate-400">
               Provider
@@ -476,16 +613,15 @@ export default function DigestSettings() {
             </select>
           </div>
         </div>
-      </section>
+      </Collapsible>
 
-      {/* ── Translation Model ──────────────────────────────────────────── */}
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
-        <h2 className="text-lg font-semibold text-slate-100">Translation Model</h2>
-        <p className="mt-1 text-xs text-slate-500">
-          Used when language is set to Georgian — translates the English digest output.
-        </p>
-
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+      {/* ── Translation Model (collapsible) ──────────────────────────── */}
+      <Collapsible
+        storeKey="translationModel"
+        title="Translation Model"
+        subtitle="Used when language is set to Georgian — translates the English digest output."
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label className="mb-1.5 block text-xs font-medium text-slate-400">
               Provider
@@ -555,16 +691,15 @@ export default function DigestSettings() {
             {config.translationPrompt.length}/1000
           </p>
         </div>
-      </section>
+      </Collapsible>
 
-      {/* ── Delivery Channels ──────────────────────────────────────────── */}
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
-        <h2 className="text-lg font-semibold text-slate-100">Delivery Channels</h2>
-        <p className="mt-1 text-xs text-slate-500">
-          Choose where to send the digest. At least one channel must be enabled.
-        </p>
-
-        <div className="mt-4 space-y-3">
+      {/* ── Delivery Channels (collapsible) ──────────────────────────── */}
+      <Collapsible
+        storeKey="channels"
+        title="Delivery Channels"
+        subtitle="Choose where to send the digest. At least one channel must be enabled."
+      >
+        <div className="space-y-3">
           {/* Telegram */}
           <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4">
             <div className="flex items-center justify-between">
@@ -575,18 +710,33 @@ export default function DigestSettings() {
                   <p className="text-xs text-slate-500">Bot API — rich HTML formatting</p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setConfig({ ...config, telegramEnabled: !config.telegramEnabled })}
-                className={[
-                  "rounded-full px-4 py-1.5 text-xs font-medium transition-colors",
-                  config.telegramEnabled
-                    ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50"
-                    : "bg-slate-700 text-slate-400 hover:bg-slate-600",
-                ].join(" ")}
-              >
-                {config.telegramEnabled ? "ON" : "OFF"}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConfig({ ...config, imageTelegram: !config.imageTelegram })}
+                  title="Attach cover image"
+                  className={[
+                    "rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
+                    config.imageTelegram
+                      ? "bg-sky-500/20 text-sky-200 ring-1 ring-sky-500/50"
+                      : "bg-slate-700 text-slate-400 hover:bg-slate-600",
+                  ].join(" ")}
+                >
+                  IMG
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfig({ ...config, telegramEnabled: !config.telegramEnabled })}
+                  className={[
+                    "rounded-full px-4 py-1.5 text-xs font-medium transition-colors",
+                    config.telegramEnabled
+                      ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50"
+                      : "bg-slate-700 text-slate-400 hover:bg-slate-600",
+                  ].join(" ")}
+                >
+                  {config.telegramEnabled ? "ON" : "OFF"}
+                </button>
+              </div>
             </div>
             <div className="mt-3">
               <label className="mb-1 block text-xs font-medium text-slate-400">
@@ -622,18 +772,33 @@ export default function DigestSettings() {
                   <p className="text-xs text-slate-500">Page post — uses connected page</p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setConfig({ ...config, facebookEnabled: !config.facebookEnabled })}
-                className={[
-                  "rounded-full px-4 py-1.5 text-xs font-medium transition-colors",
-                  config.facebookEnabled
-                    ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50"
-                    : "bg-slate-700 text-slate-400 hover:bg-slate-600",
-                ].join(" ")}
-              >
-                {config.facebookEnabled ? "ON" : "OFF"}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConfig({ ...config, imageFacebook: !config.imageFacebook })}
+                  title="Attach cover image"
+                  className={[
+                    "rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
+                    config.imageFacebook
+                      ? "bg-sky-500/20 text-sky-200 ring-1 ring-sky-500/50"
+                      : "bg-slate-700 text-slate-400 hover:bg-slate-600",
+                  ].join(" ")}
+                >
+                  IMG
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfig({ ...config, facebookEnabled: !config.facebookEnabled })}
+                  className={[
+                    "rounded-full px-4 py-1.5 text-xs font-medium transition-colors",
+                    config.facebookEnabled
+                      ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50"
+                      : "bg-slate-700 text-slate-400 hover:bg-slate-600",
+                  ].join(" ")}
+                >
+                  {config.facebookEnabled ? "ON" : "OFF"}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -647,18 +812,33 @@ export default function DigestSettings() {
                   <p className="text-xs text-slate-500">Profile/org post — uses connected account</p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setConfig({ ...config, linkedinEnabled: !config.linkedinEnabled })}
-                className={[
-                  "rounded-full px-4 py-1.5 text-xs font-medium transition-colors",
-                  config.linkedinEnabled
-                    ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50"
-                    : "bg-slate-700 text-slate-400 hover:bg-slate-600",
-                ].join(" ")}
-              >
-                {config.linkedinEnabled ? "ON" : "OFF"}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConfig({ ...config, imageLinkedin: !config.imageLinkedin })}
+                  title="Attach cover image"
+                  className={[
+                    "rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
+                    config.imageLinkedin
+                      ? "bg-sky-500/20 text-sky-200 ring-1 ring-sky-500/50"
+                      : "bg-slate-700 text-slate-400 hover:bg-slate-600",
+                  ].join(" ")}
+                >
+                  IMG
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfig({ ...config, linkedinEnabled: !config.linkedinEnabled })}
+                  className={[
+                    "rounded-full px-4 py-1.5 text-xs font-medium transition-colors",
+                    config.linkedinEnabled
+                      ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50"
+                      : "bg-slate-700 text-slate-400 hover:bg-slate-600",
+                  ].join(" ")}
+                >
+                  {config.linkedinEnabled ? "ON" : "OFF"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -698,30 +878,153 @@ export default function DigestSettings() {
             Test digests don't update this — only scheduled runs do.
           </p>
         </div>
-      </section>
+      </Collapsible>
 
-      {/* ── Actions ──────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          onClick={handleSave}
-          disabled={isSaving}
-          className="rounded-full bg-cyan-600 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-cyan-500 disabled:opacity-50"
-        >
-          {isSaving ? "Saving..." : "Save Settings"}
-        </button>
-        <button
-          onClick={handleTest}
-          disabled={isTesting}
-          className="rounded-full border border-slate-700 bg-slate-800 px-5 py-2.5 text-sm font-medium text-slate-300 transition-colors hover:border-slate-500 hover:text-slate-100 disabled:opacity-50"
-        >
-          {isTesting ? "Sending..." : "Send Test Digest"}
-        </button>
-        {!config.enabled && (
-          <span className="text-xs text-slate-500">
-            Test digest works even when disabled
-          </span>
+      {/* ── Digest History (collapsible) ─────────────────────────────── */}
+      <Collapsible
+        storeKey="history"
+        title="Digest History"
+        subtitle="Recent digest runs with delivery status and pipeline stats."
+        trailing={
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowClearConfirm(true);
+              }}
+              disabled={isClearing || history.length === 0}
+              className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs text-red-400 transition-colors hover:bg-red-500/20 hover:text-red-300 disabled:opacity-50"
+            >
+              {isClearing ? "Clearing..." : "Clear All"}
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                loadHistory();
+              }}
+              disabled={historyLoading}
+              className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-500 transition-colors hover:text-slate-300 disabled:opacity-50"
+            >
+              {historyLoading ? "Loading..." : "Refresh"}
+            </button>
+          </div>
+        }
+      >
+        {history.length === 0 ? (
+          <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-8 text-center">
+            <p className="text-sm text-slate-500">
+              {historyLoading ? "Loading..." : "No digest runs yet"}
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-slate-800">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-800/50">
+                <tr>
+                  <th className="px-3 py-2.5 text-left font-medium text-slate-300">Date & Time</th>
+                  <th className="px-3 py-2.5 text-left font-medium text-slate-300">Type</th>
+                  <th className="px-3 py-2.5 text-left font-medium text-slate-300">Lang</th>
+                  <th className="px-3 py-2.5 text-left font-medium text-slate-300">Channels</th>
+                  <th className="px-3 py-2.5 text-left font-medium text-slate-300">Articles</th>
+                  <th className="px-3 py-2.5 text-left font-medium text-slate-300">Model</th>
+                  <th className="px-3 py-2.5 text-left font-medium text-slate-300">Pipeline Stats</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800">
+                {history.map((run) => (
+                  <tr key={run.id} className="hover:bg-slate-800/30">
+                    <td className="whitespace-nowrap px-3 py-2.5 text-slate-300">
+                      {new Date(run.sentAt).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                      })}{" "}
+                      <span className="text-slate-500">
+                        {new Date(run.sentAt).toLocaleTimeString("en-US", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span
+                        className={[
+                          "inline-block rounded-full px-2 py-0.5 text-xs font-medium",
+                          run.isTest
+                            ? "bg-amber-500/20 text-amber-300"
+                            : "bg-emerald-500/20 text-emerald-300",
+                        ].join(" ")}
+                      >
+                        {run.isTest ? "Test" : "Scheduled"}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 text-xs font-medium uppercase text-slate-400">
+                      {run.language}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex flex-wrap gap-1">
+                        {run.channels.map((ch) => {
+                          const status = run.channelResults?.[ch] ?? "unknown";
+                          const ok = status === "sent";
+                          return (
+                            <span
+                              key={ch}
+                              className={[
+                                "inline-block rounded px-1.5 py-0.5 text-xs font-medium",
+                                ok
+                                  ? "bg-emerald-500/20 text-emerald-300"
+                                  : "bg-red-500/20 text-red-300",
+                              ].join(" ")}
+                              title={`${ch}: ${status}`}
+                            >
+                              {ch === "telegram" ? "TG" : ch === "facebook" ? "FB" : "LI"}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2.5 text-center text-slate-300">{run.articleCount}</td>
+                    <td className="px-3 py-2.5 text-xs text-slate-400">{run.model}</td>
+                    <td className="px-3 py-2.5 text-xs text-slate-500">
+                      Scanned: {run.statsScanned} | Scored: {run.statsScored} | {run.minScore}+: {run.statsAboveThreshold}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
-      </div>
+      </Collapsible>
+
+      {/* ── Clear History Confirmation Modal ──────────────────────────── */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-slate-100">Clear Digest History</h3>
+            <p className="mt-2 text-sm text-slate-400">
+              This will permanently delete all {history.length} digest history
+              record{history.length === 1 ? "" : "s"}. This cannot be undone.
+            </p>
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowClearConfirm(false)}
+                className="rounded-full border border-slate-700 bg-slate-800 px-5 py-2 text-sm font-medium text-slate-300 transition-colors hover:border-slate-500 hover:text-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleClearHistory}
+                className="rounded-full bg-red-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-red-500"
+              >
+                Clear All
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

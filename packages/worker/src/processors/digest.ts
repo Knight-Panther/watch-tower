@@ -5,8 +5,9 @@ import { eq, gte, and, desc, inArray, count, isNotNull } from "drizzle-orm";
 import { logger } from "@watch-tower/shared";
 import { DEFAULT_MODELS, DEFAULT_BASE_URLS, calculateLLMCost } from "@watch-tower/llm";
 import type { Database } from "@watch-tower/db";
-import { articles, appConfig, sectors, llmTelemetry } from "@watch-tower/db";
-import { sendTelegramAlert, cleanForTelegram } from "../utils/telegram-alert.js";
+import { articles, appConfig, sectors, llmTelemetry, digestRuns } from "@watch-tower/db";
+import { sendTelegramAlert, sendTelegramPhoto, cleanForTelegram } from "../utils/telegram-alert.js";
+import { generateDigestCover } from "../services/digest-cover.js";
 import {
   createFacebookProvider,
   createLinkedInProvider,
@@ -53,6 +54,9 @@ export type DigestConfig = {
   translationProvider: string; // "gemini" | "openai"
   translationModel: string;
   translationPrompt: string; // instructions for Georgian translation LLM
+  imageTelegram: boolean;
+  imageFacebook: boolean;
+  imageLinkedin: boolean;
 };
 
 type DigestArticle = {
@@ -125,6 +129,9 @@ export const readDigestConfig = async (db: Database): Promise<DigestConfig> => {
     "digest_translation_provider",
     "digest_translation_model",
     "digest_translation_prompt",
+    "digest_image_telegram",
+    "digest_image_facebook",
+    "digest_image_linkedin",
     // Fallbacks from global config
     "posting_language",
     "LLM_PROVIDER",
@@ -170,6 +177,9 @@ export const readDigestConfig = async (db: Database): Promise<DigestConfig> => {
     translationProvider: (m.get("digest_translation_provider") as string) ?? globalTransProvider,
     translationModel: (m.get("digest_translation_model") as string) ?? globalTransModel,
     translationPrompt: (m.get("digest_translation_prompt") as string) ?? DEFAULT_TRANSLATION_PROMPT,
+    imageTelegram: m.get("digest_image_telegram") === true || m.get("digest_image_telegram") === "true",
+    imageFacebook: m.get("digest_image_facebook") === true || m.get("digest_image_facebook") === "true",
+    imageLinkedin: m.get("digest_image_linkedin") === true || m.get("digest_image_linkedin") === "true",
   };
 };
 
@@ -320,18 +330,28 @@ export const compileAndSendDigest = async (
   const stats = await queryPipelineStats(db, lookback, config.minScore);
   const dateStr = formatDate(new Date(), config.timezone);
 
-  // 11. Build localized labels
+  // 11. Build localized header
   const isKa = config.language === "ka";
   const lblHeader = isKa ? "რა მოხდა დღეს" : "What Happened Today";
-  const lblPipeline = isKa ? "მილსადენი" : "Pipeline";
-  const lblScanned = isKa ? "სკანირებული" : "Scanned";
-  const lblScored = isKa ? "შეფასებული" : "Scored";
-  const lblScore = isKa ? "ქულა" : "Score";
-  const lblInDigest = isKa ? "დაიჯესტში" : "In digest";
 
-  // 12. Deliver to each enabled platform
+  // 12. Generate cover image (if any platform has image enabled)
+  const wantImage = config.imageTelegram || config.imageFacebook || config.imageLinkedin;
+  let coverBuffer: Buffer | null = null;
+
+  if (wantImage) {
+    try {
+      coverBuffer = await generateDigestCover(config.language, dateStr);
+      logger.info({ size: coverBuffer.length, language: config.language }, "[digest] cover image generated");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn({ error: msg }, "[digest] cover image generation failed, continuing without image");
+    }
+  }
+
+  // 13. Deliver to each enabled platform
   let anySent = false;
   let totalMessages = 0;
+  const channelResults: Record<string, string> = {};
 
   // ── Telegram (HTML formatting) ──
   if (hasTelegram) {
@@ -346,11 +366,13 @@ export const compileAndSendDigest = async (
         /\[#(\d+(?:,\s*#\d+)*)\]/g,
         (match, inner: string) => {
           const ids = inner.split(/,\s*#/).map((s) => parseInt(s.replace("#", ""), 10));
+          let linkNum = 0;
           const links = ids
             .map((id) => {
               const article = articleMap.get(id);
               if (!article) return null;
-              return `<a href="${escapeUrl(article.url)}">src</a>`;
+              linkNum++;
+              return `<a href="${escapeUrl(article.url)}">${linkNum}</a>`;
             })
             .filter(Boolean);
           if (links.length === 0) return match;
@@ -378,48 +400,77 @@ export const compileAndSendDigest = async (
       "[digest] telegram body assembled",
     );
 
+    // Split body into individual lines so the splitter can paginate without
+    // cutting HTML tags in half (each bullet is its own section).
+    const bodyLines = bodyHtml
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
     const sections: string[] = [
       `<b>\u{1F4CA} ${cleanForTelegram(lblHeader)} \u2014 ${cleanForTelegram(dateStr)}</b>`,
-      bodyHtml,
-      `<b>\u{1F4C8} ${cleanForTelegram(lblPipeline)}</b>\n` +
-        `${lblScanned}: ${stats.totalIngested} | ${lblScored}: ${stats.passedFilters} | ` +
-        `${lblScore} ${stats.minScore}+: ${stats.aboveThreshold} | ${lblInDigest}: ${allArticles.length}`,
+      ...bodyLines,
     ];
 
     const messages = splitTelegramMessages(sections);
+    let tgOk = false;
+
+    // Send cover image first (if enabled)
+    if (config.imageTelegram && coverBuffer) {
+      const photoSent = await sendTelegramPhoto(telegramConfig!.botToken, config.telegramChatId, coverBuffer);
+      if (photoSent) { tgOk = true; totalMessages++; }
+      else logger.warn("[digest] telegram cover photo failed to send");
+      await new Promise((r) => setTimeout(r, 500));
+    }
+
     for (let i = 0; i < messages.length; i++) {
       logger.debug(
         { msgIndex: i, msgLen: messages[i].length, preview: messages[i].slice(0, 300) },
         "[digest] telegram message chunk",
       );
       const sent = await sendTelegramAlert(telegramConfig!.botToken, config.telegramChatId, messages[i]);
-      if (sent) anySent = true;
+      if (sent) { anySent = true; tgOk = true; }
       else logger.warn({ msgIndex: i }, "[digest] telegram message failed to send");
       if (messages.length > 1) await new Promise((r) => setTimeout(r, 500));
     }
     totalMessages += messages.length;
+    channelResults.telegram = tgOk ? "sent" : "failed";
     logger.info({ messages: messages.length }, "[digest] telegram sent");
   }
 
-  // ── Facebook (plain text) ──
+  // ── Facebook ──
   if (hasFacebook) {
     try {
       const plainBody = formatPlainDigest(rawBullets, allArticles as DigestArticle[], !!llmBullets);
-      const fbText = `\u{1F4CA} ${lblHeader} \u2014 ${dateStr}\n\n${plainBody}\n\n` +
-        `\u{1F4C8} ${lblScanned}: ${stats.totalIngested} | ${lblScored}: ${stats.passedFilters} | ` +
-        `${lblScore} ${stats.minScore}+: ${stats.aboveThreshold} | ${lblInDigest}: ${allArticles.length}`;
+      const fbText = `\u{1F4CA} ${lblHeader} \u2014 ${dateStr}\n\n${plainBody}`;
 
-      const fb = createFacebookProvider(facebookConfig!);
-      const result = await fb.post({ text: fbText });
-      if (result.success) {
-        anySent = true;
-        totalMessages++;
-        logger.info({ postId: result.postId }, "[digest] facebook sent");
+      if (config.imageFacebook && coverBuffer) {
+        // Photo post via multipart (direct buffer upload, no R2 needed)
+        const result = await postFacebookPhoto(facebookConfig!, fbText, coverBuffer);
+        if (result.success) {
+          anySent = true;
+          totalMessages++;
+          channelResults.facebook = "sent";
+          logger.info({ postId: result.postId }, "[digest] facebook photo sent");
+        } else {
+          channelResults.facebook = "failed";
+          logger.warn({ error: result.error }, "[digest] facebook photo post failed");
+        }
       } else {
-        logger.warn({ error: result.error }, "[digest] facebook post failed");
+        const fb = createFacebookProvider(facebookConfig!);
+        const result = await fb.post({ text: fbText });
+        if (result.success) {
+          anySent = true;
+          totalMessages++;
+          channelResults.facebook = "sent";
+          logger.info({ postId: result.postId }, "[digest] facebook sent");
+        } else {
+          channelResults.facebook = "failed";
+          logger.warn({ error: result.error }, "[digest] facebook post failed");
+        }
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      channelResults.facebook = "failed";
       logger.warn({ error: msg }, "[digest] facebook delivery failed");
     }
   }
@@ -428,28 +479,33 @@ export const compileAndSendDigest = async (
   if (hasLinkedin) {
     try {
       const plainBody = formatPlainDigest(rawBullets, allArticles as DigestArticle[], !!llmBullets);
-      const footer =
-        `\u{1F4C8} ${lblScanned}: ${stats.totalIngested} | ${lblScored}: ${stats.passedFilters} | ` +
-        `${lblScore} ${stats.minScore}+: ${stats.aboveThreshold} | ${lblInDigest}: ${allArticles.length}`;
       const header = `\u{1F4CA} ${lblHeader} \u2014 ${dateStr}`;
       // LinkedIn allows 3000 chars (personal) — truncate body to fit
-      const maxBody = 3000 - header.length - footer.length - 8; // 8 for \n\n separators
+      const maxBody = 3000 - header.length - 4; // 4 for \n\n separator
       const truncBody = plainBody.length > maxBody
         ? plainBody.slice(0, plainBody.lastIndexOf("\n", maxBody)) || plainBody.slice(0, maxBody)
         : plainBody;
-      const liText = `${header}\n\n${truncBody}\n\n${footer}`;
+      const liText = `${header}\n\n${truncBody}`;
 
-      const li = createLinkedInProvider(linkedinConfig!);
-      const result = await li.post({ text: liText });
+      let result;
+      if (config.imageLinkedin && coverBuffer) {
+        result = await postLinkedInPhoto(linkedinConfig!, liText, coverBuffer);
+      } else {
+        const li = createLinkedInProvider(linkedinConfig!);
+        result = await li.post({ text: liText });
+      }
       if (result.success) {
         anySent = true;
         totalMessages++;
+        channelResults.linkedin = "sent";
         logger.info({ postId: result.postId }, "[digest] linkedin sent");
       } else {
+        channelResults.linkedin = "failed";
         logger.warn({ error: result.error }, "[digest] linkedin post failed");
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      channelResults.linkedin = "failed";
       logger.warn({ error: msg }, "[digest] linkedin delivery failed");
     }
   }
@@ -501,6 +557,25 @@ export const compileAndSendDigest = async (
       costMicrodollars: cost,
       latencyMs: translationResult.latencyMs,
       status: "success",
+    });
+  }
+
+  // 14. Record digest run in history
+  const sentChannels = Object.keys(channelResults);
+  if (sentChannels.length > 0) {
+    await db.insert(digestRuns).values({
+      sentAt: new Date(),
+      isTest,
+      language: config.language,
+      articleCount: allArticles.length,
+      channels: sentChannels,
+      channelResults,
+      provider: config.provider,
+      model: config.model,
+      minScore: config.minScore,
+      statsScanned: stats.totalIngested,
+      statsScored: stats.passedFilters,
+      statsAboveThreshold: stats.aboveThreshold,
     });
   }
 
@@ -647,6 +722,10 @@ const buildUserPrompt = (allArticles: DigestArticle[], config: DigestConfig): st
     lines.push(`[#${i + 1}] Score ${a.importanceScore}${sector} | ${summary}`);
   }
 
+  lines.push(
+    `\n---\nSelect ONLY the top 7-12 most significant developments from the ${allArticles.length} articles above. Merge related stories. Do NOT exceed 12 bullets.`,
+  );
+
   return lines.join("\n");
 };
 
@@ -791,19 +870,21 @@ const escapeUrl = (url: string): string =>
 
 const formatDate = (date: Date, timezone: string): string => {
   try {
-    return new Intl.DateTimeFormat("en-US", {
+    const parts = new Intl.DateTimeFormat("en-US", {
       timeZone: timezone,
-      weekday: "long",
+      day: "2-digit",
+      month: "2-digit",
       year: "numeric",
-      month: "long",
-      day: "numeric",
-    }).format(date);
+    }).formatToParts(date);
+    const d = parts.find((p) => p.type === "day")!.value;
+    const m = parts.find((p) => p.type === "month")!.value;
+    const y = parts.find((p) => p.type === "year")!.value;
+    return `${d}.${m}.${y}`;
   } catch {
     return date.toLocaleDateString("en-US", {
-      weekday: "long",
+      day: "2-digit",
+      month: "2-digit",
       year: "numeric",
-      month: "long",
-      day: "numeric",
     });
   }
 };
@@ -817,17 +898,158 @@ const splitTelegramMessages = (sections: string[]): string[] => {
   let current = "";
 
   for (const section of sections) {
-    const withSeparator = current ? `\n\n${section}` : section;
+    // Join with single newline between bullet lines (double after header)
+    const sep = current ? (current.endsWith("</b>") ? "\n\n" : "\n") : "";
+    const candidate = current + sep + section;
 
-    if (current.length + withSeparator.length <= MAX_MESSAGE_LENGTH) {
-      current += withSeparator;
+    if (candidate.length <= MAX_MESSAGE_LENGTH) {
+      current = candidate;
     } else {
+      // Current chunk is full — push it and start new message with this section
       if (current) messages.push(current);
-      current =
-        section.length > MAX_MESSAGE_LENGTH ? section.slice(0, MAX_MESSAGE_LENGTH - 3) + "..." : section;
+      // If single section still exceeds limit, truncate at last newline boundary
+      if (section.length > MAX_MESSAGE_LENGTH) {
+        const truncated = section.slice(0, MAX_MESSAGE_LENGTH - 4);
+        const lastNl = truncated.lastIndexOf("\n");
+        current = lastNl > 0 ? truncated.slice(0, lastNl) + "\n..." : truncated + "...";
+      } else {
+        current = section;
+      }
     }
   }
 
   if (current) messages.push(current);
   return messages.length > 0 ? messages : [""];
 };
+
+// ─── Direct photo uploads (no R2 needed) ──────────────────────────────────────
+
+const UPLOAD_TIMEOUT_MS = 30_000;
+
+type SimplePostResult = { success: boolean; postId: string; error?: string };
+
+/** Facebook: multipart photo upload via Graph API /photos endpoint */
+async function postFacebookPhoto(
+  config: FacebookConfig,
+  caption: string,
+  imageBuffer: Buffer,
+): Promise<SimplePostResult> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+
+  try {
+    const form = new FormData();
+    form.append("source", new Blob([new Uint8Array(imageBuffer)], { type: "image/webp" }), "digest-cover.webp");
+    form.append("caption", caption);
+    form.append("access_token", config.accessToken);
+
+    const resp = await fetch(
+      `https://graph.facebook.com/v18.0/${config.pageId}/photos`,
+      { method: "POST", body: form, signal: controller.signal },
+    );
+
+    const data = (await resp.json()) as { id?: string; post_id?: string; error?: { message: string } };
+    if (!resp.ok || data.error) {
+      return { success: false, postId: "", error: data.error?.message || `HTTP ${resp.status}` };
+    }
+    return { success: true, postId: data.post_id || data.id || "" };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, postId: "", error: msg };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/** LinkedIn: 3-step image upload (register → upload binary → create post) */
+async function postLinkedInPhoto(
+  config: LinkedInConfig,
+  text: string,
+  imageBuffer: Buffer,
+): Promise<SimplePostResult> {
+  const authorUrn = `urn:li:${config.authorType}:${config.authorId}`;
+  const headers = { Authorization: `Bearer ${config.accessToken}` };
+
+  try {
+    // Step 1: Register upload
+    const registerResp = await fetch(
+      "https://api.linkedin.com/v2/assets?action=registerUpload",
+      {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          registerUploadRequest: {
+            recipes: ["urn:li:digitalmediaRecipe:feedshare-image"],
+            owner: authorUrn,
+            serviceRelationships: [
+              { relationshipType: "OWNER", identifier: "urn:li:userGeneratedContent" },
+            ],
+          },
+        }),
+      },
+    );
+
+    if (!registerResp.ok) {
+      const err = (await registerResp.json().catch(() => ({}))) as { message?: string };
+      return { success: false, postId: "", error: err.message || `Register failed: HTTP ${registerResp.status}` };
+    }
+
+    const registerData = (await registerResp.json()) as {
+      value: {
+        uploadMechanism: {
+          "com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest": { uploadUrl: string };
+        };
+        asset: string;
+      };
+    };
+
+    const uploadUrl =
+      registerData.value.uploadMechanism[
+        "com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest"
+      ].uploadUrl;
+    const assetUrn = registerData.value.asset;
+
+    // Step 2: Upload binary directly (no R2 fetch needed)
+    const uploadResp = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: { ...headers, "Content-Type": "image/webp" },
+      body: new Uint8Array(imageBuffer),
+    });
+
+    if (!uploadResp.ok && uploadResp.status !== 201) {
+      return { success: false, postId: "", error: `Upload failed: HTTP ${uploadResp.status}` };
+    }
+
+    // Step 3: Create post with image
+    const postResp = await fetch("https://api.linkedin.com/v2/ugcPosts", {
+      method: "POST",
+      headers: {
+        ...headers,
+        "Content-Type": "application/json",
+        "X-Restli-Protocol-Version": "2.0.0",
+      },
+      body: JSON.stringify({
+        author: authorUrn,
+        lifecycleState: "PUBLISHED",
+        specificContent: {
+          "com.linkedin.ugc.ShareContent": {
+            shareCommentary: { text },
+            shareMediaCategory: "IMAGE",
+            media: [{ status: "READY", media: assetUrn }],
+          },
+        },
+        visibility: { "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC" },
+      }),
+    });
+
+    if (!postResp.ok) {
+      const err = (await postResp.json().catch(() => ({}))) as { message?: string };
+      return { success: false, postId: "", error: err.message || `Post failed: HTTP ${postResp.status}` };
+    }
+
+    return { success: true, postId: postResp.headers.get("x-restli-id") || "" };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, postId: "", error: msg };
+  }
+}

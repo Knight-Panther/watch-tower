@@ -316,6 +316,31 @@ export const allowedDomains = pgTable("allowed_domains", {
 
 // ─── Alert Rules (P3: Keyword Alerts → Telegram) ────────────────────────────
 
+// ─── Digest Runs (history of sent digests) ──────────────────────────────────
+
+export const digestRuns = pgTable(
+  "digest_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+    isTest: boolean("is_test").notNull().default(false),
+    language: text("language").notNull().default("en"), // "en" | "ka"
+    articleCount: smallint("article_count").notNull().default(0),
+    channels: text("channels").array().notNull(), // ["telegram", "facebook", "linkedin"]
+    channelResults: jsonb("channel_results").notNull().default({}), // { telegram: "sent", facebook: "failed" }
+    provider: text("provider").notNull(), // "claude" | "openai" | "deepseek" | "gemini"
+    model: text("model").notNull(),
+    minScore: smallint("min_score").notNull().default(3),
+    statsScanned: integer("stats_scanned").notNull().default(0),
+    statsScored: integer("stats_scored").notNull().default(0),
+    statsAboveThreshold: integer("stats_above_threshold").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("idx_digest_runs_sent_at").on(table.sentAt)],
+);
+
+// ─── Alert Rules (P3: Keyword Alerts → Telegram) ────────────────────────────
+
 export const alertRules = pgTable(
   "alert_rules",
   {

@@ -477,7 +477,15 @@ export default function Home(props: HomeProps) {
                           </div>
                         </div>
                         <span className="w-6 text-right text-[10px] tabular-nums text-slate-500" title="Total number of articles scored from this source in the last 30 days.">{quality.total}</span>
-                        {quality.signal_ratio < 10 && quality.total >= 30 && (
+                        {quality.total >= 30 && quality.signal_ratio >= 40 && (
+                          <span
+                            className="rounded bg-emerald-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-400"
+                            title="This source produces 40%+ high-value articles (score 4+) over 30+ scored articles. Great signal source."
+                          >
+                            High signal
+                          </span>
+                        )}
+                        {quality.total >= 30 && quality.signal_ratio < 10 && (
                           <span
                             className="rounded bg-red-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-red-400"
                             title="This source produces less than 10% high-value articles (score 4+) over 30+ scored articles. Consider disabling it or adjusting its sector."

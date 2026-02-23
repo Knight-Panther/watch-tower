@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { ReactNode } from "react";
+import { ReactNode, useEffect, useRef } from "react";
 import type { ConnectionStatus } from "../hooks/useServerEvents";
 
 const navItems = [
@@ -37,9 +37,23 @@ const statusLabels: Record<ConnectionStatus, string> = {
 };
 
 export default function Layout({ children, connectionStatus }: LayoutProps) {
+  const headerRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const update = () => {
+      document.documentElement.style.setProperty("--nav-h", `${el.offsetHeight}px`);
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
-      <header className="sticky top-0 z-40 border-b border-slate-900/70 bg-slate-950/80 backdrop-blur">
+      <header ref={headerRef} className="sticky top-0 z-40 border-b border-slate-900/70 bg-slate-950/80 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-4">
           <div className="flex items-center gap-3">
             <div>
