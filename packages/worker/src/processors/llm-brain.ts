@@ -13,7 +13,7 @@ import {
   type ScoringConfig,
 } from "@watch-tower/shared";
 import type { Database } from "@watch-tower/db";
-import { llmTelemetry, appConfig } from "@watch-tower/db";
+import { llmTelemetry, appConfig, alertRules } from "@watch-tower/db";
 import type { LLMProvider, ScoringRequest, ScoringResult } from "@watch-tower/llm";
 import { calculateLLMCost } from "@watch-tower/llm";
 import type { EventPublisher } from "../events.js";
@@ -242,6 +242,43 @@ export const createLLMBrainWorker = ({
 
       logger.info(`[llm-brain] claimed ${articles.length} articles for scoring`);
 
+      // 2. FETCH ALERT KEYWORDS per sector (for LLM-based semantic matching)
+      // Only inject keywords for sectors that have active alert rules
+      const alertKeywordsBySector = new Map<string, string[]>();
+      const globalAlertKeywords: string[] = [];
+      try {
+        const activeAlertRules = await db
+          .select({
+            sectorId: alertRules.sectorId,
+            keywords: alertRules.keywords,
+          })
+          .from(alertRules)
+          .where(eq(alertRules.active, true));
+
+        for (const rule of activeAlertRules) {
+          if (rule.sectorId) {
+            const existing = alertKeywordsBySector.get(rule.sectorId) ?? [];
+            existing.push(...rule.keywords);
+            alertKeywordsBySector.set(rule.sectorId, existing);
+          } else {
+            globalAlertKeywords.push(...rule.keywords);
+          }
+        }
+        // Deduplicate per-sector keywords
+        for (const [sid, kws] of alertKeywordsBySector) {
+          alertKeywordsBySector.set(sid, [...new Set(kws)]);
+        }
+      } catch (err) {
+        logger.error("[llm-brain] failed to fetch alert keywords, continuing without", err);
+      }
+
+      /** Get deduplicated alert keywords for a given sector (sector-specific + global) */
+      const getAlertKeywordsForSector = (sectorId: string | null): string[] => {
+        const sectorKws = sectorId ? (alertKeywordsBySector.get(sectorId) ?? []) : [];
+        const combined = [...sectorKws, ...globalAlertKeywords];
+        return [...new Set(combined)];
+      };
+
       // 2a. PRE-FILTER: Hard reject articles matching reject_keywords before LLM (cost gate)
       const preFilterRejects: { id: string; reason: string }[] = [];
       const passedArticles: ClaimedArticle[] = [];
@@ -354,8 +391,21 @@ export const createLLMBrainWorker = ({
 
       // 2b. Build scoring requests with sector-specific prompts
       // Uses compile-on-read: structured config (system/user) > legacy prompt > default
+      // Alert keywords are appended to the prompt for LLM-based semantic matching
+      const alertKeywordInstruction = (keywords: string[]) =>
+        keywords.length === 0
+          ? ""
+          : `\n\nALERT KEYWORD MATCHING:
+Check if any of these alert keywords are semantically relevant to this article: [${keywords.join(", ")}]
+Include a "matched_alert_keywords" field in your JSON response — an array of matched keyword strings.
+Only include keywords that are clearly relevant to the article's core topic, not just mentioned in passing.
+If no keywords match, return an empty array.
+Example: {"reasoning": "...", "score": 3, "summary": "...", "matched_alert_keywords": ["keyword1"]}`;
+
       const requests: ScoringRequest[] = passedArticles.map((a) => {
         const resolved = resolvePrompt(a.sectorId, a.sectorName);
+        const keywords = getAlertKeywordsForSector(a.sectorId);
+        const alertSuffix = alertKeywordInstruction(keywords);
         return {
           articleId: a.id,
           title: a.title,
@@ -363,8 +413,8 @@ export const createLLMBrainWorker = ({
           categories: a.articleCategories ?? undefined,
           sectorName: a.sectorName ?? undefined,
           ...(resolved.systemPrompt
-            ? { systemPrompt: resolved.systemPrompt }
-            : { promptTemplate: resolved.promptTemplate }),
+            ? { systemPrompt: resolved.systemPrompt + alertSuffix }
+            : { promptTemplate: resolved.promptTemplate + alertSuffix }),
         };
       });
 
@@ -633,8 +683,10 @@ export const createLLMBrainWorker = ({
                 articleId: r.articleId,
                 title: claimed.title,
                 llmSummary: r.summary ?? null,
-                articleCategories: claimed.articleCategories,
+                url: claimed.url,
+                sectorName: claimed.sectorName,
                 score: r.score,
+                matchedAlertKeywords: r.matchedAlertKeywords ?? [],
               };
             });
             await checkAndFireAlerts({ db, redis, telegramConfig, articles: alertArticles });

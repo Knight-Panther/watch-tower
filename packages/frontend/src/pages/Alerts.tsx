@@ -10,9 +10,39 @@ import {
   updateAlertRule,
   deleteAlertRule,
   getAlertRule,
+  testAlertRule,
+  muteAlertRule,
+  unmuteAlertRule,
+  getAlertWeeklyStats,
+  listSectors,
+  getAlertWarningThreshold,
+  setAlertWarningThreshold as saveWarningThreshold,
+  getAlertQuietHours,
+  setAlertQuietHours as saveQuietHours,
   type AlertRule,
   type AlertDelivery,
+  type AlertTemplateConfig,
+  type AlertWeeklyStats,
+  type Sector,
 } from "../api";
+
+// ─── Constants ──────────────────────────────────────────────────────────────
+
+const DEFAULT_TEMPLATE: AlertTemplateConfig = {
+  showUrl: true,
+  showSummary: true,
+  showScore: true,
+  showSector: true,
+  alertEmoji: "🔔",
+};
+
+const MUTE_OPTIONS = [
+  { label: "1 hour", hours: 1 },
+  { label: "4 hours", hours: 4 },
+  { label: "12 hours", hours: 12 },
+  { label: "24 hours", hours: 24 },
+  { label: "48 hours", hours: 48 },
+];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -30,10 +60,22 @@ function formatRelativeTime(isoString: string | null): string {
   return `${days} day${days === 1 ? "" : "s"} ago`;
 }
 
+function formatMuteRemaining(muteUntil: string | null): string | null {
+  if (!muteUntil) return null;
+  const remaining = Date.parse(muteUntil) - Date.now();
+  if (remaining <= 0) return null;
+  const hours = Math.ceil(remaining / (60 * 60 * 1000));
+  if (hours < 1) return "< 1h remaining";
+  return `${hours}h remaining`;
+}
+
 function scoreBadgeClass(score: number): string {
-  if (score <= 2) return "rounded-full bg-slate-700 px-2.5 py-0.5 text-xs font-medium text-slate-300";
-  if (score === 3) return "rounded-full bg-amber-500/20 px-2.5 py-0.5 text-xs font-medium text-amber-300";
-  if (score === 4) return "rounded-full bg-orange-500/20 px-2.5 py-0.5 text-xs font-medium text-orange-300";
+  if (score <= 2)
+    return "rounded-full bg-slate-700 px-2.5 py-0.5 text-xs font-medium text-slate-300";
+  if (score === 3)
+    return "rounded-full bg-amber-500/20 px-2.5 py-0.5 text-xs font-medium text-amber-300";
+  if (score === 4)
+    return "rounded-full bg-orange-500/20 px-2.5 py-0.5 text-xs font-medium text-orange-300";
   return "rounded-full bg-red-500/20 px-2.5 py-0.5 text-xs font-medium text-red-300";
 }
 
@@ -49,12 +91,122 @@ function scoreLabel(score: number): string {
 }
 
 function deliveryStatusClass(status: AlertDelivery["status"]): string {
-  if (status === "sent") return "rounded-full bg-emerald-500/20 px-2 py-0.5 text-xs text-emerald-300";
-  if (status === "failed") return "rounded-full bg-red-500/20 px-2 py-0.5 text-xs text-red-300";
+  if (status === "sent")
+    return "rounded-full bg-emerald-500/20 px-2 py-0.5 text-xs text-emerald-300";
+  if (status === "failed")
+    return "rounded-full bg-red-500/20 px-2 py-0.5 text-xs text-red-300";
   return "rounded-full bg-slate-700 px-2 py-0.5 text-xs text-slate-500";
 }
 
-// ─── Create Form ──────────────────────────────────────────────────────────────
+// ─── Sector Selector (shared) ───────────────────────────────────────────────
+
+function SectorSelect({
+  value,
+  onChange,
+  sectors,
+}: {
+  value: string | null;
+  onChange: (v: string | null) => void;
+  sectors: Sector[];
+}) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs font-medium text-slate-400">
+        Sector <span className="text-slate-500">(optional)</span>
+      </label>
+      <select
+        value={value ?? ""}
+        onChange={(e) => onChange(e.target.value || null)}
+        className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
+      >
+        <option value="">All sectors (global)</option>
+        {sectors.map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.name}
+          </option>
+        ))}
+      </select>
+      <p className="mt-1 text-xs text-slate-600">
+        Scoped rules only inject keywords when scoring articles from that sector.
+      </p>
+    </div>
+  );
+}
+
+// ─── Template Toggles (shared) ──────────────────────────────────────────────
+
+function TemplateToggles({
+  template,
+  onChange,
+  ruleName,
+  keywords,
+}: {
+  template: AlertTemplateConfig;
+  onChange: (t: AlertTemplateConfig) => void;
+  ruleName?: string;
+  keywords?: string[];
+}) {
+  const toggle = (key: keyof AlertTemplateConfig) => {
+    onChange({ ...template, [key]: !template[key] });
+  };
+
+  // Build preview mirroring worker's formatAlertMessage
+  const emoji = template.alertEmoji || "\u{1F514}";
+  const name = ruleName || "My Alert Rule";
+  const kw = keywords?.[0] || "keyword";
+  const previewLines: string[] = [`<b>${emoji} Alert: ${name}</b>`];
+  const meta = [`Keyword: ${kw}`];
+  if (template.showScore !== false) meta.push("Score: 4/5 (High)");
+  if (template.showSector !== false) meta.push("Sector: Technology");
+  previewLines.push(meta.join(" | "));
+  previewLines.push("");
+  if (template.showTitle !== false) {
+    previewLines.push("<b>OpenAI announces GPT-5 with real-time reasoning</b>");
+  }
+  if (template.showSummary !== false) {
+    previewLines.push("OpenAI unveiled GPT-5 featuring real-time chain-of-thought reasoning...");
+  }
+  if (template.showUrl !== false) {
+    previewLines.push('\n<a href="#">Read more \u2192</a>');
+  }
+
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs font-medium text-slate-400">Message Template</label>
+      <div className="flex flex-wrap gap-3">
+        {([
+          { key: "showTitle" as const, label: "Show Title" },
+          { key: "showUrl" as const, label: "Show URL" },
+          { key: "showSummary" as const, label: "Show Summary" },
+          { key: "showScore" as const, label: "Show Score" },
+          { key: "showSector" as const, label: "Show Sector" },
+        ] as const).map(({ key, label }) => (
+          <label key={key} className="flex items-center gap-1.5 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              checked={template[key] !== false}
+              onChange={() => toggle(key)}
+              className="rounded border-slate-600 bg-slate-950 text-cyan-500 focus:ring-0 focus:ring-offset-0"
+            />
+            {label}
+          </label>
+        ))}
+      </div>
+      {/* Live preview */}
+      <div className="mt-2 rounded-lg border border-slate-700/50 bg-slate-950/60 px-3 py-2 font-mono text-[10px] leading-relaxed text-slate-400">
+        {previewLines.map((line, i) => {
+          if (line === "") return <br key={i} />;
+          const html = line
+            .replace(/<b>(.*?)<\/b>/g, '<span class="font-bold text-slate-200">$1</span>')
+            .replace(/<a [^>]*>(.*?)<\/a>/g, '<span class="text-cyan-400 underline">$1</span>');
+          return <div key={i} dangerouslySetInnerHTML={{ __html: html }} />;
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Create Form ─────────────────────────────────────────────────────────────
 
 type CreateFormState = {
   name: string;
@@ -62,6 +214,8 @@ type CreateFormState = {
   keywords: string[];
   minScore: number;
   telegramChatId: string;
+  sectorId: string | null;
+  template: AlertTemplateConfig;
 };
 
 const INITIAL_FORM: CreateFormState = {
@@ -70,13 +224,16 @@ const INITIAL_FORM: CreateFormState = {
   keywords: [],
   minScore: 4,
   telegramChatId: "",
+  sectorId: null,
+  template: { ...DEFAULT_TEMPLATE },
 };
 
 type CreateFormProps = {
   onCreated: (rule: AlertRule) => void;
+  sectors: Sector[];
 };
 
-function CreateForm({ onCreated }: CreateFormProps) {
+function CreateForm({ onCreated, sectors }: CreateFormProps) {
   const [form, setForm] = useState<CreateFormState>(INITIAL_FORM);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const keywordInputRef = useRef<HTMLInputElement>(null);
@@ -142,6 +299,8 @@ function CreateForm({ onCreated }: CreateFormProps) {
         min_score: form.minScore,
         telegram_chat_id: chatId,
         active: true,
+        sector_id: form.sectorId,
+        template: form.template,
       });
       onCreated(rule);
       setForm(INITIAL_FORM);
@@ -173,8 +332,7 @@ function CreateForm({ onCreated }: CreateFormProps) {
         {/* Keywords */}
         <div>
           <label className="mb-1.5 block text-xs font-medium text-slate-400">
-            Keywords{" "}
-            <span className="text-slate-500">(press Enter to add)</span>
+            Keywords <span className="text-slate-500">(press Enter to add)</span>
           </label>
           <div className="min-h-10 flex flex-wrap gap-2 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 focus-within:border-slate-500">
             {form.keywords.map((kw, i) => (
@@ -186,7 +344,7 @@ function CreateForm({ onCreated }: CreateFormProps) {
                 <button
                   type="button"
                   onClick={() => removeKeyword(i)}
-                  className="ml-0.5 text-cyan-400 hover:text-cyan-200 leading-none"
+                  className="ml-0.5 leading-none text-cyan-400 hover:text-cyan-200"
                   aria-label={`Remove keyword ${kw}`}
                 >
                   x
@@ -208,22 +366,22 @@ function CreateForm({ onCreated }: CreateFormProps) {
             <span className="text-xs text-slate-500">{form.keywords.length}/50</span>
             {hasShortKeyword && (
               <span className="text-xs text-amber-400">
-                Warning: some keywords are shorter than 3 characters and may produce excessive matches.
+                Warning: some keywords are shorter than 3 characters and may produce excessive
+                matches.
               </span>
             )}
             {form.keywordInput.trim().length > 0 && form.keywordInput.trim().length < 3 && (
-              <span className="text-xs text-amber-400">
-                Tag should be at least 3 characters
-              </span>
+              <span className="text-xs text-amber-400">Tag should be at least 3 characters</span>
             )}
           </div>
-          <p className="text-xs text-slate-600">Matches are case-insensitive</p>
         </div>
 
-        {/* Min Score + Chat ID row */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {/* Min Score + Chat ID + Sector row */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div>
-            <label className="mb-1.5 block text-xs font-medium text-slate-400">Minimum Score</label>
+            <label className="mb-1.5 block text-xs font-medium text-slate-400">
+              Minimum Score
+            </label>
             <select
               value={form.minScore}
               onChange={(e) =>
@@ -253,7 +411,21 @@ function CreateForm({ onCreated }: CreateFormProps) {
               className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
             />
           </div>
+
+          <SectorSelect
+            value={form.sectorId}
+            onChange={(v) => setForm((prev) => ({ ...prev, sectorId: v }))}
+            sectors={sectors}
+          />
         </div>
+
+        {/* Template */}
+        <TemplateToggles
+          template={form.template}
+          onChange={(t) => setForm((prev) => ({ ...prev, template: t }))}
+          ruleName={form.name}
+          keywords={form.keywords}
+        />
 
         <div className="flex justify-end">
           <Button
@@ -272,13 +444,9 @@ function CreateForm({ onCreated }: CreateFormProps) {
   );
 }
 
-// ─── Recent Deliveries Table ──────────────────────────────────────────────────
+// ─── Recent Deliveries Table ─────────────────────────────────────────────────
 
-type DeliveriesTableProps = {
-  ruleId: string;
-};
-
-function DeliveriesTable({ ruleId }: DeliveriesTableProps) {
+function DeliveriesTable({ ruleId }: { ruleId: string }) {
   const [deliveries, setDeliveries] = useState<AlertDelivery[] | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -290,18 +458,13 @@ function DeliveriesTable({ ruleId }: DeliveriesTableProps) {
       setError(null);
       try {
         const detail = await getAlertRule(ruleId);
-        if (!cancelled) {
-          setDeliveries(detail.recent_deliveries);
-        }
+        if (!cancelled) setDeliveries(detail.recent_deliveries);
       } catch (err) {
         if (!cancelled) {
-          const message = err instanceof Error ? err.message : "Failed to load deliveries";
-          setError(message);
+          setError(err instanceof Error ? err.message : "Failed to load deliveries");
         }
       } finally {
-        if (!cancelled) {
-          setIsLoading(false);
-        }
+        if (!cancelled) setIsLoading(false);
       }
     };
     load();
@@ -317,17 +480,9 @@ function DeliveriesTable({ ruleId }: DeliveriesTableProps) {
       </div>
     );
   }
-
-  if (error) {
-    return (
-      <p className="py-3 text-center text-xs text-red-400">{error}</p>
-    );
-  }
-
+  if (error) return <p className="py-3 text-center text-xs text-red-400">{error}</p>;
   if (!deliveries || deliveries.length === 0) {
-    return (
-      <p className="py-3 text-center text-xs text-slate-500">No deliveries yet for this rule.</p>
-    );
+    return <p className="py-3 text-center text-xs text-slate-500">No deliveries yet.</p>;
   }
 
   return (
@@ -344,7 +499,10 @@ function DeliveriesTable({ ruleId }: DeliveriesTableProps) {
         <tbody>
           {deliveries.map((d) => (
             <tr key={d.id} className="border-b border-slate-800/50 last:border-0">
-              <td className="max-w-xs truncate px-3 py-2 text-slate-300" title={d.article_title ?? ""}>
+              <td
+                className="max-w-xs truncate px-3 py-2 text-slate-300"
+                title={d.article_title ?? ""}
+              >
                 {d.article_title ?? <span className="text-slate-500">Unknown</span>}
               </td>
               <td className="px-3 py-2">
@@ -366,7 +524,7 @@ function DeliveriesTable({ ruleId }: DeliveriesTableProps) {
   );
 }
 
-// ─── Rule Card ────────────────────────────────────────────────────────────────
+// ─── Rule Card ───────────────────────────────────────────────────────────────
 
 type EditFormState = {
   name: string;
@@ -374,30 +532,55 @@ type EditFormState = {
   keywords: string[];
   minScore: number;
   telegramChatId: string;
+  sectorId: string | null;
+  template: AlertTemplateConfig;
 };
 
 type RuleCardProps = {
   rule: AlertRule;
+  sectors: Sector[];
   onToggle: (rule: AlertRule) => void;
   onDelete: (rule: AlertRule) => void;
   onUpdated: (rule: AlertRule) => void;
   isToggling: boolean;
 };
 
-function RuleCard({ rule, onToggle, onDelete, onUpdated, isToggling }: RuleCardProps) {
+function RuleCard({ rule, sectors, onToggle, onDelete, onUpdated, isToggling }: RuleCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const [isMuting, setIsMuting] = useState(false);
+  const [showMuteMenu, setShowMuteMenu] = useState(false);
   const [editForm, setEditForm] = useState<EditFormState>({
     name: "",
     keywordInput: "",
     keywords: [],
     minScore: 4,
     telegramChatId: "",
+    sectorId: null,
+    template: { ...DEFAULT_TEMPLATE },
   });
   const editKeywordInputRef = useRef<HTMLInputElement>(null);
+  const muteMenuRef = useRef<HTMLDivElement>(null);
 
   const hasShortEditKeyword = editForm.keywords.some((kw) => kw.length < 3);
+  const muteRemaining = formatMuteRemaining(rule.mute_until);
+  const sectorName = rule.sector_id
+    ? sectors.find((s) => s.id === rule.sector_id)?.name ?? "Unknown"
+    : null;
+
+  // Close mute menu on outside click
+  useEffect(() => {
+    if (!showMuteMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (muteMenuRef.current && !muteMenuRef.current.contains(e.target as Node)) {
+        setShowMuteMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showMuteMenu]);
 
   const handleEditClick = () => {
     setEditForm({
@@ -406,18 +589,13 @@ function RuleCard({ rule, onToggle, onDelete, onUpdated, isToggling }: RuleCardP
       keywords: [...rule.keywords],
       minScore: rule.min_score,
       telegramChatId: rule.telegram_chat_id,
+      sectorId: rule.sector_id,
+      template: { ...DEFAULT_TEMPLATE, ...(rule.template ?? {}) },
     });
     setIsEditing(true);
   };
 
   const handleCancelEdit = () => {
-    setEditForm({
-      name: "",
-      keywordInput: "",
-      keywords: [],
-      minScore: 4,
-      telegramChatId: "",
-    });
     setIsEditing(false);
   };
 
@@ -432,7 +610,11 @@ function RuleCard({ rule, onToggle, onDelete, onUpdated, isToggling }: RuleCardP
       toast.error("Maximum 50 keywords allowed");
       return;
     }
-    setEditForm((prev) => ({ ...prev, keywords: [...prev.keywords, trimmed], keywordInput: "" }));
+    setEditForm((prev) => ({
+      ...prev,
+      keywords: [...prev.keywords, trimmed],
+      keywordInput: "",
+    }));
     editKeywordInputRef.current?.focus();
   };
 
@@ -477,19 +659,59 @@ function RuleCard({ rule, onToggle, onDelete, onUpdated, isToggling }: RuleCardP
         keywords: editForm.keywords,
         min_score: editForm.minScore,
         telegram_chat_id: chatId,
+        sector_id: editForm.sectorId,
+        template: editForm.template,
       });
       onUpdated(updated);
       setIsEditing(false);
       toast.success("Alert rule updated");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to update alert rule";
-      toast.error(message);
+      toast.error(err instanceof Error ? err.message : "Failed to update alert rule");
     } finally {
       setIsSaving(false);
     }
   };
 
-  // ── Edit mode ──────────────────────────────────────────────────────────────
+  const handleTest = async () => {
+    setIsTesting(true);
+    try {
+      await testAlertRule(rule.id);
+      toast.success("Test alert sent! Check your Telegram.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Test alert failed");
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  const handleMute = async (hours: number) => {
+    setShowMuteMenu(false);
+    setIsMuting(true);
+    try {
+      const updated = await muteAlertRule(rule.id, hours);
+      onUpdated(updated);
+      toast.success(`Alert muted for ${hours} hour${hours === 1 ? "" : "s"}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to mute");
+    } finally {
+      setIsMuting(false);
+    }
+  };
+
+  const handleUnmute = async () => {
+    setIsMuting(true);
+    try {
+      const updated = await unmuteAlertRule(rule.id);
+      onUpdated(updated);
+      toast.success("Alert unmuted");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to unmute");
+    } finally {
+      setIsMuting(false);
+    }
+  };
+
+  // ── Edit mode ─────────────────────────────────────────────────────────────
   if (isEditing) {
     return (
       <div className="rounded-2xl border border-slate-700 bg-slate-900/40 p-6">
@@ -510,8 +732,7 @@ function RuleCard({ rule, onToggle, onDelete, onUpdated, isToggling }: RuleCardP
           {/* Keywords */}
           <div>
             <label className="mb-1.5 block text-xs font-medium text-slate-400">
-              Keywords{" "}
-              <span className="text-slate-500">(press Enter to add)</span>
+              Keywords <span className="text-slate-500">(press Enter to add)</span>
             </label>
             <div className="min-h-10 flex flex-wrap gap-2 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 focus-within:border-slate-500">
               {editForm.keywords.map((kw, i) => (
@@ -523,7 +744,7 @@ function RuleCard({ rule, onToggle, onDelete, onUpdated, isToggling }: RuleCardP
                   <button
                     type="button"
                     onClick={() => removeEditKeyword(i)}
-                    className="ml-0.5 text-cyan-400 hover:text-cyan-200 leading-none"
+                    className="ml-0.5 leading-none text-cyan-400 hover:text-cyan-200"
                     aria-label={`Remove keyword ${kw}`}
                   >
                     x
@@ -533,9 +754,13 @@ function RuleCard({ rule, onToggle, onDelete, onUpdated, isToggling }: RuleCardP
               <input
                 ref={editKeywordInputRef}
                 type="text"
-                placeholder={editForm.keywords.length === 0 ? "Type a keyword and press Enter..." : ""}
+                placeholder={
+                  editForm.keywords.length === 0 ? "Type a keyword and press Enter..." : ""
+                }
                 value={editForm.keywordInput}
-                onChange={(e) => setEditForm((prev) => ({ ...prev, keywordInput: e.target.value }))}
+                onChange={(e) =>
+                  setEditForm((prev) => ({ ...prev, keywordInput: e.target.value }))
+                }
                 onKeyDown={handleEditKeywordKeyDown}
                 onBlur={commitEditKeyword}
                 className="min-w-32 flex-1 bg-transparent text-sm text-slate-200 outline-none placeholder:text-slate-600"
@@ -545,20 +770,14 @@ function RuleCard({ rule, onToggle, onDelete, onUpdated, isToggling }: RuleCardP
               <span className="text-xs text-slate-500">{editForm.keywords.length}/50</span>
               {hasShortEditKeyword && (
                 <span className="text-xs text-amber-400">
-                  Warning: some keywords are shorter than 3 characters and may produce excessive matches.
-                </span>
-              )}
-              {editForm.keywordInput.trim().length > 0 && editForm.keywordInput.trim().length < 3 && (
-                <span className="text-xs text-amber-400">
-                  Tag should be at least 3 characters
+                  Warning: some keywords are shorter than 3 characters.
                 </span>
               )}
             </div>
-            <p className="text-xs text-slate-600">Matches are case-insensitive</p>
           </div>
 
-          {/* Min Score + Chat ID row */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {/* Min Score + Chat ID + Sector */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
               <label className="mb-1.5 block text-xs font-medium text-slate-400">
                 Minimum Score
@@ -592,21 +811,28 @@ function RuleCard({ rule, onToggle, onDelete, onUpdated, isToggling }: RuleCardP
                 className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
               />
             </div>
+
+            <SectorSelect
+              value={editForm.sectorId}
+              onChange={(v) => setEditForm((prev) => ({ ...prev, sectorId: v }))}
+              sectors={sectors}
+            />
           </div>
+
+          {/* Template */}
+          <TemplateToggles
+            template={editForm.template}
+            onChange={(t) => setEditForm((prev) => ({ ...prev, template: t }))}
+            ruleName={editForm.name}
+            keywords={editForm.keywords}
+          />
 
           {/* Save / Cancel */}
           <div className="flex justify-end gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={handleCancelEdit}
-              disabled={isSaving}
-            >
+            <Button variant="secondary" size="sm" onClick={handleCancelEdit} disabled={isSaving}>
               Cancel
             </Button>
             <Button
-              type="button"
               variant="primary"
               size="sm"
               onClick={handleSave}
@@ -622,13 +848,21 @@ function RuleCard({ rule, onToggle, onDelete, onUpdated, isToggling }: RuleCardP
     );
   }
 
-  // ── Display mode ───────────────────────────────────────────────────────────
+  // ── Display mode ──────────────────────────────────────────────────────────
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-      {/* Row 1: name + active toggle + edit + delete */}
+      {/* Row 1: name + badges + actions */}
       <div className="flex items-start justify-between gap-3">
-        <h3 className="text-lg font-bold text-slate-100 leading-tight">{rule.name}</h3>
+        <div className="min-w-0">
+          <h3 className="text-lg font-bold leading-tight text-slate-100">{rule.name}</h3>
+          {sectorName && (
+            <span className="mt-1 inline-block rounded-full bg-violet-500/15 px-2.5 py-0.5 text-xs text-violet-300">
+              {sectorName}
+            </span>
+          )}
+        </div>
         <div className="flex shrink-0 items-center gap-2">
+          {/* Active toggle */}
           <button
             onClick={() => onToggle(rule)}
             disabled={isToggling}
@@ -641,22 +875,73 @@ function RuleCard({ rule, onToggle, onDelete, onUpdated, isToggling }: RuleCardP
           >
             {rule.active ? "Active" : "Inactive"}
           </button>
+
+          {/* Test button */}
           <Button
             variant="secondary"
             size="sm"
-            onClick={handleEditClick}
+            onClick={handleTest}
+            disabled={isTesting}
+            loading={isTesting}
+            loadingText="..."
           >
+            Test
+          </Button>
+
+          {/* Mute / Unmute */}
+          {muteRemaining ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleUnmute}
+              disabled={isMuting}
+            >
+              Unmute
+            </Button>
+          ) : (
+            <div className="relative" ref={muteMenuRef}>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowMuteMenu((v) => !v)}
+                disabled={isMuting}
+              >
+                Mute
+              </Button>
+              {showMuteMenu && (
+                <div className="absolute right-0 top-full z-20 mt-1 w-32 rounded-xl border border-slate-700 bg-slate-900 py-1 shadow-lg">
+                  {MUTE_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.hours}
+                      onClick={() => handleMute(opt.hours)}
+                      className="w-full px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-slate-800"
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <Button variant="secondary" size="sm" onClick={handleEditClick}>
             Edit
           </Button>
-          <Button
-            variant="danger"
-            size="sm"
-            onClick={() => onDelete(rule)}
-          >
+          <Button variant="danger" size="sm" onClick={() => onDelete(rule)}>
             Delete
           </Button>
         </div>
       </div>
+
+      {/* Mute indicator */}
+      {muteRemaining && (
+        <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-3 py-1 text-xs text-amber-300">
+          <svg className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 12.5a5.5 5.5 0 110-11 5.5 5.5 0 010 11zM7.25 4v4.5l3.25 1.94.75-1.23-2.5-1.48V4h-1.5z" />
+          </svg>
+          Muted — {muteRemaining}
+        </div>
+      )}
 
       {/* Row 2: keywords */}
       {rule.keywords.length > 0 && (
@@ -703,7 +988,10 @@ function RuleCard({ rule, onToggle, onDelete, onUpdated, isToggling }: RuleCardP
           className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-200"
         >
           <svg
-            className={["h-3.5 w-3.5 transition-transform", expanded ? "rotate-90" : ""].join(" ")}
+            className={[
+              "h-3.5 w-3.5 transition-transform",
+              expanded ? "rotate-90" : "",
+            ].join(" ")}
             viewBox="0 0 16 16"
             fill="currentColor"
           >
@@ -711,17 +999,162 @@ function RuleCard({ rule, onToggle, onDelete, onUpdated, isToggling }: RuleCardP
           </svg>
           {expanded ? "Hide" : "Show"} recent deliveries
         </button>
-
         {expanded && <DeliveriesTable ruleId={rule.id} />}
       </div>
     </div>
   );
 }
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
+// ─── Alert Settings Panel ────────────────────────────────────────────────────
+
+function AlertSettings() {
+  const [threshold, setThreshold] = useState("");
+  const [thresholdLoading, setThresholdLoading] = useState(true);
+  const [quietStart, setQuietStart] = useState("");
+  const [quietEnd, setQuietEnd] = useState("");
+  const [quietTz, setQuietTz] = useState("");
+  const [quietLoading, setQuietLoading] = useState(true);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const [t, q] = await Promise.all([getAlertWarningThreshold(), getAlertQuietHours()]);
+        setThreshold(String(t));
+        setQuietStart(q.start ?? "");
+        setQuietEnd(q.end ?? "");
+        setQuietTz(q.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
+      } catch {
+        // silent
+      } finally {
+        setThresholdLoading(false);
+        setQuietLoading(false);
+      }
+    };
+    load();
+  }, []);
+
+  const handleSaveThreshold = async () => {
+    const val = Number(threshold);
+    if (Number.isNaN(val) || val < 10 || val > 200) {
+      toast.error("Threshold must be 10-200");
+      return;
+    }
+    try {
+      const updated = await saveWarningThreshold(val);
+      setThreshold(String(updated));
+      toast.success("Warning threshold updated");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save");
+    }
+  };
+
+  const handleSaveQuietHours = async () => {
+    // Allow clearing (both empty = disabled)
+    const start = quietStart.trim() || null;
+    const end = quietEnd.trim() || null;
+    if ((start && !end) || (!start && end)) {
+      toast.error("Set both start and end, or leave both empty to disable");
+      return;
+    }
+    try {
+      const updated = await saveQuietHours({
+        start,
+        end,
+        timezone: quietTz.trim() || null,
+      });
+      setQuietStart(updated.start ?? "");
+      setQuietEnd(updated.end ?? "");
+      setQuietTz(updated.timezone ?? "");
+      toast.success(start ? "Quiet hours updated" : "Quiet hours disabled");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save");
+    }
+  };
+
+  if (thresholdLoading || quietLoading) {
+    return (
+      <div className="flex items-center justify-center py-6">
+        <Spinner />
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+      <h2 className="text-base font-semibold text-slate-100">Alert Settings</h2>
+
+      {/* Warning threshold */}
+      <div className="mt-4">
+        <label className="mb-1.5 block text-xs font-medium text-slate-400">
+          High Volume Warning Threshold
+        </label>
+        <div className="flex items-center gap-2">
+          <input
+            value={threshold}
+            onChange={(e) => setThreshold(e.target.value)}
+            placeholder="30"
+            className="w-20 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
+          />
+          <span className="text-xs text-slate-500">alerts/hour</span>
+          <button
+            onClick={handleSaveThreshold}
+            className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300 transition hover:border-slate-500"
+          >
+            Save
+          </button>
+        </div>
+        <p className="mt-1 text-xs text-slate-600">
+          Sends a warning to Telegram when volume exceeds this. Alerts are never blocked.
+        </p>
+      </div>
+
+      {/* Quiet hours */}
+      <div className="mt-5 border-t border-slate-800/60 pt-4">
+        <label className="mb-1.5 block text-xs font-medium text-slate-400">
+          Quiet Hours <span className="text-slate-500">(leave empty to disable)</span>
+        </label>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="time"
+            value={quietStart}
+            onChange={(e) => setQuietStart(e.target.value)}
+            className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
+          />
+          <span className="text-xs text-slate-500">to</span>
+          <input
+            type="time"
+            value={quietEnd}
+            onChange={(e) => setQuietEnd(e.target.value)}
+            className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
+          />
+          <input
+            type="text"
+            value={quietTz}
+            onChange={(e) => setQuietTz(e.target.value)}
+            placeholder="e.g., Europe/London"
+            className="w-44 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
+          />
+          <button
+            onClick={handleSaveQuietHours}
+            className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300 transition hover:border-slate-500"
+          >
+            Save
+          </button>
+        </div>
+        <p className="mt-1 text-xs text-slate-600">
+          Alerts are suppressed during quiet hours. Supports overnight ranges (e.g., 23:00–07:00).
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function Alerts() {
   const [rules, setRules] = useState<AlertRule[]>([]);
+  const [sectors, setSectors] = useState<Sector[]>([]);
+  const [weeklyStats, setWeeklyStats] = useState<AlertWeeklyStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
@@ -744,10 +1177,11 @@ export default function Alerts() {
 
   useEffect(() => {
     loadRules();
+    listSectors().then(setSectors).catch(() => {});
+    getAlertWeeklyStats().then(setWeeklyStats).catch(() => {});
   }, [loadRules]);
 
   const handleCreated = useCallback((rule: AlertRule) => {
-    // New rules have no deliveries yet — merge defaults
     const withStats: AlertRule = {
       ...rule,
       total_deliveries: rule.total_deliveries ?? 0,
@@ -765,13 +1199,10 @@ export default function Alerts() {
     setTogglingIds((prev) => new Set(prev).add(rule.id));
     try {
       const updated = await updateAlertRule(rule.id, { active: !rule.active });
-      setRules((prev) =>
-        prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)),
-      );
+      setRules((prev) => prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)));
       toast.success(updated.active ? "Alert rule enabled" : "Alert rule disabled");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to update alert rule";
-      toast.error(message);
+      toast.error(err instanceof Error ? err.message : "Failed to update alert rule");
     } finally {
       setTogglingIds((prev) => {
         const next = new Set(prev);
@@ -792,8 +1223,7 @@ export default function Alerts() {
       setRules((prev) => prev.filter((r) => r.id !== deleteTarget.id));
       toast.success("Alert rule deleted");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to delete alert rule";
-      toast.error(message);
+      toast.error(err instanceof Error ? err.message : "Failed to delete alert rule");
     } finally {
       setDeleteTarget(null);
     }
@@ -802,15 +1232,47 @@ export default function Alerts() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-slate-100">Keyword Alerts</h1>
-        <p className="mt-1 text-sm text-slate-400">
-          Get instant Telegram notifications when articles match your keywords.
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-100">Keyword Alerts</h1>
+          <p className="mt-1 text-sm text-slate-400">
+            Instant Telegram notifications when scored articles match your keywords.
+          </p>
+        </div>
+        {weeklyStats && weeklyStats.sent_this_week > 0 && (
+          <div className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-4 py-1.5 text-sm text-cyan-300">
+            {weeklyStats.sent_this_week} alert{weeklyStats.sent_this_week !== 1 ? "s" : ""} this
+            week
+          </div>
+        )}
+      </div>
+
+      {/* Guidance */}
+      <div className="rounded-2xl border border-slate-700/50 bg-slate-900/30 p-5">
+        <h3 className="text-sm font-semibold text-slate-200">How alerts work</h3>
+        <ul className="mt-2 space-y-1.5 text-xs text-slate-400">
+          <li>
+            Keywords are injected into the LLM scoring prompt for{" "}
+            <span className="text-cyan-400">semantic matching</span> — "robot" can match articles
+            about "humanoid manufacturer".
+          </li>
+          <li>
+            Both conditions must match:{" "}
+            <span className="text-slate-300">minimum score AND keyword match</span>.
+          </li>
+          <li>
+            Link a rule to a <span className="text-violet-300">sector</span> to scope keywords — or
+            leave global to match all sectors.
+          </li>
+          <li>
+            Alerts are <span className="text-slate-300">never blocked or rate-limited</span>. A
+            warning is sent if volume is high.
+          </li>
+        </ul>
       </div>
 
       {/* Create Form */}
-      <CreateForm onCreated={handleCreated} />
+      <CreateForm onCreated={handleCreated} sectors={sectors} />
 
       {/* Rules List */}
       <div className="space-y-4">
@@ -827,11 +1289,7 @@ export default function Alerts() {
         {!isLoading && error && (
           <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6 text-center">
             <p className="text-sm text-red-400">{error}</p>
-            <Button
-              variant="secondary"
-              className="mt-4"
-              onClick={loadRules}
-            >
+            <Button variant="secondary" className="mt-4" onClick={loadRules}>
               Retry
             </Button>
           </div>
@@ -850,6 +1308,7 @@ export default function Alerts() {
             <RuleCard
               key={rule.id}
               rule={rule}
+              sectors={sectors}
               onToggle={handleToggle}
               onDelete={handleDelete}
               onUpdated={handleUpdated}
@@ -858,6 +1317,10 @@ export default function Alerts() {
           ))}
       </div>
 
+      {/* Alert Settings */}
+      <AlertSettings />
+
+      {/* Delete Confirmation */}
       {deleteTarget && (
         <ConfirmModal
           title="Delete Alert Rule"

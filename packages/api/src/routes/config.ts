@@ -13,6 +13,8 @@ const CONSTRAINTS = {
   articleImagesTtl: { min: 1, max: 60, unit: "days" },
   postDeliveriesTtl: { min: 1, max: 60, unit: "days" },
   digestRunsTtl: { min: 1, max: 90, unit: "days" },
+  alertDeliveriesTtl: { min: 1, max: 60, unit: "days" },
+  alertWarningThreshold: { min: 10, max: 200, unit: "per hour" },
 } as const;
 
 const getConfigValue = async (deps: ApiDeps, key: string, fallback: number) => {
@@ -222,6 +224,104 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       }
       await upsertConfig(deps, "digest_runs_ttl_days", days);
       return { days };
+    },
+  );
+
+  // Alert Deliveries TTL
+  app.get("/config/alert-deliveries-ttl", { preHandler: deps.requireApiKey }, async () => {
+    const days = await getConfigValue(deps, "alert_deliveries_ttl_days", 30);
+    return { days };
+  });
+
+  app.patch<{ Body: { days: number } }>(
+    "/config/alert-deliveries-ttl",
+    { preHandler: deps.requireApiKey },
+    async (request, reply) => {
+      const { days } = request.body ?? {};
+      if (
+        !Number.isFinite(days) ||
+        days < CONSTRAINTS.alertDeliveriesTtl.min ||
+        days > CONSTRAINTS.alertDeliveriesTtl.max
+      ) {
+        return reply.code(400).send({
+          error: `days must be between ${CONSTRAINTS.alertDeliveriesTtl.min} and ${CONSTRAINTS.alertDeliveriesTtl.max}`,
+        });
+      }
+      await upsertConfig(deps, "alert_deliveries_ttl_days", days);
+      return { days };
+    },
+  );
+
+  // Alert Warning Threshold
+  app.get("/config/alert-warning-threshold", { preHandler: deps.requireApiKey }, async () => {
+    const per_hour = await getConfigValue(deps, "alert_warning_threshold", 30);
+    return { per_hour };
+  });
+
+  app.patch<{ Body: { per_hour: number } }>(
+    "/config/alert-warning-threshold",
+    { preHandler: deps.requireApiKey },
+    async (request, reply) => {
+      const { per_hour } = request.body ?? {};
+      if (
+        !Number.isFinite(per_hour) ||
+        per_hour < CONSTRAINTS.alertWarningThreshold.min ||
+        per_hour > CONSTRAINTS.alertWarningThreshold.max
+      ) {
+        return reply.code(400).send({
+          error: `per_hour must be between ${CONSTRAINTS.alertWarningThreshold.min} and ${CONSTRAINTS.alertWarningThreshold.max}`,
+        });
+      }
+      await upsertConfig(deps, "alert_warning_threshold", per_hour);
+      return { per_hour };
+    },
+  );
+
+  // Alert Quiet Hours
+  app.get("/config/alert-quiet-hours", { preHandler: deps.requireApiKey }, async () => {
+    const [startRow] = await deps.db
+      .select({ value: appConfig.value })
+      .from(appConfig)
+      .where(eq(appConfig.key, "alert_quiet_start"));
+    const [endRow] = await deps.db
+      .select({ value: appConfig.value })
+      .from(appConfig)
+      .where(eq(appConfig.key, "alert_quiet_end"));
+    const [tzRow] = await deps.db
+      .select({ value: appConfig.value })
+      .from(appConfig)
+      .where(eq(appConfig.key, "alert_quiet_timezone"));
+    return {
+      start: (startRow?.value as string) ?? null,
+      end: (endRow?.value as string) ?? null,
+      timezone: (tzRow?.value as string) ?? null,
+    };
+  });
+
+  app.patch<{ Body: { start: string | null; end: string | null; timezone?: string } }>(
+    "/config/alert-quiet-hours",
+    { preHandler: deps.requireApiKey },
+    async (request, reply) => {
+      const { start, end, timezone } = request.body ?? {};
+      const timeRe = /^\d{2}:\d{2}$/;
+
+      // Both null = disable quiet hours
+      if (start === null && end === null) {
+        await upsertTypedConfig(deps, "alert_quiet_start", null);
+        await upsertTypedConfig(deps, "alert_quiet_end", null);
+        return { start: null, end: null, timezone: timezone ?? null };
+      }
+
+      if (!start || !end || !timeRe.test(start) || !timeRe.test(end)) {
+        return reply.code(400).send({ error: "start and end must be HH:MM format, or both null" });
+      }
+
+      await upsertTypedConfig(deps, "alert_quiet_start", start);
+      await upsertTypedConfig(deps, "alert_quiet_end", end);
+      if (timezone) {
+        await upsertTypedConfig(deps, "alert_quiet_timezone", timezone);
+      }
+      return { start, end, timezone: timezone ?? null };
     },
   );
 

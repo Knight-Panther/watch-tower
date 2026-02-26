@@ -24,6 +24,7 @@ import {
   llmTelemetry,
   articleImages,
   digestRuns,
+  alertDeliveries,
 } from "@watch-tower/db";
 import {
   createTelegramProvider,
@@ -995,6 +996,25 @@ export const createMaintenanceWorker = ({
           const msg = err instanceof Error ? err.message : String(err);
           logger.error(`[maintenance] digest_runs cleanup failed: ${msg}`);
           errors.push("digest_runs");
+        }
+
+        // Alert deliveries cleanup
+        try {
+          const alertDeliveriesTtlDays = await getConfigNumber(
+            db,
+            "alert_deliveries_ttl_days",
+            30,
+          );
+          const alertDeliveriesCutoff = new Date(
+            Date.now() - alertDeliveriesTtlDays * 86_400_000,
+          );
+          await db
+            .delete(alertDeliveries)
+            .where(lt(alertDeliveries.sentAt, alertDeliveriesCutoff));
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logger.error(`[maintenance] alert_deliveries cleanup failed: ${msg}`);
+          errors.push("alert_deliveries");
         }
 
         // Also run zombie cleanup during daily maintenance

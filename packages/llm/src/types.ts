@@ -13,6 +13,7 @@ export type ScoringResult = {
   score: number; // 1-5
   summary: string | null; // Generated summary (Phase 4)
   reasoning?: string; // Optional: why this score (for debugging)
+  matchedAlertKeywords?: string[]; // Alert keywords the LLM identified as relevant
   error?: string; // Error message if scoring failed
 
   // Telemetry (populated from LLM API response)

@@ -109,6 +109,7 @@ export class ClaudeLLMProvider implements LLMProvider {
         score: parsed.data.score,
         summary: parsed.data.summary ?? null,
         reasoning: parsed.data.reasoning,
+        matchedAlertKeywords: parsed.data.matched_alert_keywords,
         usage,
         latencyMs,
       };

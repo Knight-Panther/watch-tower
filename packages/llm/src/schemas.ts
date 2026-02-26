@@ -22,6 +22,8 @@ export const ScoringResponseSchema = z.object({
     .string()
     .optional()
     .transform((v) => (v && v.length > 1000 ? v.slice(0, 1000) + "..." : v)),
+  // Alert keywords the LLM identified as semantically relevant to this article
+  matched_alert_keywords: z.array(z.string()).optional().default([]),
 });
 
 export type ScoringResponse = z.infer<typeof ScoringResponseSchema>;

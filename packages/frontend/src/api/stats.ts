@@ -51,6 +51,8 @@ export type Constraints = {
   articleImagesTtl: { min: number; max: number; unit: string };
   postDeliveriesTtl: { min: number; max: number; unit: string };
   digestRunsTtl: { min: number; max: number; unit: string };
+  alertDeliveriesTtl: { min: number; max: number; unit: string };
+  alertWarningThreshold: { min: number; max: number; unit: string };
 };
 
 export const getStatsOverview = async (): Promise<StatsOverview> => {

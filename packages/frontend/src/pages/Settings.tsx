@@ -13,6 +13,8 @@ import {
   setArticleImagesTtl,
   getPostDeliveriesTtl,
   setPostDeliveriesTtl,
+  getAlertDeliveriesTtl,
+  setAlertDeliveriesTtl,
   getTelemetrySummary,
   getTelemetryByProvider,
   getTelemetryByOperation,
@@ -109,6 +111,8 @@ export default function Settings() {
   const [articleImagesTtlError, setArticleImagesTtlError] = useState<string | null>(null);
   const [postDeliveriesTtlDays, setPostDeliveriesTtlDays] = useState("");
   const [postDeliveriesTtlError, setPostDeliveriesTtlError] = useState<string | null>(null);
+  const [alertDeliveriesTtlDays, setAlertDeliveriesTtlDays] = useState("");
+  const [alertDeliveriesTtlError, setAlertDeliveriesTtlError] = useState<string | null>(null);
 
   // Telemetry state
   const [telemetrySummary, setTelemetrySummary] = useState<TelemetrySummary | null>(null);
@@ -135,6 +139,7 @@ export default function Settings() {
         llmTelemetryTtl,
         articleImagesTtl,
         postDeliveriesTtl,
+        alertDeliveriesTtl,
       ] = await Promise.all([
         getFeedItemsTtl(),
         getFeedFetchRunsTtl(),
@@ -142,6 +147,7 @@ export default function Settings() {
         getLlmTelemetryTtl(),
         getArticleImagesTtl(),
         getPostDeliveriesTtl(),
+        getAlertDeliveriesTtl(),
       ]);
       setConstraints(constraintsData);
       setTtlDays(String(ttlValue));
@@ -158,6 +164,7 @@ export default function Settings() {
       setLlmTelemetryTtlDays(String(llmTelemetryTtl));
       setArticleImagesTtlDays(String(articleImagesTtl));
       setPostDeliveriesTtlDays(String(postDeliveriesTtl));
+      setAlertDeliveriesTtlDays(String(alertDeliveriesTtl));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load settings";
       toast.error(message);
@@ -330,6 +337,27 @@ export default function Settings() {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to update post deliveries TTL";
       setPostDeliveriesTtlError(message);
+      toast.error(message);
+    }
+  };
+
+  const onSaveAlertDeliveriesTtl = async () => {
+    const min = constraints?.alertDeliveriesTtl?.min ?? 1;
+    const max = constraints?.alertDeliveriesTtl?.max ?? 60;
+    const value = Number(alertDeliveriesTtlDays);
+    if (Number.isNaN(value) || value < min || value > max) {
+      setAlertDeliveriesTtlError(`TTL must be between ${min} and ${max} days`);
+      toast.error(`TTL must be between ${min} and ${max} days`);
+      return;
+    }
+    try {
+      const updated = await setAlertDeliveriesTtl(value);
+      setAlertDeliveriesTtlDays(String(updated));
+      setAlertDeliveriesTtlError(null);
+      toast.success("Alert deliveries TTL updated");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update alert deliveries TTL";
+      setAlertDeliveriesTtlError(message);
       toast.error(message);
     }
   };
@@ -841,6 +869,40 @@ export default function Settings() {
                     Completed/failed/cancelled deliveries retention.
                     {postDeliveriesTtlError ? (
                       <span className="ml-2 text-red-400">{postDeliveriesTtlError}</span>
+                    ) : null}
+                  </td>
+                </tr>
+
+                {/* Alert Deliveries TTL */}
+                <tr>
+                  <td className="py-3 pr-4 font-medium text-slate-300">Alert Deliveries</td>
+                  <td className="py-3 pr-4">
+                    <div className="flex items-center gap-2">
+                      <input
+                        value={alertDeliveriesTtlDays}
+                        onChange={(e) => setAlertDeliveriesTtlDays(e.target.value)}
+                        placeholder="1-60"
+                        className="w-20 rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1.5 text-sm text-slate-200 outline-none focus:border-slate-600"
+                      />
+                      <span className="text-slate-500">days</span>
+                    </div>
+                  </td>
+                  <td className="py-3 pr-4 font-mono text-xs text-emerald-400/70">
+                    {formatTtlHint(alertDeliveriesTtlDays)}
+                  </td>
+                  <td className="py-3 pr-4">
+                    <button
+                      onClick={onSaveAlertDeliveriesTtl}
+                      disabled={!alertDeliveriesTtlDays.trim()}
+                      className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300 transition hover:border-slate-500 disabled:opacity-40"
+                    >
+                      Save
+                    </button>
+                  </td>
+                  <td className="py-3 text-xs text-slate-500">
+                    Keyword alert delivery audit trail retention.
+                    {alertDeliveriesTtlError ? (
+                      <span className="ml-2 text-red-400">{alertDeliveriesTtlError}</span>
                     ) : null}
                   </td>
                 </tr>

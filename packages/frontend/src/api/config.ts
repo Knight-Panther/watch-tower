@@ -309,6 +309,96 @@ export const setAutoRejectThreshold = async (value: number): Promise<number> => 
   return data.value ?? value;
 };
 
+// ─── Alert Deliveries TTL ───────────────────────────────────────────────────
+
+export const getAlertDeliveriesTtl = async (): Promise<number> => {
+  const res = await fetch(`${API_BASE}/config/alert-deliveries-ttl`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load alert deliveries TTL");
+  }
+  const data = await res.json();
+  return Number(data.days ?? 30);
+};
+
+export const setAlertDeliveriesTtl = async (days: number): Promise<number> => {
+  const res = await fetch(`${API_BASE}/config/alert-deliveries-ttl`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify({ days }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to update alert deliveries TTL");
+  }
+  const data = await res.json();
+  return Number(data.days ?? days);
+};
+
+// ─── Alert Warning Threshold ────────────────────────────────────────────────
+
+export const getAlertWarningThreshold = async (): Promise<number> => {
+  const res = await fetch(`${API_BASE}/config/alert-warning-threshold`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load alert warning threshold");
+  }
+  const data = await res.json();
+  return Number(data.per_hour ?? 30);
+};
+
+export const setAlertWarningThreshold = async (value: number): Promise<number> => {
+  const res = await fetch(`${API_BASE}/config/alert-warning-threshold`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify({ per_hour: value }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to update alert warning threshold");
+  }
+  const data = await res.json();
+  return Number(data.per_hour ?? value);
+};
+
+// ─── Alert Quiet Hours ──────────────────────────────────────────────────────
+
+export type AlertQuietHours = {
+  start: string | null;
+  end: string | null;
+  timezone: string | null;
+};
+
+export const getAlertQuietHours = async (): Promise<AlertQuietHours> => {
+  const res = await fetch(`${API_BASE}/config/alert-quiet-hours`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load alert quiet hours");
+  }
+  return res.json();
+};
+
+export const setAlertQuietHours = async (
+  payload: AlertQuietHours,
+): Promise<AlertQuietHours> => {
+  const res = await fetch(`${API_BASE}/config/alert-quiet-hours`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to update alert quiet hours");
+  }
+  return res.json();
+};
+
 // ─── Reset Data ──────────────────────────────────────────────────────────────
 
 export type ResetResult = {

@@ -11,6 +11,7 @@ import {
   saveScoringRule,
   deleteScoringRule,
   previewScoringPrompt,
+  getAlertSectorKeywords,
   type Sector,
   type ScoringConfig,
   type ScoringRule,
@@ -47,6 +48,10 @@ export default function ScoringRules() {
   const [autoApprove, setAutoApprove] = useState(5);
   const [autoReject, setAutoReject] = useState(2);
   const [hasChanges, setHasChanges] = useState(false);
+
+  // Alert keywords state (read-only, from alert rules)
+  const [alertKeywords, setAlertKeywords] = useState<string[]>([]);
+  const [alertRuleCount, setAlertRuleCount] = useState(0);
 
   // Preview state
   const [promptPreview, setPromptPreview] = useState<string>("");
@@ -101,6 +106,30 @@ export default function ScoringRules() {
     loadRule();
   }, [loadRule]);
 
+  // Load alert keywords when sector changes
+  useEffect(() => {
+    if (!selectedSectorId) return;
+    let cancelled = false;
+    const loadAlertKeywords = async () => {
+      try {
+        const data = await getAlertSectorKeywords(selectedSectorId);
+        if (!cancelled) {
+          setAlertKeywords(data.keywords);
+          setAlertRuleCount(data.rule_count);
+        }
+      } catch {
+        if (!cancelled) {
+          setAlertKeywords([]);
+          setAlertRuleCount(0);
+        }
+      }
+    };
+    loadAlertKeywords();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSectorId]);
+
   // Update preview when config changes (debounced)
   useEffect(() => {
     const sector = sectors.find((s) => s.id === selectedSectorId);
@@ -120,6 +149,20 @@ export default function ScoringRules() {
 
     return () => clearTimeout(timer);
   }, [config, selectedSectorId, sectors]);
+
+  // Build full preview including alert keywords suffix (client-side, matches worker behavior)
+  const fullPreview = (() => {
+    if (!promptPreview) return "";
+    if (alertKeywords.length === 0) return promptPreview;
+    return `${promptPreview}
+
+ALERT KEYWORD MATCHING:
+Check if any of these alert keywords are semantically relevant to this article: [${alertKeywords.join(", ")}]
+Include a "matched_alert_keywords" field in your JSON response — an array of matched keyword strings.
+Only include keywords that are clearly relevant to the article's core topic, not just mentioned in passing.
+If no keywords match, return an empty array.
+Example: {"reasoning": "...", "score": 3, "summary": "...", "matched_alert_keywords": ["keyword1"]}`;
+  })();
 
   // Track changes
   const updateConfig = <K extends keyof ScoringConfig>(key: K, value: ScoringConfig[K]) => {
@@ -234,13 +277,13 @@ export default function ScoringRules() {
           <Spinner /> <span className="ml-2 text-slate-400">Loading rule...</span>
         </div>
       ) : (
-        <div className="grid gap-6 lg:grid-cols-2">
-          {/* Left: Form */}
-          <section className="space-y-6">
+        <div className="grid gap-6 xl:grid-cols-[2fr_3fr]">
+          {/* Left: Form controls */}
+          <section className="space-y-5">
             {/* Priorities */}
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-              <h2 className="text-lg font-semibold">Topics to Prioritize</h2>
-              <p className="mt-1 text-sm text-slate-400">
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+              <h2 className="font-semibold">Topics to Prioritize</h2>
+              <p className="mt-1 text-xs text-slate-400">
                 Articles about these topics will score higher.
               </p>
               <div className="mt-3">
@@ -255,9 +298,9 @@ export default function ScoringRules() {
             </div>
 
             {/* Ignore */}
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-              <h2 className="text-lg font-semibold">Topics to Ignore</h2>
-              <p className="mt-1 text-sm text-slate-400">
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+              <h2 className="font-semibold">Topics to Ignore</h2>
+              <p className="mt-1 text-xs text-slate-400">
                 Articles about these topics will score lower.
               </p>
               <div className="mt-3">
@@ -272,33 +315,58 @@ export default function ScoringRules() {
             </div>
 
             {/* Hard Reject Keywords */}
-            <div className="rounded-2xl border border-orange-500/20 bg-slate-900/40 p-6">
-              <h2 className="text-lg font-semibold text-orange-200">Reject Before Scoring</h2>
-              <p className="mt-1 text-sm text-slate-400">
-                Articles matching these keywords or categories skip LLM entirely (saves cost).
-                Uses word-boundary matching to avoid false positives.
+            <div className="rounded-2xl border border-orange-500/20 bg-slate-900/40 p-5">
+              <h2 className="font-semibold text-orange-200">Reject Before Scoring</h2>
+              <p className="mt-1 text-xs text-slate-400">
+                Articles matching these keywords skip LLM entirely (saves cost).
               </p>
               <div className="mt-3">
                 <TagInput
                   tags={config.rejectKeywords}
                   onChange={(tags) => updateConfig("rejectKeywords", tags)}
                   maxTags={50}
-                  placeholder="Add keyword (e.g., Sponsored, Press Release)..."
+                  placeholder="Add keyword..."
                   color="orange"
                 />
               </div>
             </div>
 
-            {/* Score Definitions */}
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-              <h2 className="text-lg font-semibold">Score Definitions</h2>
-              <p className="mt-1 text-sm text-slate-400">
-                Define what each score level (1-5) means for this sector.
+            {/* Alert Keywords (read-only) */}
+            <div className="rounded-2xl border border-violet-500/20 bg-slate-900/40 p-5">
+              <h2 className="font-semibold text-violet-200">Alert Keywords (Injected)</h2>
+              <p className="mt-1 text-xs text-slate-400">
+                Injected into LLM prompt for semantic matching. Manage on{" "}
+                <a href="/alerts" className="text-violet-400 hover:underline">
+                  Alerts
+                </a>
+                .
               </p>
-              <div className="mt-4 space-y-3">
+              {alertKeywords.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {alertKeywords.map((kw, i) => (
+                    <span
+                      key={i}
+                      className="rounded-full bg-violet-500/20 px-2.5 py-0.5 text-xs text-violet-200"
+                    >
+                      {kw}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-3 text-xs text-slate-500">No alert keywords for this sector.</p>
+              )}
+              <p className="mt-2 text-xs text-slate-500">
+                {alertRuleCount} active rule{alertRuleCount !== 1 ? "s" : ""} for this sector
+              </p>
+            </div>
+
+            {/* Score Definitions */}
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+              <h2 className="font-semibold">Score Definitions</h2>
+              <div className="mt-3 space-y-2">
                 {([1, 2, 3, 4, 5] as const).map((level) => (
-                  <div key={level} className="flex items-start gap-3">
-                    <span className="mt-2 w-14 shrink-0 text-sm font-semibold text-slate-300">
+                  <div key={level} className="flex items-start gap-2">
+                    <span className="mt-2 w-12 shrink-0 text-xs font-semibold text-slate-300">
                       {"★".repeat(level)}
                     </span>
                     <textarea
@@ -306,8 +374,8 @@ export default function ScoringRules() {
                       onChange={(e) =>
                         updateConfig(`score${level}` as keyof ScoringConfig, e.target.value)
                       }
-                      rows={2}
-                      className="flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
+                      rows={1}
+                      className="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-slate-500"
                     />
                   </div>
                 ))}
@@ -315,14 +383,11 @@ export default function ScoringRules() {
             </div>
 
             {/* Summary Settings */}
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-              <h2 className="text-lg font-semibold">Summary Settings</h2>
-              <p className="mt-1 text-sm text-slate-400">
-                Control how article summaries are generated.
-              </p>
-              <div className="mt-4 space-y-4">
-                <div className="flex items-center gap-4">
-                  <label className="w-28 text-sm text-slate-300">Max Length</label>
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+              <h2 className="font-semibold">Summary Settings</h2>
+              <div className="mt-3 space-y-3">
+                <div className="flex items-center gap-3">
+                  <label className="w-20 text-xs text-slate-300">Max Length</label>
                   <input
                     type="range"
                     min={50}
@@ -332,16 +397,19 @@ export default function ScoringRules() {
                     onChange={(e) => updateConfig("summaryMaxChars", parseInt(e.target.value))}
                     className="flex-1"
                   />
-                  <span className="w-16 text-sm text-slate-400">{config.summaryMaxChars} chars</span>
+                  <span className="w-14 text-xs text-slate-400">{config.summaryMaxChars} ch</span>
                 </div>
-                <div className="flex items-center gap-4">
-                  <label className="w-28 text-sm text-slate-300">Tone</label>
+                <div className="flex items-center gap-3">
+                  <label className="w-20 text-xs text-slate-300">Tone</label>
                   <select
                     value={config.summaryTone}
                     onChange={(e) =>
-                      updateConfig("summaryTone", e.target.value as ScoringConfig["summaryTone"])
+                      updateConfig(
+                        "summaryTone",
+                        e.target.value as ScoringConfig["summaryTone"],
+                      )
                     }
-                    className="flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
+                    className="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-slate-500"
                   >
                     {TONE_OPTIONS.map((tone) => (
                       <option key={tone} value={tone}>
@@ -350,43 +418,40 @@ export default function ScoringRules() {
                     ))}
                   </select>
                 </div>
-                <div className="flex items-center gap-4">
-                  <label className="w-28 text-sm text-slate-300">Language</label>
+                <div className="flex items-center gap-3">
+                  <label className="w-20 text-xs text-slate-300">Language</label>
                   <input
                     value={config.summaryLanguage}
                     onChange={(e) => updateConfig("summaryLanguage", e.target.value)}
-                    className="flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
+                    className="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-slate-500"
                   />
                 </div>
-                <div className="flex items-start gap-4">
-                  <label className="w-28 pt-2 text-sm text-slate-300">Style</label>
+                <div className="flex items-start gap-3">
+                  <label className="w-20 pt-1.5 text-xs text-slate-300">Style</label>
                   <textarea
                     value={config.summaryStyle}
                     onChange={(e) => updateConfig("summaryStyle", e.target.value)}
                     rows={2}
                     placeholder="Instructions for summary style..."
-                    className="flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
+                    className="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-slate-500"
                   />
                 </div>
               </div>
             </div>
 
             {/* Score Thresholds */}
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-              <h2 className="text-lg font-semibold">Score Thresholds</h2>
-              <p className="mt-1 text-sm text-slate-400">
-                Automatically approve or reject articles based on score.
-              </p>
-              <div className="mt-4 flex flex-wrap gap-6">
-                <div className="flex items-center gap-3">
-                  <label className="text-sm text-slate-300">Auto-approve at score:</label>
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+              <h2 className="font-semibold">Score Thresholds</h2>
+              <div className="mt-3 flex flex-wrap gap-4">
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-slate-300">Auto-approve:</label>
                   <select
                     value={autoApprove}
                     onChange={(e) => {
                       setAutoApprove(parseInt(e.target.value));
                       setHasChanges(true);
                     }}
-                    className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200"
+                    className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-200"
                   >
                     <option value={0}>OFF</option>
                     {[3, 4, 5].map((n) => (
@@ -396,15 +461,15 @@ export default function ScoringRules() {
                     ))}
                   </select>
                 </div>
-                <div className="flex items-center gap-3">
-                  <label className="text-sm text-slate-300">Auto-reject at score:</label>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-slate-300">Auto-reject:</label>
                   <select
                     value={autoReject}
                     onChange={(e) => {
                       setAutoReject(parseInt(e.target.value));
                       setHasChanges(true);
                     }}
-                    className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200"
+                    className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-200"
                   >
                     <option value={0}>OFF</option>
                     {[1, 2, 3].map((n) => (
@@ -416,17 +481,11 @@ export default function ScoringRules() {
                 </div>
               </div>
               {autoApprove !== 0 && autoReject !== 0 && autoReject >= autoApprove && (
-                <p className="mt-3 rounded-lg border border-red-800/50 bg-red-950/30 px-3 py-2 text-xs text-red-300">
-                  Conflict: auto-reject ({autoReject}) must be lower than auto-approve ({autoApprove}).
+                <p className="mt-2 rounded-lg border border-red-800/50 bg-red-950/30 px-3 py-1.5 text-xs text-red-300">
+                  Conflict: auto-reject ({autoReject}) must be lower than auto-approve (
+                  {autoApprove}).
                 </p>
               )}
-              <p className="mt-3 text-xs text-slate-500">
-                Scores between these thresholds go to manual review. Platform settings are on the{" "}
-                <a href="/media-channels" className="text-emerald-400 hover:underline">
-                  Media Channels
-                </a>{" "}
-                page.
-              </p>
             </div>
 
             {/* Actions */}
@@ -441,32 +500,30 @@ export default function ScoringRules() {
               >
                 Save Changes
               </Button>
-              <Button
-                variant="secondary"
-                size="lg"
-                onClick={handleReset}
-                disabled={isSaving}
-              >
+              <Button variant="secondary" size="lg" onClick={handleReset} disabled={isSaving}>
                 Reset to Defaults
               </Button>
             </div>
           </section>
 
-          {/* Right: Preview */}
-          <section className="lg:sticky lg:top-24 lg:self-start">
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+          {/* Right: Sticky prompt preview */}
+          <section className="xl:sticky xl:top-44 xl:self-start">
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
               <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold">Prompt Preview</h2>
+                <h2 className="font-semibold">Prompt Preview</h2>
                 {isPreviewLoading && <Spinner />}
               </div>
-              <p className="mt-1 text-sm text-slate-400">
-                This is what the LLM will receive for {selectedSector?.name ?? "this sector"}.
+              <p className="mt-1 text-xs text-slate-400">
+                Full prompt for {selectedSector?.name ?? "this sector"}. Updates live.
               </p>
-              <pre className="mt-4 max-h-[600px] overflow-auto rounded-xl border border-slate-800 bg-slate-950 p-4 text-xs text-slate-300">
-                {promptPreview || (
-                  <span className="space-y-2 block">
+              <pre className="mt-3 max-h-[calc(100vh-14rem)] overflow-y-auto whitespace-pre-wrap break-words rounded-xl border border-slate-800 bg-slate-950 p-4 text-xs leading-relaxed text-slate-300">
+                {fullPreview || (
+                  <span className="block space-y-2">
                     {Array.from({ length: 12 }, (_, i) => (
-                      <SkeletonText key={i} className={`h-3 ${i % 3 === 0 ? "w-full" : i % 3 === 1 ? "w-4/5" : "w-3/5"}`} />
+                      <SkeletonText
+                        key={i}
+                        className={`h-3 ${i % 3 === 0 ? "w-full" : i % 3 === 1 ? "w-4/5" : "w-3/5"}`}
+                      />
                     ))}
                   </span>
                 )}
