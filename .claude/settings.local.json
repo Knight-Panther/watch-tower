@@ -31,7 +31,12 @@
       "Bash(grep -n \"aria-label\" packages/frontend/src/components/*.tsx packages/frontend/src/pages/*.tsx)",
       "Bash(grep -n \"max-h-\\\\[90vh\\\\]\" packages/frontend/src/components/*.tsx)",
       "Bash(grep -n \"FocusTrap\" packages/frontend/src/components/*.tsx packages/frontend/src/pages/*.tsx)",
-      "Bash(xargs grep -l \"customFields\\\\|content:encoded\")"
+      "Bash(xargs grep -l \"customFields\\\\|content:encoded\")",
+      "Bash(curl -s -H \"Authorization: Bearer local-dev-key\" \"http://localhost:3001/articles?score_min=1&score_max=2&limit=5\")",
+      "Bash(curl -s -H \"Authorization: Bearer local-dev-key\" \"http://localhost:3001/articles?score_min=1&score_max=2&limit=5\" -o /tmp/articles.json)",
+      "Bash(curl -s -H \"Authorization: Bearer local-dev-key\" \"http://localhost:3001/articles?score_min=1&score_max=2&limit=5\" -o C:/Users/VM-Dev/Desktop/watch-tower/tmp-articles.json)",
+      "Bash(curl -s -H \"Authorization: Bearer local-dev-key\" \"http://localhost:3001/articles?limit=5\" -o C:/Users/VM-Dev/Desktop/watch-tower/tmp-articles.json)",
+      "Bash(curl -s -H \"Authorization: Bearer local-dev-key\" \"http://localhost:3001/articles?limit=3\" -o C:/Users/VM-Dev/Desktop/watch-tower/tmp-art2.json)"
     ],
     "deny": [
       "Bash(git push --force *)",

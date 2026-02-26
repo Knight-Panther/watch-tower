@@ -649,12 +649,13 @@ export default function Articles() {
           <table className="w-full text-sm table-fixed">
             <colgroup>
               <col className="w-10" />          {/* checkbox */}
-              <col className="w-[100px]" />     {/* date */}
+              <col className="w-[86px]" />      {/* ingested */}
+              <col className="w-[86px]" />      {/* publish */}
               <col className="w-[110px]" />     {/* source */}
               <col />                            {/* title/summary — takes remaining space */}
-              <col className="w-[80px]" />       {/* status */}
-              <col className="w-[60px]" />       {/* score */}
-              <col className="w-[100px]" />      {/* actions */}
+              <col className="w-[76px]" />       {/* status */}
+              <col className="w-[56px]" />       {/* score */}
+              <col className="w-[94px]" />       {/* actions */}
             </colgroup>
             <thead className="bg-slate-800/50">
               <tr>
@@ -667,10 +668,17 @@ export default function Articles() {
                   />
                 </th>
                 <th
-                  onClick={() => handleSort("published_at")}
-                  className="px-2 py-3 text-left text-xs font-medium text-slate-300 cursor-pointer hover:text-white"
+                  onClick={() => handleSort("created_at")}
+                  className="px-1 py-2 text-left text-xs font-medium text-slate-300 cursor-pointer hover:text-white"
                 >
-                  Date{" "}
+                  Ingested{" "}
+                  {filters.sort_by === "created_at" && (filters.sort_dir === "desc" ? "↓" : "↑")}
+                </th>
+                <th
+                  onClick={() => handleSort("published_at")}
+                  className="px-1 py-2 text-left text-xs font-medium text-slate-300 cursor-pointer hover:text-white"
+                >
+                  Publish{" "}
                   {filters.sort_by === "published_at" && (filters.sort_dir === "desc" ? "↓" : "↑")}
                 </th>
                 <th className="px-2 py-3 text-left font-medium text-slate-300">Source</th>
@@ -690,7 +698,7 @@ export default function Articles() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
-              {isLoading && articles.length === 0 && <SkeletonTable rows={8} columns={7} />}
+              {isLoading && articles.length === 0 && <SkeletonTable rows={8} columns={8} />}
               {articles.map((article) => (
                 <tr key={article.id} className={`hover:bg-slate-800/30 ${selectedIds.has(article.id) ? "bg-slate-800/20" : ""}`}>
                   <td className="px-2 py-3">
@@ -701,7 +709,10 @@ export default function Articles() {
                       className="h-4 w-4 rounded border-slate-600 bg-slate-800 accent-emerald-500"
                     />
                   </td>
-                  <td className="px-2 py-3 text-xs text-slate-400 whitespace-nowrap">
+                  <td className="px-1 py-2 text-xs text-slate-400 whitespace-nowrap">
+                    {formatDate(article.created_at)}
+                  </td>
+                  <td className="px-1 py-2 text-xs text-slate-400 whitespace-nowrap">
                     {formatDate(article.published_at)}
                   </td>
                   <td className="px-2 py-3">
@@ -921,8 +932,7 @@ export default function Articles() {
                     <div className="flex flex-col gap-1.5 items-center">
                       {/* Schedule button (scored articles) */}
                       {article.pipeline_stage === "scored" &&
-                        article.importance_score !== null &&
-                        article.importance_score >= 3 && (
+                        article.importance_score !== null && (
                           <Button
                             variant="primary"
                             size="xs"
@@ -960,8 +970,7 @@ export default function Articles() {
                         )}
                       {/* Reject button at bottom (scored articles) */}
                       {article.pipeline_stage === "scored" &&
-                        article.importance_score !== null &&
-                        article.importance_score >= 3 && (
+                        article.importance_score !== null && (
                           <Button
                             variant="danger-soft"
                             size="xs"
