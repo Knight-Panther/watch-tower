@@ -172,6 +172,21 @@ export const batchRejectArticles = async (
   return res.json();
 };
 
+export const batchTranslateArticles = async (
+  ids: string[],
+): Promise<{ queued: number; skipped: number; ids: string[] }> => {
+  const res = await fetch(`${API_BASE}/articles/batch/translate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to batch translate articles");
+  }
+  return res.json();
+};
+
 export const updateArticle = async (
   id: string,
   updates: {

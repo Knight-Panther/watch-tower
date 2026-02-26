@@ -417,6 +417,54 @@ export const registerArticlesRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     return { updated: updated.length, ids: updated.map((u) => u.id) };
   });
 
+  // POST /articles/batch/translate - Batch queue Georgian translation for multiple articles
+  app.post<{
+    Body: { ids: string[] };
+  }>("/articles/batch/translate", { preHandler: deps.requireApiKey }, async (request, reply) => {
+    const { ids } = request.body ?? {};
+
+    if (!ids?.length) {
+      return reply.code(400).send({ error: "ids are required" });
+    }
+
+    // Check Georgian mode is active
+    const [langRow] = await deps.db
+      .select({ value: appConfig.value })
+      .from(appConfig)
+      .where(eq(appConfig.key, "posting_language"));
+    const postingLanguage = (langRow?.value as string) ?? "en";
+
+    if (postingLanguage !== "ka") {
+      return reply.code(400).send({ error: "Georgian mode is not active" });
+    }
+
+    // Atomic update: only queue articles that are eligible
+    const updated = await deps.db
+      .update(articles)
+      .set({
+        translationStatus: "queued",
+        translationAttempts: 0,
+        translationError: null,
+        titleKa: null,
+        llmSummaryKa: null,
+      })
+      .where(
+        and(
+          inArray(articles.id, ids),
+          sql`llm_summary IS NOT NULL`,
+          sql`pipeline_stage IN ('scored', 'approved', 'posted')`,
+          sql`(translation_status IS NULL OR translation_status IN ('failed', 'exhausted'))`,
+        ),
+      )
+      .returning({ id: articles.id });
+
+    return {
+      queued: updated.length,
+      skipped: ids.length - updated.length,
+      ids: updated.map((u) => u.id),
+    };
+  });
+
   // POST /articles/:id/schedule - Approve article and schedule delivery to one or more platforms
   app.post<{
     Params: { id: string };

@@ -7,7 +7,6 @@ import NotFound from "./components/NotFound";
 import Monitoring from "./pages/Monitoring";
 import Settings from "./pages/Settings";
 import Home from "./pages/Home";
-import SectorManagement from "./pages/SectorManagement";
 import ArticleScheduler from "./pages/ArticleScheduler";
 import ScoringRules from "./pages/ScoringRules";
 import MediaChannelControl from "./pages/MediaChannelControl";
@@ -33,7 +32,6 @@ export default function App() {
         <Toaster richColors position="top-right" />
         <Routes>
           <Route path="/" element={<ErrorBoundary FallbackComponent={PageErrorFallback}><Home /></ErrorBoundary>} />
-          <Route path="/sectors" element={<ErrorBoundary FallbackComponent={PageErrorFallback}><SectorManagement /></ErrorBoundary>} />
           <Route path="/monitoring" element={<ErrorBoundary FallbackComponent={PageErrorFallback}><Monitoring /></ErrorBoundary>} />
           <Route path="/article-scheduler" element={<ErrorBoundary FallbackComponent={PageErrorFallback}><ArticleScheduler /></ErrorBoundary>} />
           <Route path="/scoring-rules" element={<ErrorBoundary FallbackComponent={PageErrorFallback}><ScoringRules /></ErrorBoundary>} />

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import type { StatsOverview, StatsSource, ResetResult } from "../api";
 import { getStatsOverview, getStatsSources, resetAllData } from "../api";
 import { Skeleton, SkeletonText } from "../components/ui/Skeleton";
@@ -154,41 +155,43 @@ export default function Monitoring() {
       </section>
 
       <section className="grid gap-3 md:grid-cols-5">
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4" title="Total number of RSS sources configured in the system">
           <p className="text-xs uppercase tracking-wide text-slate-500">Total sources</p>
           <p className="mt-2 text-2xl font-semibold text-slate-100">
             {overview?.total_sources ?? "—"}
           </p>
         </div>
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4" title="Sources currently enabled for fetching">
           <p className="text-xs uppercase tracking-wide text-slate-500">Active sources</p>
           <p className="mt-2 text-2xl font-semibold text-slate-100">
             {overview?.active_sources ?? "—"}
           </p>
         </div>
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4" title="Articles ingested in the last 24 hours">
           <p className="text-xs uppercase tracking-wide text-slate-500">Items 24h</p>
           <p className="mt-2 text-2xl font-semibold text-slate-100">
             {overview?.items_last_24h ?? "—"}
           </p>
         </div>
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4" title="Sources with no successful fetch in 2+ hours">
           <p className="text-xs uppercase tracking-wide text-slate-500">Stale sources</p>
           <p className="mt-2 text-2xl font-semibold text-slate-100">
             {overview?.stale_sources ?? "—"}
           </p>
         </div>
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+        <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4" title="BullMQ pipeline queue status">
           <p className="text-xs uppercase tracking-wide text-slate-500">Queue backlog</p>
           <p className="mt-2 text-sm text-slate-300">
-            W:{overview?.queues.feed.waiting ?? "—"} A:{overview?.queues.feed.active ?? "—"} D:
-            {overview?.queues.feed.delayed ?? "—"} F:
+            <span title="Waiting — jobs queued but not yet processing">W:{overview?.queues.feed.waiting ?? "—"}</span>{" "}
+            <span title="Active — jobs currently being processed">A:{overview?.queues.feed.active ?? "—"}</span>{" "}
+            <span title="Delayed — jobs scheduled for future execution">D:{overview?.queues.feed.delayed ?? "—"}</span>{" "}
             <span
+              title="Failed — jobs that errored during processing"
               className={
                 (overview?.queues.feed.failed ?? 0) > 0 ? "text-red-300" : "text-slate-300"
               }
             >
-              {overview?.queues.feed.failed ?? "—"}
+              F:{overview?.queues.feed.failed ?? "—"}
             </span>
           </p>
         </div>
@@ -267,9 +270,25 @@ export default function Monitoring() {
                   <span className="text-sm font-semibold text-slate-100">
                     {source.name ?? "Untitled source"}
                   </span>
-                  <span className="text-xs text-slate-500 truncate max-w-[280px]" title={source.url}>
-                    {source.url}
+                  <span className="text-xs text-slate-500" title={source.url}>
+                    {(() => {
+                      try {
+                        return new URL(source.url).hostname;
+                      } catch {
+                        return source.url;
+                      }
+                    })()}
                   </span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigator.clipboard.writeText(source.url);
+                      toast.success("URL copied");
+                    }}
+                    className="flex-shrink-0 rounded border border-slate-700 px-1.5 py-0.5 text-[10px] text-slate-400 hover:border-slate-500 hover:text-slate-200 transition"
+                  >
+                    Copy URL
+                  </button>
                   <span className="rounded-full border border-slate-700 px-2 py-0.5 text-[10px] text-slate-400">
                     {source.sector?.name ?? "Unassigned"}
                   </span>

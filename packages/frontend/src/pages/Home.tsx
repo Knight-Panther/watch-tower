@@ -569,6 +569,27 @@ export default function Home() {
               <option value="signal-worst">Worst signal first</option>
               <option value="name">Name A-Z</option>
             </select>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => {
+                const allSelected = filteredSources.every((s) => selectedIds[s.id]);
+                if (allSelected) {
+                  setSelectedIds({});
+                } else {
+                  setSelectedIds(
+                    filteredSources.reduce(
+                      (acc, s) => ({ ...acc, [s.id]: true }),
+                      {} as Record<string, boolean>,
+                    ),
+                  );
+                }
+              }}
+            >
+              {filteredSources.length > 0 && filteredSources.every((s) => selectedIds[s.id])
+                ? "Deselect All"
+                : "Select All"}
+            </Button>
             {selectedCount > 0 ? (
               <span className="text-xs text-slate-500">{selectedCount} selected</span>
             ) : null}

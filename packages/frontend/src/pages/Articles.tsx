@@ -19,6 +19,7 @@ import {
   scheduleArticle,
   batchApproveArticles,
   batchRejectArticles,
+  batchTranslateArticles,
   type Article,
   type ArticleFilters,
   type ArticleFilterOptions,
@@ -65,7 +66,10 @@ export default function Articles() {
 
   // Batch selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [pendingBatchAction, setPendingBatchAction] = useState<"approve" | "reject" | null>(null);
+  const [pendingBatchAction, setPendingBatchAction] = useState<"approve" | "reject" | "translate" | null>(null);
+
+  // Single-article confirmation
+  const [pendingAction, setPendingAction] = useState<{ type: "reject" | "translate"; article: Article } | null>(null);
 
   // Filter state with localStorage persistence (no URL sync to avoid tab conflicts)
   const [filters, setFilter, setFilters] = useLocalStorageFilters<ArticleFilters>(
@@ -223,7 +227,7 @@ export default function Articles() {
     }
   };
 
-  const handleReject = async (article: Article) => {
+  const executeReject = async (article: Article) => {
     setBusyIds((prev) => new Set(prev).add(article.id));
     try {
       await rejectArticle(article.id);
@@ -237,7 +241,7 @@ export default function Articles() {
     }
   };
 
-  const handleTranslate = async (article: Article) => {
+  const executeTranslate = async (article: Article) => {
     setBusyIds((prev) => new Set(prev).add(article.id));
     try {
       await translateArticle(article.id);
@@ -251,6 +255,14 @@ export default function Articles() {
     }
   };
 
+  const confirmPendingAction = async () => {
+    if (!pendingAction) return;
+    const { type, article } = pendingAction;
+    setPendingAction(null);
+    if (type === "reject") await executeReject(article);
+    else await executeTranslate(article);
+  };
+
   // Batch actions
   const confirmBatchAction = async () => {
     if (!pendingBatchAction || selectedIds.size === 0) return;
@@ -258,13 +270,16 @@ export default function Articles() {
       if (pendingBatchAction === "reject") {
         await batchRejectArticles([...selectedIds]);
         toast.success(`${selectedIds.size} article(s) rejected`);
+      } else if (pendingBatchAction === "translate") {
+        const result = await batchTranslateArticles([...selectedIds]);
+        toast.success(`${result.queued} article(s) queued for translation${result.skipped ? ` (${result.skipped} skipped)` : ""}`);
       } else {
         await batchApproveArticles([...selectedIds]);
         toast.success(`${selectedIds.size} article(s) approved`);
       }
       loadArticles();
     } catch (err) {
-      const action = pendingBatchAction === "reject" ? "reject" : "approve";
+      const action = pendingBatchAction;
       const message = err instanceof Error ? err.message : `Failed to batch ${action}`;
       toast.error(message);
     } finally {
@@ -335,12 +350,12 @@ export default function Articles() {
 
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return "-";
-    return new Date(dateStr).toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    const d = new Date(dateStr);
+    const month = d.toLocaleDateString("en-US", { month: "short" });
+    const day = d.getDate();
+    const h = d.getHours().toString().padStart(2, "0");
+    const m = d.getMinutes().toString().padStart(2, "0");
+    return `${month} ${day}, ${h}:${m}`;
   };
 
   const getStageBadgeClass = (stage: string) => {
@@ -614,6 +629,11 @@ export default function Articles() {
           <Button variant="danger-soft" size="sm" onClick={() => setPendingBatchAction("reject")}>
             Reject Selected
           </Button>
+          {postingLanguage === "ka" && (
+            <Button variant="secondary" size="sm" onClick={() => setPendingBatchAction("translate")}>
+              Translate Selected
+            </Button>
+          )}
           <button
             onClick={() => setSelectedIds(new Set())}
             className="ml-auto text-xs text-slate-500 hover:text-slate-300"
@@ -625,11 +645,20 @@ export default function Articles() {
 
       {/* Articles Table */}
       <section className="rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+        <div className="overflow-hidden">
+          <table className="w-full text-sm table-fixed">
+            <colgroup>
+              <col className="w-10" />          {/* checkbox */}
+              <col className="w-[100px]" />     {/* date */}
+              <col className="w-[110px]" />     {/* source */}
+              <col />                            {/* title/summary — takes remaining space */}
+              <col className="w-[80px]" />       {/* status */}
+              <col className="w-[60px]" />       {/* score */}
+              <col className="w-[100px]" />      {/* actions */}
+            </colgroup>
             <thead className="bg-slate-800/50">
               <tr>
-                <th className="px-3 py-3 w-10">
+                <th className="px-2 py-3">
                   <input
                     type="checkbox"
                     checked={articles.length > 0 && selectedIds.size === articles.length}
@@ -639,32 +668,32 @@ export default function Articles() {
                 </th>
                 <th
                   onClick={() => handleSort("published_at")}
-                  className="px-4 py-3 text-left font-medium text-slate-300 cursor-pointer hover:text-white"
+                  className="px-2 py-3 text-left text-xs font-medium text-slate-300 cursor-pointer hover:text-white"
                 >
                   Date{" "}
                   {filters.sort_by === "published_at" && (filters.sort_dir === "desc" ? "↓" : "↑")}
                 </th>
-                <th className="px-4 py-3 text-left font-medium text-slate-300">Source</th>
-                <th className="px-4 py-3 text-left font-medium text-slate-300">
+                <th className="px-2 py-3 text-left font-medium text-slate-300">Source</th>
+                <th className="px-2 py-3 text-left font-medium text-slate-300">
                   Title / Summary
                 </th>
-                <th className="px-4 py-3 text-left font-medium text-slate-300">Status</th>
+                <th className="px-2 py-3 text-left font-medium text-slate-300">Status</th>
                 <th
                   onClick={() => handleSort("importance_score")}
-                  className="px-4 py-3 text-left font-medium text-slate-300 cursor-pointer hover:text-white"
+                  className="px-2 py-3 text-left font-medium text-slate-300 cursor-pointer hover:text-white"
                 >
                   Score{" "}
                   {filters.sort_by === "importance_score" &&
                     (filters.sort_dir === "desc" ? "↓" : "↑")}
                 </th>
-                <th className="px-4 py-3 text-left font-medium text-slate-300">Actions</th>
+                <th className="px-2 py-3 text-left font-medium text-slate-300">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
               {isLoading && articles.length === 0 && <SkeletonTable rows={8} columns={7} />}
               {articles.map((article) => (
                 <tr key={article.id} className={`hover:bg-slate-800/30 ${selectedIds.has(article.id) ? "bg-slate-800/20" : ""}`}>
-                  <td className="px-3 py-3">
+                  <td className="px-2 py-3">
                     <input
                       type="checkbox"
                       checked={selectedIds.has(article.id)}
@@ -672,11 +701,11 @@ export default function Articles() {
                       className="h-4 w-4 rounded border-slate-600 bg-slate-800 accent-emerald-500"
                     />
                   </td>
-                  <td className="px-4 py-3 text-slate-400 whitespace-nowrap">
+                  <td className="px-2 py-3 text-xs text-slate-400 whitespace-nowrap">
                     {formatDate(article.published_at)}
                   </td>
-                  <td className="px-4 py-3">
-                    <div className="max-w-[120px]">
+                  <td className="px-2 py-3">
+                    <div className="overflow-hidden">
                       <p className="text-slate-200 text-sm truncate">{article.source_name || "Unknown"}</p>
                       <div className="flex items-center gap-1 mt-0.5">
                         <span className="px-1.5 py-0.5 bg-slate-700/50 rounded text-xs text-slate-500">
@@ -696,7 +725,7 @@ export default function Articles() {
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-2 py-3 overflow-hidden">
                     {editingId === article.id ? (
                       <div className="space-y-2 rounded-lg border border-slate-600/50 bg-slate-800/30 p-2">
                         <div>
@@ -861,19 +890,19 @@ export default function Articles() {
                       </div>
                     )}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-2 py-3">
                     <span
                       className={`px-2 py-1 rounded text-xs ${getStageBadgeClass(article.pipeline_stage)}`}
                     >
                       {article.pipeline_stage}
                     </span>
                     {article.pipeline_stage === "rejected" && article.rejection_reason && (
-                      <p className="mt-1 text-[10px] text-red-400/70 max-w-[140px] truncate" title={article.rejection_reason}>
+                      <p className="mt-1 text-[10px] text-red-400/70 truncate" title={article.rejection_reason}>
                         {article.rejection_reason}
                       </p>
                     )}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-2 py-3">
                     <div className="group/score relative inline-block">
                       <span
                         className={`px-2 py-1 rounded text-xs font-bold ${getScoreBadgeClass(article.importance_score)} ${article.score_reasoning ? "cursor-help" : ""}`}
@@ -881,14 +910,14 @@ export default function Articles() {
                         {article.importance_score ?? "-"}
                       </span>
                       {article.score_reasoning && (
-                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-300 shadow-xl opacity-0 pointer-events-none group-hover/score:opacity-100 group-hover/score:pointer-events-auto transition-opacity z-20">
+                        <div className="absolute bottom-full right-0 mb-2 w-72 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-300 shadow-xl opacity-0 pointer-events-none group-hover/score:opacity-100 group-hover/score:pointer-events-auto transition-opacity z-20">
                           <p className="font-medium text-slate-200 mb-1">Score Reasoning</p>
                           <p className="leading-relaxed">{article.score_reasoning}</p>
                         </div>
                       )}
                     </div>
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-2 py-3">
                     <div className="flex flex-col gap-1.5 items-center">
                       {/* Schedule button (scored articles) */}
                       {article.pipeline_stage === "scored" &&
@@ -922,7 +951,7 @@ export default function Articles() {
                           article.translation_status === "failed" ||
                           article.translation_status === "exhausted") && (
                           <button
-                            onClick={() => handleTranslate(article)}
+                            onClick={() => setPendingAction({ type: "translate", article })}
                             disabled={busyIds.has(article.id)}
                             className="px-2 py-1 bg-cyan-500/20 text-cyan-200 rounded text-xs hover:bg-cyan-500/30 w-full text-center disabled:opacity-50"
                           >
@@ -937,7 +966,7 @@ export default function Articles() {
                             variant="danger-soft"
                             size="xs"
                             fullWidth
-                            onClick={() => handleReject(article)}
+                            onClick={() => setPendingAction({ type: "reject", article })}
                             disabled={busyIds.has(article.id)}
                             loading={busyIds.has(article.id)}
                             loadingText="Rejecting..."
@@ -951,7 +980,7 @@ export default function Articles() {
               ))}
               {!isLoading && articles.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8">
+                  <td colSpan={7} className="px-4 py-8">
                     <EmptyState
                       title="No articles found"
                       description={hasActiveFilters ? "Try adjusting your filters to see more results." : "Articles will appear here once the pipeline processes RSS feeds."}
@@ -1003,17 +1032,47 @@ export default function Articles() {
         />
       )}
 
+      {/* Single Article Confirmation */}
+      {pendingAction && (
+        <ConfirmModal
+          title={pendingAction.type === "reject" ? "Reject Article" : "Translate Article"}
+          message={
+            pendingAction.type === "reject"
+              ? `Reject "${pendingAction.article.title}"? This cannot be undone.`
+              : `Translate "${pendingAction.article.title}" to Georgian?`
+          }
+          confirmLabel={pendingAction.type === "reject" ? "Reject" : "Translate"}
+          variant={pendingAction.type === "reject" ? "danger" : "default"}
+          onConfirm={confirmPendingAction}
+          onCancel={() => setPendingAction(null)}
+        />
+      )}
+
       {/* Batch Action Confirmation */}
       {pendingBatchAction && (
         <ConfirmModal
-          title={pendingBatchAction === "approve" ? "Approve Articles" : "Reject Articles"}
+          title={
+            pendingBatchAction === "approve"
+              ? "Approve Articles"
+              : pendingBatchAction === "translate"
+                ? "Translate Articles"
+                : "Reject Articles"
+          }
           message={
             pendingBatchAction === "approve"
               ? `Approve ${selectedIds.size} selected article(s)? They will be queued for posting.`
-              : `Reject ${selectedIds.size} selected article(s)? This cannot be undone.`
+              : pendingBatchAction === "translate"
+                ? `Translate ${selectedIds.size} selected article(s) to Georgian? Already translated or ineligible articles will be skipped.`
+                : `Reject ${selectedIds.size} selected article(s)? This cannot be undone.`
           }
-          confirmLabel={pendingBatchAction === "approve" ? "Approve" : "Reject"}
-          variant={pendingBatchAction === "approve" ? "default" : "danger"}
+          confirmLabel={
+            pendingBatchAction === "approve"
+              ? "Approve"
+              : pendingBatchAction === "translate"
+                ? "Translate"
+                : "Reject"
+          }
+          variant={pendingBatchAction === "reject" ? "danger" : "default"}
           onConfirm={confirmBatchAction}
           onCancel={() => setPendingBatchAction(null)}
         />
