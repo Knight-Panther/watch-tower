@@ -2,6 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import Spinner from "../components/Spinner";
 import ScheduleModal from "../components/ScheduleModal";
+import ConfirmModal from "../components/ConfirmModal";
+import { SkeletonTable } from "../components/ui/Skeleton";
+import Button from "../components/ui/Button";
+import EmptyState from "../components/ui/EmptyState";
 import { useLocalStorageFilters } from "../hooks/useLocalStorageFilters";
 import { useServerEventsContext } from "../contexts/ServerEventsContext";
 import { useDebouncedCallback } from "../hooks/useDebouncedCallback";
@@ -61,6 +65,7 @@ export default function Articles() {
 
   // Batch selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [pendingBatchAction, setPendingBatchAction] = useState<"approve" | "reject" | null>(null);
 
   // Filter state with localStorage persistence (no URL sync to avoid tab conflicts)
   const [filters, setFilter, setFilters] = useLocalStorageFilters<ArticleFilters>(
@@ -76,6 +81,9 @@ export default function Articles() {
   const [editTitle, setEditTitle] = useState("");
   const [editSummary, setEditSummary] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+
+  // Per-row action loading (reject, translate)
+  const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
 
   // Schedule modal state
   const [schedulingArticle, setSchedulingArticle] = useState<Article | null>(null);
@@ -216,6 +224,7 @@ export default function Articles() {
   };
 
   const handleReject = async (article: Article) => {
+    setBusyIds((prev) => new Set(prev).add(article.id));
     try {
       await rejectArticle(article.id);
       toast.success("Article rejected");
@@ -223,10 +232,13 @@ export default function Articles() {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to reject";
       toast.error(message);
+    } finally {
+      setBusyIds((prev) => { const next = new Set(prev); next.delete(article.id); return next; });
     }
   };
 
   const handleTranslate = async (article: Article) => {
+    setBusyIds((prev) => new Set(prev).add(article.id));
     try {
       await translateArticle(article.id);
       toast.success("Translation queued");
@@ -234,31 +246,29 @@ export default function Articles() {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to queue translation";
       toast.error(message);
+    } finally {
+      setBusyIds((prev) => { const next = new Set(prev); next.delete(article.id); return next; });
     }
   };
 
   // Batch actions
-  const handleBatchReject = async () => {
-    if (selectedIds.size === 0) return;
+  const confirmBatchAction = async () => {
+    if (!pendingBatchAction || selectedIds.size === 0) return;
     try {
-      await batchRejectArticles([...selectedIds]);
-      toast.success(`${selectedIds.size} article(s) rejected`);
+      if (pendingBatchAction === "reject") {
+        await batchRejectArticles([...selectedIds]);
+        toast.success(`${selectedIds.size} article(s) rejected`);
+      } else {
+        await batchApproveArticles([...selectedIds]);
+        toast.success(`${selectedIds.size} article(s) approved`);
+      }
       loadArticles();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to batch reject";
+      const action = pendingBatchAction === "reject" ? "reject" : "approve";
+      const message = err instanceof Error ? err.message : `Failed to batch ${action}`;
       toast.error(message);
-    }
-  };
-
-  const handleBatchApprove = async () => {
-    if (selectedIds.size === 0) return;
-    try {
-      await batchApproveArticles([...selectedIds]);
-      toast.success(`${selectedIds.size} article(s) approved`);
-      loadArticles();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to batch approve";
-      toast.error(message);
+    } finally {
+      setPendingBatchAction(null);
     }
   };
 
@@ -365,15 +375,12 @@ export default function Articles() {
     <>
       <section className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Articles</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Articles</h1>
           <p className="mt-2 text-sm text-slate-400">{pagination.total} total articles</p>
         </div>
-        <button
-          onClick={loadArticles}
-          className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:border-slate-500"
-        >
-          {isLoading ? <Spinner /> : "Refresh"}
-        </button>
+        <Button variant="secondary" onClick={loadArticles} loading={isLoading}>
+          Refresh
+        </Button>
       </section>
 
       {/* Quick Filters */}
@@ -382,7 +389,7 @@ export default function Articles() {
           onClick={applyNeedsReview}
           className={`rounded-full px-4 py-2 text-sm font-medium transition ${
             filters.status === "scored" && filters.min_score === 3
-              ? "bg-amber-500/20 text-amber-200 border border-amber-500/50"
+              ? "bg-amber-500/20 text-amber-200 border border-amber-500/30"
               : "border border-slate-700 text-slate-300 hover:border-slate-500"
           }`}
         >
@@ -391,7 +398,7 @@ export default function Articles() {
         {hasActiveFilters && (
           <button
             onClick={clearFilters}
-            className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-400 transition hover:border-red-500/50 hover:text-red-300"
+            className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-400 transition hover:border-red-500/30 hover:text-red-300"
           >
             Clear Filters
           </button>
@@ -539,6 +546,55 @@ export default function Articles() {
         </div>
       </section>
 
+      {/* Active filter summary */}
+      {hasActiveFilters && (
+        <section className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+          <span className="font-medium text-slate-300">
+            Showing {pagination.total} article{pagination.total !== 1 ? "s" : ""}
+          </span>
+          {filters.sector_id && filterOptions?.sectors.find((s) => s.id === filters.sector_id) && (
+            <span className="rounded-full bg-slate-800 px-2.5 py-1">
+              Sector: {filterOptions.sectors.find((s) => s.id === filters.sector_id)?.name}
+            </span>
+          )}
+          {filters.status && (
+            <span className="rounded-full bg-slate-800 px-2.5 py-1">
+              Stage: {filters.status}
+            </span>
+          )}
+          {filters.min_score !== undefined && (
+            <span className="rounded-full bg-slate-800 px-2.5 py-1">
+              Score {">"}= {filters.min_score}
+            </span>
+          )}
+          {filters.max_score !== undefined && (
+            <span className="rounded-full bg-slate-800 px-2.5 py-1">
+              Score {"<"}= {filters.max_score}
+            </span>
+          )}
+          {filters.search && (
+            <span className="rounded-full bg-slate-800 px-2.5 py-1">
+              Search: "{filters.search}"
+            </span>
+          )}
+          {filters.date_from && (
+            <span className="rounded-full bg-slate-800 px-2.5 py-1">
+              From: {filters.date_from}
+            </span>
+          )}
+          {filters.date_to && (
+            <span className="rounded-full bg-slate-800 px-2.5 py-1">
+              To: {filters.date_to}
+            </span>
+          )}
+          {filters.rejection_type && (
+            <span className="rounded-full bg-slate-800 px-2.5 py-1">
+              Rejection: {filters.rejection_type}
+            </span>
+          )}
+        </section>
+      )}
+
       {/* Error */}
       {error && (
         <div className="rounded-xl border border-red-800 bg-red-950/40 p-4 text-red-200">
@@ -552,18 +608,12 @@ export default function Articles() {
           <span className="text-sm text-slate-300 font-medium">
             {selectedIds.size} selected
           </span>
-          <button
-            onClick={handleBatchApprove}
-            className="rounded-lg bg-emerald-500/20 px-3 py-1.5 text-xs font-medium text-emerald-200 hover:bg-emerald-500/30"
-          >
+          <Button variant="primary" size="sm" onClick={() => setPendingBatchAction("approve")}>
             Approve Selected
-          </button>
-          <button
-            onClick={handleBatchReject}
-            className="rounded-lg bg-red-500/20 px-3 py-1.5 text-xs font-medium text-red-200 hover:bg-red-500/30"
-          >
+          </Button>
+          <Button variant="danger-soft" size="sm" onClick={() => setPendingBatchAction("reject")}>
             Reject Selected
-          </button>
+          </Button>
           <button
             onClick={() => setSelectedIds(new Set())}
             className="ml-auto text-xs text-slate-500 hover:text-slate-300"
@@ -611,6 +661,7 @@ export default function Articles() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
+              {isLoading && articles.length === 0 && <SkeletonTable rows={8} columns={7} />}
               {articles.map((article) => (
                 <tr key={article.id} className={`hover:bg-slate-800/30 ${selectedIds.has(article.id) ? "bg-slate-800/20" : ""}`}>
                   <td className="px-3 py-3">
@@ -628,12 +679,12 @@ export default function Articles() {
                     <div className="max-w-[120px]">
                       <p className="text-slate-200 text-sm truncate">{article.source_name || "Unknown"}</p>
                       <div className="flex items-center gap-1 mt-0.5">
-                        <span className="px-1.5 py-0.5 bg-slate-700/50 rounded text-xs text-slate-400">
+                        <span className="px-1.5 py-0.5 bg-slate-700/50 rounded text-xs text-slate-500">
                           {article.sector_name || "-"}
                         </span>
                         {article.url && (
                           <button
-                            onClick={() => navigator.clipboard.writeText(article.url)}
+                            onClick={() => { navigator.clipboard.writeText(article.url); toast.success("URL copied"); }}
                             className="p-0.5 text-slate-500 hover:text-slate-300 transition-colors"
                             title="Copy article URL"
                           >
@@ -647,34 +698,51 @@ export default function Articles() {
                   </td>
                   <td className="px-4 py-3">
                     {editingId === article.id ? (
-                      <div className="space-y-2">
-                        <input
-                          value={editTitle}
-                          onChange={(e) => setEditTitle(e.target.value)}
-                          className="w-full rounded border border-slate-600 bg-slate-800 px-2 py-1 text-sm text-slate-200 outline-none focus:border-slate-400"
-                          placeholder="Title"
-                        />
-                        <textarea
-                          value={editSummary}
-                          onChange={(e) => setEditSummary(e.target.value)}
-                          rows={3}
-                          className="w-full rounded border border-slate-600 bg-slate-800 px-2 py-1 text-xs text-slate-300 outline-none focus:border-slate-400 resize-y"
-                          placeholder="Summary"
-                        />
-                        <div className="flex gap-2">
-                          <button
+                      <div className="space-y-2 rounded-lg border border-slate-600/50 bg-slate-800/30 p-2">
+                        <div>
+                          <input
+                            value={editTitle}
+                            onChange={(e) => setEditTitle(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape") cancelEditing();
+                              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); saveEditing(article.id); }
+                            }}
+                            className="w-full rounded border border-slate-600 bg-slate-800 px-2 py-1 text-sm text-slate-200 outline-none focus:border-slate-400"
+                            placeholder="Title"
+                          />
+                          <p className={`mt-0.5 text-[10px] ${editTitle.length > 200 ? "text-amber-400" : "text-slate-500"}`}>
+                            {editTitle.length}/200
+                          </p>
+                        </div>
+                        <div>
+                          <textarea
+                            value={editSummary}
+                            onChange={(e) => setEditSummary(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape") cancelEditing();
+                            }}
+                            rows={3}
+                            className="w-full rounded border border-slate-600 bg-slate-800 px-2 py-1 text-xs text-slate-300 outline-none focus:border-slate-400 resize-y"
+                            placeholder="Summary"
+                          />
+                          <p className={`text-[10px] ${editSummary.length > 500 ? "text-amber-400" : "text-slate-500"}`}>
+                            {editSummary.length}/500
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="primary"
+                            size="xs"
                             onClick={() => saveEditing(article.id)}
-                            disabled={isSaving}
-                            className="px-2 py-1 bg-emerald-500/20 text-emerald-200 rounded text-xs hover:bg-emerald-500/30 disabled:opacity-50"
+                            loading={isSaving}
+                            loadingText="Saving..."
                           >
-                            {isSaving ? "Saving..." : "Save"}
-                          </button>
-                          <button
-                            onClick={cancelEditing}
-                            className="px-2 py-1 bg-slate-700/50 text-slate-300 rounded text-xs hover:bg-slate-700"
-                          >
+                            Save
+                          </Button>
+                          <Button variant="ghost" size="xs" onClick={cancelEditing}>
                             Cancel
-                          </button>
+                          </Button>
+                          <span className="text-[10px] text-slate-500 ml-auto">Esc to cancel</span>
                         </div>
                       </div>
                     ) : (
@@ -702,11 +770,11 @@ export default function Articles() {
                             )}
                             {/* Summary text (Georgian if translated, English fallback) */}
                             {article.translation_status === "translated" && article.llm_summary_ka ? (
-                              <p className="text-xs text-slate-400 mt-1">
+                              <p className="text-xs text-slate-500 mt-1">
                                 {article.llm_summary_ka}
                               </p>
                             ) : article.llm_summary ? (
-                              <p className="text-xs text-slate-400 mt-1">
+                              <p className="text-xs text-slate-500 mt-1">
                                 {article.llm_summary}
                               </p>
                             ) : null}
@@ -758,7 +826,7 @@ export default function Articles() {
                               {article.title}
                             </a>
                             {article.llm_summary && (
-                              <p className="text-xs text-slate-400 mt-1">
+                              <p className="text-xs text-slate-500 mt-1">
                                 {article.llm_summary}
                               </p>
                             )}
@@ -826,21 +894,25 @@ export default function Articles() {
                       {article.pipeline_stage === "scored" &&
                         article.importance_score !== null &&
                         article.importance_score >= 3 && (
-                          <button
+                          <Button
+                            variant="primary"
+                            size="xs"
+                            fullWidth
                             onClick={() => openScheduleModal(article)}
-                            className="px-2 py-1 bg-emerald-500/20 text-emerald-200 rounded text-xs hover:bg-emerald-500/30 w-full text-center"
                           >
                             Schedule
-                          </button>
+                          </Button>
                         )}
                       {/* Repost button (posted articles) */}
                       {article.pipeline_stage === "posted" && (
-                        <button
+                        <Button
+                          variant="secondary"
+                          size="xs"
+                          fullWidth
                           onClick={() => openScheduleModal(article)}
-                          className="px-2 py-1 bg-blue-500/20 text-blue-200 rounded text-xs hover:bg-blue-500/30 w-full text-center"
                         >
                           Repost
-                        </button>
+                        </Button>
                       )}
                       {/* Translate button (Georgian mode) */}
                       {postingLanguage === "ka" &&
@@ -851,21 +923,27 @@ export default function Articles() {
                           article.translation_status === "exhausted") && (
                           <button
                             onClick={() => handleTranslate(article)}
-                            className="px-2 py-1 bg-cyan-500/20 text-cyan-200 rounded text-xs hover:bg-cyan-500/30 w-full text-center"
+                            disabled={busyIds.has(article.id)}
+                            className="px-2 py-1 bg-cyan-500/20 text-cyan-200 rounded text-xs hover:bg-cyan-500/30 w-full text-center disabled:opacity-50"
                           >
-                            Translate
+                            {busyIds.has(article.id) ? "Translating..." : "Translate"}
                           </button>
                         )}
                       {/* Reject button at bottom (scored articles) */}
                       {article.pipeline_stage === "scored" &&
                         article.importance_score !== null &&
                         article.importance_score >= 3 && (
-                          <button
+                          <Button
+                            variant="danger-soft"
+                            size="xs"
+                            fullWidth
                             onClick={() => handleReject(article)}
-                            className="px-2 py-1 bg-red-500/20 text-red-200 rounded text-xs hover:bg-red-500/30 w-full text-center"
+                            disabled={busyIds.has(article.id)}
+                            loading={busyIds.has(article.id)}
+                            loadingText="Rejecting..."
                           >
                             Reject
-                          </button>
+                          </Button>
                         )}
                     </div>
                   </td>
@@ -873,8 +951,11 @@ export default function Articles() {
               ))}
               {!isLoading && articles.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
-                    No articles found
+                  <td colSpan={8} className="px-4 py-8">
+                    <EmptyState
+                      title="No articles found"
+                      description={hasActiveFilters ? "Try adjusting your filters to see more results." : "Articles will appear here once the pipeline processes RSS feeds."}
+                    />
                   </td>
                 </tr>
               )}
@@ -889,23 +970,25 @@ export default function Articles() {
             {Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total}
           </p>
           <div className="flex gap-2">
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => handlePageChange(pagination.page - 1)}
               disabled={pagination.page <= 1}
-              className="px-3 py-1 rounded border border-slate-700 text-slate-200 text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:border-slate-500"
             >
               Previous
-            </button>
+            </Button>
             <span className="px-3 py-1 text-sm text-slate-400">
               Page {pagination.page} of {pagination.total_pages}
             </span>
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => handlePageChange(pagination.page + 1)}
               disabled={pagination.page >= pagination.total_pages}
-              className="px-3 py-1 rounded border border-slate-700 text-slate-200 text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:border-slate-500"
             >
               Next
-            </button>
+            </Button>
           </div>
         </div>
       </section>
@@ -917,6 +1000,22 @@ export default function Articles() {
           postingLanguage={postingLanguage}
           onClose={() => setSchedulingArticle(null)}
           onSchedule={handleSchedule}
+        />
+      )}
+
+      {/* Batch Action Confirmation */}
+      {pendingBatchAction && (
+        <ConfirmModal
+          title={pendingBatchAction === "approve" ? "Approve Articles" : "Reject Articles"}
+          message={
+            pendingBatchAction === "approve"
+              ? `Approve ${selectedIds.size} selected article(s)? They will be queued for posting.`
+              : `Reject ${selectedIds.size} selected article(s)? This cannot be undone.`
+          }
+          confirmLabel={pendingBatchAction === "approve" ? "Approve" : "Reject"}
+          variant={pendingBatchAction === "approve" ? "default" : "danger"}
+          onConfirm={confirmBatchAction}
+          onCancel={() => setPendingBatchAction(null)}
         />
       )}
     </>

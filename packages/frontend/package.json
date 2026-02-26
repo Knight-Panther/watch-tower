@@ -14,8 +14,10 @@
   "license": "ISC",
   "dependencies": {
     "@watch-tower/shared": "*",
+    "focus-trap-react": "^12.0.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
+    "react-error-boundary": "^6.1.1",
     "react-router-dom": "^7.12.0",
     "sonner": "^2.0.7"
   },

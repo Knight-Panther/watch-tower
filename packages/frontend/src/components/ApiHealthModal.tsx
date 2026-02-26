@@ -1,5 +1,8 @@
+import { useEffect } from "react";
+import { FocusTrap } from "focus-trap-react";
 import type { ProviderHealthResult } from "../api";
 import Spinner from "./Spinner";
+import Button from "./ui/Button";
 
 type ApiHealthModalProps = {
   results: ProviderHealthResult[] | null;
@@ -32,9 +35,18 @@ export default function ApiHealthModal({
       )
     : null;
 
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-      <div className="w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-100 shadow-xl">
+      <FocusTrap focusTrapOptions={{ escapeDeactivates: false, allowOutsideClick: true }}>
+      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-100 shadow-xl">
         <h3 className="text-lg font-semibold">API Provider Health</h3>
 
         {loading && (
@@ -113,14 +125,12 @@ export default function ApiHealthModal({
         )}
 
         <div className="mt-6 flex justify-end">
-          <button
-            onClick={onClose}
-            className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:border-slate-500"
-          >
+          <Button variant="secondary" onClick={onClose}>
             Close
-          </button>
+          </Button>
         </div>
       </div>
+      </FocusTrap>
     </div>
   );
 }

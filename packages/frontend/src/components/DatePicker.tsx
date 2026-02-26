@@ -114,6 +114,7 @@ export default function DatePicker({ value, onChange }: DatePickerProps) {
             <button
               type="button"
               onClick={prevMonth}
+              aria-label="Previous month"
               className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -126,6 +127,7 @@ export default function DatePicker({ value, onChange }: DatePickerProps) {
             <button
               type="button"
               onClick={nextMonth}
+              aria-label="Next month"
               className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

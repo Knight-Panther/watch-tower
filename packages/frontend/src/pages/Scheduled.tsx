@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import Spinner from "../components/Spinner";
 import DatePicker from "../components/DatePicker";
 import TimePicker from "../components/TimePicker";
+import Button from "../components/ui/Button";
 import { useLocalStorageFilters } from "../hooks/useLocalStorageFilters";
 import { useServerEventsContext } from "../contexts/ServerEventsContext";
 import { useDebouncedCallback } from "../hooks/useDebouncedCallback";
@@ -272,7 +273,7 @@ export default function Scheduled() {
     <>
       <section className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Scheduled Posts</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Scheduled Posts</h1>
           <p className="mt-2 text-sm text-slate-400">
             {pagination.total} total deliveries
             {stats && stats.due_in_next_hour > 0 && (
@@ -282,15 +283,16 @@ export default function Scheduled() {
             )}
           </p>
         </div>
-        <button
+        <Button
+          variant="secondary"
           onClick={() => {
             loadDeliveries();
             loadStats();
           }}
-          className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:border-slate-500"
+          loading={isLoading}
         >
-          {isLoading ? <Spinner /> : "Refresh"}
-        </button>
+          Refresh
+        </Button>
       </section>
 
       {/* Stats cards */}
@@ -528,18 +530,12 @@ export default function Scheduled() {
                           <td className="px-4 py-2.5">
                             {delivery.status === "scheduled" && (
                               <div className="flex gap-2">
-                                <button
-                                  onClick={() => openReschedule(delivery)}
-                                  className="px-2 py-0.5 bg-blue-500/20 text-blue-200 rounded text-xs hover:bg-blue-500/30"
-                                >
+                                <Button variant="secondary" size="xs" onClick={() => openReschedule(delivery)}>
                                   Reschedule
-                                </button>
-                                <button
-                                  onClick={() => setCancelItem(delivery)}
-                                  className="px-2 py-0.5 bg-red-500/20 text-red-200 rounded text-xs hover:bg-red-500/30"
-                                >
+                                </Button>
+                                <Button variant="danger-soft" size="xs" onClick={() => setCancelItem(delivery)}>
                                   Cancel
-                                </button>
+                                </Button>
                               </div>
                             )}
                           </td>
@@ -568,23 +564,25 @@ export default function Scheduled() {
             {Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total}
           </p>
           <div className="flex gap-2">
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => handlePageChange(pagination.page - 1)}
               disabled={pagination.page <= 1}
-              className="px-3 py-1 rounded border border-slate-700 text-slate-200 text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:border-slate-500"
             >
               Previous
-            </button>
+            </Button>
             <span className="px-3 py-1 text-sm text-slate-400">
               Page {pagination.page} of {pagination.total_pages || 1}
             </span>
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => handlePageChange(pagination.page + 1)}
               disabled={pagination.page >= pagination.total_pages}
-              className="px-3 py-1 rounded border border-slate-700 text-slate-200 text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:border-slate-500"
             >
               Next
-            </button>
+            </Button>
           </div>
         </section>
       )}
@@ -592,7 +590,7 @@ export default function Scheduled() {
       {/* Reschedule Modal */}
       {rescheduleItem && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-          <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-100 shadow-xl">
+          <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-100 shadow-xl">
             <h3 className="text-lg font-semibold">Reschedule Post</h3>
 
             <div className="mt-4">
@@ -616,18 +614,12 @@ export default function Scheduled() {
             </div>
 
             <div className="mt-6 flex justify-end gap-3">
-              <button
-                onClick={() => setRescheduleItem(null)}
-                className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:border-slate-500"
-              >
+              <Button variant="secondary" onClick={() => setRescheduleItem(null)}>
                 Cancel
-              </button>
-              <button
-                onClick={handleReschedule}
-                className="rounded-full bg-blue-500/20 px-4 py-2 text-sm font-semibold text-blue-200 hover:bg-blue-500/30"
-              >
+              </Button>
+              <Button variant="primary" onClick={handleReschedule}>
                 Reschedule
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -636,7 +628,7 @@ export default function Scheduled() {
       {/* Cancel Confirmation Modal */}
       {cancelItem && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-          <div className="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-100 shadow-xl">
+          <div className="w-full max-w-sm max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-100 shadow-xl">
             <h3 className="text-lg font-semibold text-red-200">Cancel Scheduled Post?</h3>
 
             <div className="mt-4">
@@ -651,7 +643,7 @@ export default function Scheduled() {
                 >
                   {cancelItem.platform}
                 </span>
-                <span className="text-xs text-slate-400">
+                <span className="text-xs text-slate-500">
                   {formatDateShort(cancelItem.scheduled_at)} {formatTime24(cancelItem.scheduled_at)}
                 </span>
               </div>
@@ -662,20 +654,18 @@ export default function Scheduled() {
             </p>
 
             <div className="mt-6 flex justify-end gap-3">
-              <button
-                onClick={() => setCancelItem(null)}
-                disabled={isCancelling}
-                className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:border-slate-500 disabled:opacity-50"
-              >
+              <Button variant="secondary" onClick={() => setCancelItem(null)} disabled={isCancelling}>
                 Keep Scheduled
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="danger-soft"
                 onClick={handleCancel}
                 disabled={isCancelling}
-                className="rounded-full bg-red-500/20 px-4 py-2 text-sm font-semibold text-red-200 hover:bg-red-500/30 disabled:opacity-50"
+                loading={isCancelling}
+                loadingText="Cancelling..."
               >
-                {isCancelling ? "Cancelling..." : "Yes, Cancel"}
-              </button>
+                Yes, Cancel
+              </Button>
             </div>
           </div>
         </div>

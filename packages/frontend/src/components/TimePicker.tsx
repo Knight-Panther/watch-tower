@@ -183,6 +183,7 @@ export default function TimePicker({ value, onChange }: TimePickerProps) {
             e.preventDefault(); // Don't steal focus from input
             setOpen(!open);
           }}
+          aria-label="Toggle time picker"
           className="px-3 py-3 text-slate-400 hover:text-slate-200 transition"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -201,9 +202,9 @@ export default function TimePicker({ value, onChange }: TimePickerProps) {
         <div className="absolute z-50 mt-1 rounded-xl border border-slate-700 bg-slate-900 shadow-xl overflow-hidden">
           {/* Column headers */}
           <div className="flex border-b border-slate-700">
-            <div className="w-16 text-center py-1.5 text-xs text-slate-400 font-medium">Hour</div>
+            <div className="w-16 text-center py-1.5 text-xs text-slate-500 font-medium">Hour</div>
             <div className="w-px bg-slate-700" />
-            <div className="w-16 text-center py-1.5 text-xs text-slate-400 font-medium">Min</div>
+            <div className="w-16 text-center py-1.5 text-xs text-slate-500 font-medium">Min</div>
           </div>
 
           <div className="flex">

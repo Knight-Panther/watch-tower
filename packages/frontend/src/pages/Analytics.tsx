@@ -4,6 +4,7 @@ import { getAnalytics, type AnalyticsData } from "../api";
 import { useServerEventsContext } from "../contexts/ServerEventsContext";
 import { useDebouncedCallback } from "../hooks/useDebouncedCallback";
 import Spinner from "../components/Spinner";
+import Button from "../components/ui/Button";
 
 const SCORE_COLORS: Record<number, string> = {
   1: "bg-red-500",
@@ -137,13 +138,9 @@ export default function Analytics() {
             Scoring patterns and approval insights over the last 30 days. Use these panels to understand how the AI scores your articles and which sources deliver the most value.
           </p>
         </div>
-        <button
-          onClick={loadData}
-          disabled={loading}
-          className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:border-slate-500 disabled:opacity-50"
-        >
-          {loading ? <Spinner /> : "Refresh"}
-        </button>
+        <Button variant="secondary" onClick={loadData} loading={loading}>
+          Refresh
+        </Button>
       </section>
 
       {error && (
@@ -168,7 +165,7 @@ export default function Analytics() {
           {/* Row 1: Score Distribution + Rejection Breakdown */}
           <div className="grid gap-6 lg:grid-cols-2">
             {/* Score Distribution */}
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
               <h2 className="text-sm font-semibold text-slate-200">Score Distribution</h2>
               <p className="mt-0.5 text-[11px] text-slate-500">
                 Every article is scored 1-5 by the AI (1 = irrelevant, 5 = critical). This shows how many articles fell into each score level. Ideally most articles should cluster around 2-3, with only a few reaching 4-5. Too many 1s means noisy sources; too many 5s means scoring is too lenient.
@@ -189,20 +186,35 @@ export default function Analytics() {
                           style={{ width: `${barWidth}%` }}
                         />
                       </div>
-                      <span className="w-16 text-right text-xs text-slate-400">
+                      <span className="w-16 text-right text-xs text-slate-500">
                         {cnt} ({pct.toFixed(0)}%)
                       </span>
                     </div>
                   );
                 })}
               </div>
-              <p className="mt-3 text-[10px] text-slate-500">
+              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[10px]">
+                {[
+                  { score: 1, label: "Irrelevant" },
+                  { score: 2, label: "Low" },
+                  { score: 3, label: "Moderate" },
+                  { score: 4, label: "High" },
+                  { score: 5, label: "Critical" },
+                ].map(({ score, label }) => (
+                  <span key={score} className="flex items-center gap-1">
+                    <span className={`inline-block h-2 w-2 rounded-sm ${SCORE_COLORS[score]}`} />
+                    <span className={SCORE_TEXT_COLORS[score]}>{score}</span>
+                    <span className="text-slate-500">{label}</span>
+                  </span>
+                ))}
+              </div>
+              <p className="mt-2 text-[10px] text-slate-500">
                 Total scored: {totalScored} articles
               </p>
             </section>
 
             {/* Rejection Breakdown */}
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
               <h2 className="text-sm font-semibold text-slate-200">Rejection Breakdown</h2>
               <p className="mt-0.5 text-[11px] text-slate-500">
                 Articles can be rejected in three ways: pre-filter (keyword rules block them before the AI even sees them — saves cost), LLM rejection (AI scored them too low), or manual (you rejected them from the dashboard). High pre-filter counts mean your keyword rules are effective.
@@ -244,7 +256,7 @@ export default function Analytics() {
           </div>
 
           {/* Row 2: Approval Rate by Score */}
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
             <h2 className="text-sm font-semibold text-slate-200">Approval Rate by Score</h2>
             <p className="mt-0.5 text-[11px] text-slate-500">
               Shows what happened to articles at each score level — were they posted, approved, rejected, or still pending review? This helps you tune auto-approve/reject thresholds. If score-3 articles often get manually approved, consider lowering the auto-approve threshold to save time.
@@ -299,7 +311,7 @@ export default function Analytics() {
           {/* Row 3: Source Value + Sector Performance */}
           <div className="grid gap-6 lg:grid-cols-2">
             {/* Source Value Ranking */}
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
               <h2 className="text-sm font-semibold text-slate-200">Source Value Ranking</h2>
               <p className="mt-0.5 text-[11px] text-slate-500">
                 Ranks your RSS sources by quality. "Signal" is the percentage of articles scoring 4+ (high-value). Sources with low signal ratio produce mostly noise — they cost LLM budget without delivering useful articles. Consider disabling or reassigning low-signal sources.
@@ -376,7 +388,7 @@ export default function Analytics() {
             </section>
 
             {/* Sector Performance */}
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
               <h2 className="text-sm font-semibold text-slate-200">Sector Performance</h2>
               <p className="mt-0.5 text-[11px] text-slate-500">
                 Compares performance across your sectors (e.g., Biotech, Crypto). Each sector groups multiple RSS sources. Sectors with low approval rates or low average scores may need better scoring rules or source curation on the Sectors page.

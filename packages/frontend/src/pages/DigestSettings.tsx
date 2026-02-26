@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import Spinner from "../components/Spinner";
+import Button from "../components/ui/Button";
 import {
   getDigestConfig,
   updateDigestConfig,
@@ -158,7 +159,8 @@ function Collapsible({
       <button
         type="button"
         onClick={toggle}
-        className="flex w-full items-center justify-between gap-3 p-5 text-left"
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-3 p-6 text-left"
       >
         <div className="min-w-0">
           <h2 className="text-lg font-semibold text-slate-100">{title}</h2>
@@ -177,7 +179,7 @@ function Collapsible({
           </svg>
         </div>
       </button>
-      {open && <div className="border-t border-slate-800 p-5 pt-4">{children}</div>}
+      {open && <div className="border-t border-slate-800 p-6 pt-4">{children}</div>}
     </section>
   );
 }
@@ -340,7 +342,7 @@ export default function DigestSettings() {
         <div>
           <h1 className="text-2xl font-bold text-slate-100">Daily Digest</h1>
         </div>
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-8 text-center">
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6 text-center">
           <p className="text-sm text-red-400">{error ?? "Failed to load config"}</p>
         </div>
       </div>
@@ -364,26 +366,30 @@ export default function DigestSettings() {
               className={[
                 "rounded-full px-4 py-2 text-sm font-medium transition-colors",
                 config.enabled
-                  ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50"
+                  ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/30"
                   : "bg-slate-700 text-slate-400 hover:bg-slate-600",
               ].join(" ")}
             >
               {config.enabled ? "Enabled" : "Disabled"}
             </button>
-            <button
+            <Button
+              variant="primary"
               onClick={handleSave}
               disabled={isSaving}
-              className="rounded-full bg-cyan-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-cyan-500 disabled:opacity-50"
+              loading={isSaving}
+              loadingText="Saving..."
             >
-              {isSaving ? "Saving..." : "Save Settings"}
-            </button>
-            <button
+              Save Settings
+            </Button>
+            <Button
+              variant="secondary"
               onClick={handleTest}
               disabled={isTesting}
-              className="rounded-full border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-300 transition-colors hover:border-slate-500 hover:text-slate-100 disabled:opacity-50"
+              loading={isTesting}
+              loadingText="Sending..."
             >
-              {isTesting ? "Sending..." : "Send Test"}
-            </button>
+              Send Test
+            </Button>
           </div>
         </div>
       </div>
@@ -391,7 +397,7 @@ export default function DigestSettings() {
       {/* ── Schedule + Content — side by side ─────────────────────────── */}
       <div className="grid gap-5 lg:grid-cols-2">
         {/* Schedule */}
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
           <h2 className="text-lg font-semibold text-slate-100">Schedule</h2>
           <p className="mt-0.5 text-xs text-slate-500">
             When to compile and deliver the digest.
@@ -446,7 +452,7 @@ export default function DigestSettings() {
                     className={[
                       "rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors",
                       active
-                        ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50"
+                        ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/30"
                         : "bg-slate-700 text-slate-400 hover:bg-slate-600",
                     ].join(" ")}
                   >
@@ -459,7 +465,7 @@ export default function DigestSettings() {
         </section>
 
         {/* Content */}
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
           <h2 className="text-lg font-semibold text-slate-100">Content</h2>
           <p className="mt-0.5 text-xs text-slate-500">
             Which articles to include and how to present them.
@@ -497,7 +503,7 @@ export default function DigestSettings() {
                   className={[
                     "rounded-full px-4 py-2 text-sm font-medium transition-colors",
                     config.language === "en"
-                      ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50"
+                      ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/30"
                       : "bg-slate-700 text-slate-400 hover:bg-slate-600",
                   ].join(" ")}
                 >
@@ -509,7 +515,7 @@ export default function DigestSettings() {
                   className={[
                     "rounded-full px-4 py-2 text-sm font-medium transition-colors",
                     config.language === "ka"
-                      ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50"
+                      ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/30"
                       : "bg-slate-700 text-slate-400 hover:bg-slate-600",
                   ].join(" ")}
                 >
@@ -730,7 +736,7 @@ export default function DigestSettings() {
                   className={[
                     "rounded-full px-4 py-1.5 text-xs font-medium transition-colors",
                     config.telegramEnabled
-                      ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50"
+                      ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/30"
                       : "bg-slate-700 text-slate-400 hover:bg-slate-600",
                   ].join(" ")}
                 >
@@ -792,7 +798,7 @@ export default function DigestSettings() {
                   className={[
                     "rounded-full px-4 py-1.5 text-xs font-medium transition-colors",
                     config.facebookEnabled
-                      ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50"
+                      ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/30"
                       : "bg-slate-700 text-slate-400 hover:bg-slate-600",
                   ].join(" ")}
                 >
@@ -832,7 +838,7 @@ export default function DigestSettings() {
                   className={[
                     "rounded-full px-4 py-1.5 text-xs font-medium transition-colors",
                     config.linkedinEnabled
-                      ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50"
+                      ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/30"
                       : "bg-slate-700 text-slate-400 hover:bg-slate-600",
                   ].join(" ")}
                 >
@@ -952,8 +958,8 @@ export default function DigestSettings() {
                         className={[
                           "inline-block rounded-full px-2 py-0.5 text-xs font-medium",
                           run.isTest
-                            ? "bg-amber-500/20 text-amber-300"
-                            : "bg-emerald-500/20 text-emerald-300",
+                            ? "bg-amber-500/20 text-amber-200"
+                            : "bg-emerald-500/20 text-emerald-200",
                         ].join(" ")}
                       >
                         {run.isTest ? "Test" : "Scheduled"}
@@ -985,7 +991,7 @@ export default function DigestSettings() {
                       </div>
                     </td>
                     <td className="px-3 py-2.5 text-center text-slate-300">{run.articleCount}</td>
-                    <td className="px-3 py-2.5 text-xs text-slate-400">{run.model}</td>
+                    <td className="px-3 py-2.5 text-xs text-slate-500">{run.model}</td>
                     <td className="px-3 py-2.5 text-xs text-slate-500">
                       Scanned: {run.statsScanned} | Scored: {run.statsScored} | {run.minScore}+: {run.statsAboveThreshold}
                     </td>
@@ -1000,27 +1006,19 @@ export default function DigestSettings() {
       {/* ── Clear History Confirmation Modal ──────────────────────────── */}
       {showClearConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-xl">
+          <div className="w-full max-w-sm max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-xl">
             <h3 className="text-lg font-semibold text-slate-100">Clear Digest History</h3>
             <p className="mt-2 text-sm text-slate-400">
               This will permanently delete all {history.length} digest history
               record{history.length === 1 ? "" : "s"}. This cannot be undone.
             </p>
             <div className="mt-5 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setShowClearConfirm(false)}
-                className="rounded-full border border-slate-700 bg-slate-800 px-5 py-2 text-sm font-medium text-slate-300 transition-colors hover:border-slate-500 hover:text-slate-100"
-              >
+              <Button variant="secondary" onClick={() => setShowClearConfirm(false)}>
                 Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleClearHistory}
-                className="rounded-full bg-red-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-red-500"
-              >
+              </Button>
+              <Button variant="danger" onClick={handleClearHistory}>
                 Clear All
-              </button>
+              </Button>
             </div>
           </div>
         </div>

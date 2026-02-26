@@ -29,3 +29,4 @@ coverage/
 
 # Misc
 .gemini-clipboard/
+.claude/worktrees/

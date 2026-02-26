@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
+import { FocusTrap } from "focus-trap-react";
 import type { Article } from "../api";
 import DatePicker from "./DatePicker";
 import TimePicker from "./TimePicker";
+import Button from "./ui/Button";
 
 type ScheduleModalProps = {
   article: Article;
@@ -116,7 +118,8 @@ export default function ScheduleModal({ article, postingLanguage, onClose, onSch
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-      <div className="w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-100 shadow-xl">
+      <FocusTrap focusTrapOptions={{ escapeDeactivates: false, allowOutsideClick: true }}>
+      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-100 shadow-xl">
         <h3 className="text-lg font-semibold">Approve & Schedule</h3>
 
         {/* Georgian mode: block scheduling if not translated */}
@@ -131,12 +134,9 @@ export default function ScheduleModal({ article, postingLanguage, onClose, onSch
             </div>
             <p className="mt-3 text-xs text-slate-500 truncate">{article.title}</p>
             <div className="mt-6 flex justify-end">
-              <button
-                onClick={onClose}
-                className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:border-slate-500"
-              >
+              <Button variant="secondary" onClick={onClose}>
                 Close
-              </button>
+              </Button>
             </div>
           </>
         ) : (
@@ -147,6 +147,7 @@ export default function ScheduleModal({ article, postingLanguage, onClose, onSch
                 <button
                   type="button"
                   onClick={() => setReasoningOpen((v) => !v)}
+                  aria-expanded={reasoningOpen}
                   className="flex w-full items-center justify-between px-4 py-2.5 text-left"
                 >
                   <span className="text-xs font-medium text-slate-400">
@@ -224,7 +225,7 @@ export default function ScheduleModal({ article, postingLanguage, onClose, onSch
                       key={platform.id}
                       className={`flex items-center gap-3 rounded-xl border px-4 py-3 cursor-pointer transition ${
                         isSelected
-                          ? "border-emerald-500/50 bg-emerald-500/10"
+                          ? "border-emerald-500/30 bg-emerald-500/10"
                           : "border-slate-800 bg-slate-900/50 hover:border-slate-600"
                       }`}
                     >
@@ -247,33 +248,33 @@ export default function ScheduleModal({ article, postingLanguage, onClose, onSch
 
             {/* Actions */}
             <div className="mt-6 flex justify-between">
-              <button
+              <Button
+                variant="secondary"
                 onClick={handlePostNow}
                 disabled={isSubmitting || selectedPlatforms.length === 0}
-                className="rounded-full border border-amber-500/50 px-4 py-2 text-sm text-amber-200 hover:bg-amber-500/10 disabled:opacity-50"
+                className="border-amber-500/30 text-amber-200 hover:border-amber-400 hover:bg-amber-500/10"
               >
                 Post Now
-              </button>
+              </Button>
               <div className="flex gap-3">
-                <button
-                  onClick={onClose}
-                  disabled={isSubmitting}
-                  className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200 hover:border-slate-500 disabled:opacity-50"
-                >
+                <Button variant="secondary" onClick={onClose} disabled={isSubmitting}>
                   Cancel
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="primary"
                   onClick={handleSubmit}
                   disabled={isSubmitting || selectedPlatforms.length === 0}
-                  className="rounded-full bg-emerald-500/20 px-4 py-2 text-sm font-semibold text-emerald-200 hover:bg-emerald-500/30 disabled:opacity-50"
+                  loading={isSubmitting}
+                  loadingText="Scheduling..."
                 >
-                  {isSubmitting ? "Scheduling..." : "Schedule"}
-                </button>
+                  Schedule
+                </Button>
               </div>
             </div>
           </>
         )}
       </div>
+      </FocusTrap>
     </div>
   );
 }

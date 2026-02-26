@@ -1,6 +1,5 @@
 {
   "permissions": {
-    "defaultMode": "acceptEdits",
     "allow": [
       "Bash(npm *)",
       "Bash(npx *)",
@@ -12,18 +11,38 @@
       "Bash(findstr *)",
       "Bash(powershell *)",
       "Bash(codex *)",
-      "Bash(cmd /c *)"
-    ],
-    "ask": [
-      "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(cmd /c *)",
+      "Bash(grep -n \"ring-.*500/50\\\\|ring-.*400/50\\\\|ring-.*300/50\" \"/c/Users/VM-Dev/Desktop/watch-tower/packages/frontend/src/pages\"/*.tsx)",
+      "Bash(grep -c \"ring-.*500/50\" \"/c/Users/VM-Dev/Desktop/watch-tower/packages/frontend/src/pages\"/*.tsx)",
+      "Bash(grep -n \"bg-.*500/40\\\\|bg-.*500/50\" \"/c/Users/VM-Dev/Desktop/watch-tower/packages/frontend/src/pages\"/*.tsx)",
+      "Bash(grep -n \"amber-500/40\\\\|amber-500/50\" \"/c/Users/VM-Dev/Desktop/watch-tower/packages/frontend/src/pages\"/*.tsx)",
+      "Bash(grep -n \"bg-amber-500/20 text-amber-200\\\\|bg-amber.*text-amber\" \"/c/Users/VM-Dev/Desktop/watch-tower/packages/frontend/src/pages\"/*.tsx)",
+      "Bash(grep -n \"py-2 text-sm\\\\|py-1\\\\.5 text-sm\\\\|py-1 text-sm\" \"/c/Users/VM-Dev/Desktop/watch-tower/packages/frontend/src/pages\"/*.tsx)",
+      "Bash(grep -n \"px-3 py-2\\\\|px-3 py-1\\\\.5\\\\|px-3 py-1\" \"/c/Users/VM-Dev/Desktop/watch-tower/packages/frontend/src/pages\"/*.tsx)",
+      "Bash(grep -c \"px-3 py-2\" \"/c/Users/VM-Dev/Desktop/watch-tower/packages/frontend/src/pages\"/*.tsx)",
+      "Bash(grep -c \"label.*block.*text-xs\\\\|<label\" /c/Users/VM-Dev/Desktop/watch-tower/packages/frontend/src/pages/*.tsx)",
+      "Bash(grep -l \"label.*block\" /c/Users/VM-Dev/Desktop/watch-tower/packages/frontend/src/pages/*.tsx)",
+      "Bash(grep -n \"FormField\" /c/Users/VM-Dev/Desktop/watch-tower/packages/frontend/src/pages/*.tsx)",
+      "Bash(ls /c/Users/VM-Dev/Desktop/watch-tower/packages/frontend/src/api*)",
+      "Bash(grep -c \"import.*Button\" c:/Users/VM-Dev/Desktop/watch-tower/packages/frontend/src/pages/*.tsx)",
+      "Bash(grep -l \"<button\\\\|<Button\" c:/Users/VM-Dev/Desktop/watch-tower/packages/frontend/src/pages/*.tsx)",
+      "Bash(grep -n \"p-5\\\\|gap-10\\\\|text-3xl\\\\|rounded-full\" /c/Users/VM-Dev/Desktop/watch-tower/packages/frontend/src/pages/*.tsx)",
+      "Bash(grep -n \"text-slate-400\\\\|text-slate-500\" /c/Users/VM-Dev/Desktop/watch-tower/packages/frontend/src/components/*.tsx)",
+      "Bash(grep -n \"aria-label\" packages/frontend/src/components/*.tsx packages/frontend/src/pages/*.tsx)",
+      "Bash(grep -n \"max-h-\\\\[90vh\\\\]\" packages/frontend/src/components/*.tsx)",
+      "Bash(grep -n \"FocusTrap\" packages/frontend/src/components/*.tsx packages/frontend/src/pages/*.tsx)"
     ],
     "deny": [
       "Bash(git push --force *)",
       "Bash(git reset --hard *)",
       "Bash(rm -rf *)",
       "Bash(npm publish *)"
-    ]
+    ],
+    "ask": [
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ],
+    "defaultMode": "acceptEdits"
   },
   "hooks": {
     "PostToolUse": [

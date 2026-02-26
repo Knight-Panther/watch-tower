@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import Spinner from "../components/Spinner";
 import ConfirmModal from "../components/ConfirmModal";
+import Button from "../components/ui/Button";
 import {
   listSocialAccounts,
   savePostTemplate,
@@ -200,7 +201,7 @@ export default function PostTemplates() {
 
   if (accounts.length === 0) {
     return (
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-8 text-center">
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6 text-center">
         <p className="text-slate-400">
           No social accounts configured. Add a social account in the database to customize templates.
         </p>
@@ -211,7 +212,7 @@ export default function PostTemplates() {
   return (
     <div className="grid gap-6">
       {/* Header - sticky below nav */}
-      <section className="sticky top-28 z-10 rounded-2xl border border-slate-800 bg-slate-900 p-5">
+      <section className="sticky top-28 z-10 rounded-2xl border border-slate-800 bg-slate-900 p-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Post Templates</h1>
@@ -249,7 +250,7 @@ export default function PostTemplates() {
         {/* Left: Template Editor */}
         <section className="space-y-6">
           {/* Content Toggles */}
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
             <h2 className="text-lg font-semibold">Post Components</h2>
             <p className="mt-1 text-sm text-slate-400">Toggle which elements appear in your posts.</p>
             <div className="mt-4 space-y-3">
@@ -277,7 +278,7 @@ export default function PostTemplates() {
               {template.showBreakingLabel && (
                 <div className="ml-4 flex gap-3 border-l-2 border-slate-700 pl-4">
                   <div className="flex-1">
-                    <label className="text-xs text-slate-400">Emoji</label>
+                    <label className="text-xs text-slate-500">Emoji</label>
                     <input
                       value={template.breakingEmoji}
                       onChange={(e) => updateTemplate("breakingEmoji", e.target.value)}
@@ -286,7 +287,7 @@ export default function PostTemplates() {
                     />
                   </div>
                   <div className="flex-1">
-                    <label className="text-xs text-slate-400">Text</label>
+                    <label className="text-xs text-slate-500">Text</label>
                     <input
                       value={template.breakingText}
                       onChange={(e) => updateTemplate("breakingText", e.target.value)}
@@ -380,7 +381,7 @@ export default function PostTemplates() {
               {/* URL Link Text (only show when URL is enabled) */}
               {template.showUrl && (
                 <div className="ml-4 border-l-2 border-slate-700 pl-4">
-                  <label className="text-xs text-slate-400">Link Text</label>
+                  <label className="text-xs text-slate-500">Link Text</label>
                   <input
                     value={template.urlLinkText}
                     onChange={(e) => updateTemplate("urlLinkText", e.target.value)}
@@ -440,26 +441,25 @@ export default function PostTemplates() {
 
           {/* Actions */}
           <div className="flex gap-3">
-            <button
+            <Button
+              variant="primary"
+              size="lg"
               onClick={handleSave}
               disabled={isSaving || !hasChanges}
-              className="rounded-xl bg-emerald-600 px-6 py-2.5 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50"
+              loading={isSaving}
+              loadingText="Saving..."
             >
-              {isSaving ? "Saving..." : "Save Template"}
-            </button>
-            <button
-              onClick={handleReset}
-              disabled={isSaving}
-              className="rounded-xl border border-slate-700 px-6 py-2.5 text-sm text-slate-300 transition hover:border-slate-500"
-            >
+              Save Template
+            </Button>
+            <Button variant="secondary" size="lg" onClick={handleReset} disabled={isSaving}>
               Reset to Default
-            </button>
+            </Button>
           </div>
         </section>
 
         {/* Right: Preview */}
         <section className="lg:sticky lg:top-24 lg:self-start">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">Live Preview</h2>
               {isPreviewLoading && <Spinner />}
@@ -494,15 +494,15 @@ export default function PostTemplates() {
           </div>
 
           {/* Sample Article Info */}
-          <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+          <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
             <h3 className="text-sm font-semibold text-slate-300">Sample Article</h3>
-            <p className="mt-2 text-xs text-slate-400">
+            <p className="mt-2 text-xs text-slate-500">
               <span className="text-slate-500">Title:</span> {SAMPLE_ARTICLE.title}
             </p>
-            <p className="mt-1 text-xs text-slate-400">
+            <p className="mt-1 text-xs text-slate-500">
               <span className="text-slate-500">Sector:</span> {SAMPLE_ARTICLE.sector}
             </p>
-            <p className="mt-1 text-xs text-slate-400">
+            <p className="mt-1 text-xs text-slate-500">
               <span className="text-slate-500">Summary:</span> {SAMPLE_ARTICLE.summary}
             </p>
           </div>

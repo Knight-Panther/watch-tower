@@ -1,6 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { toast } from "sonner";
+import Tabs, { useTabState } from "../components/ui/Tabs";
+import ConfirmModal from "../components/ConfirmModal";
+import Button from "../components/ui/Button";
+import EmptyState from "../components/ui/EmptyState";
 import {
   getAllowedDomains,
   addAllowedDomain,
@@ -21,20 +24,15 @@ import {
 } from "../api";
 import Spinner from "../components/Spinner";
 
-type TabId = "domains" | "limits" | "api" | "thresholds" | "translation" | "dedup";
-
 export default function SiteRules() {
-  // URL-based tab state
-  const [searchParams, setSearchParams] = useSearchParams();
-  const tabParam = searchParams.get("tab");
-  const activeTab: TabId =
-    tabParam === "limits" || tabParam === "api" || tabParam === "thresholds" || tabParam === "translation" || tabParam === "dedup"
-      ? tabParam
-      : "domains";
+  const [activeTab, setActiveTab] = useTabState("domains", [
+    "domains", "limits", "api", "thresholds", "translation", "dedup",
+  ]);
 
-  const setActiveTab = (tab: TabId) => {
-    setSearchParams(tab === "domains" ? {} : { tab }, { replace: true });
-  };
+  const DOMAINS_PER_PAGE = 20;
+
+  // Domain delete confirmation
+  const [domainToDelete, setDomainToDelete] = useState<string | null>(null);
 
   // Domain whitelist state
   const [domains, setDomains] = useState<AllowedDomain[]>([]);
@@ -43,6 +41,8 @@ export default function SiteRules() {
   const [newDomain, setNewDomain] = useState("");
   const [newDomainNotes, setNewDomainNotes] = useState("");
   const [addingDomain, setAddingDomain] = useState(false);
+  const [domainSearch, setDomainSearch] = useState("");
+  const [domainPage, setDomainPage] = useState(1);
 
   // Security config state
   const [securityConfig, setSecurityConfig] = useState<SecurityConfig | null>(null);
@@ -126,6 +126,28 @@ export default function SiteRules() {
     }
   }, []);
 
+  // Filtered + paginated domains
+  const filteredDomains = useMemo(() => {
+    if (!domainSearch.trim()) return domains;
+    const q = domainSearch.toLowerCase();
+    return domains.filter(
+      (d) =>
+        d.domain.toLowerCase().includes(q) ||
+        (d.notes && d.notes.toLowerCase().includes(q)),
+    );
+  }, [domains, domainSearch]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredDomains.length / DOMAINS_PER_PAGE));
+  const pagedDomains = filteredDomains.slice(
+    (domainPage - 1) * DOMAINS_PER_PAGE,
+    domainPage * DOMAINS_PER_PAGE,
+  );
+
+  // Reset page when search changes or domains reload
+  useEffect(() => {
+    setDomainPage(1);
+  }, [domainSearch, domains]);
+
   // Initial load
   useEffect(() => {
     loadDomains();
@@ -153,12 +175,18 @@ export default function SiteRules() {
 
   // Delete domain
   const handleDeleteDomain = async (id: string) => {
-    if (!confirm("Remove this domain from whitelist?")) return;
+    setDomainToDelete(id);
+  };
+
+  const confirmDeleteDomain = async () => {
+    if (!domainToDelete) return;
     try {
-      await deleteAllowedDomain(id);
+      await deleteAllowedDomain(domainToDelete);
       await loadDomains();
     } catch (err) {
       setDomainsError(err instanceof Error ? err.message : "Failed to delete domain");
+    } finally {
+      setDomainToDelete(null);
     }
   };
 
@@ -210,33 +238,22 @@ export default function SiteRules() {
         </p>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-slate-800">
-        {[
+      <Tabs
+        tabs={[
           { id: "domains", label: "Domain Whitelist" },
           { id: "limits", label: "Feed Limits" },
           { id: "api", label: "API Security" },
           { id: "thresholds", label: "Score Thresholds" },
           { id: "dedup", label: "Dedup Sensitivity" },
           { id: "translation", label: "Translation" },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id as typeof activeTab)}
-            className={`px-4 py-2 text-sm font-medium transition ${
-              activeTab === tab.id
-                ? "border-b-2 border-cyan-400 text-cyan-400"
-                : "text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+        ]}
+        activeTab={activeTab}
+        onChange={setActiveTab}
+      />
 
       {/* Domain Whitelist Tab */}
       {activeTab === "domains" && (
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
           <h2 className="text-lg font-semibold">Allowed RSS Domains</h2>
           <p className="mt-1 text-sm text-slate-400">
             Only RSS sources from these domains can be added. Protects against SSRF attacks.
@@ -256,13 +273,15 @@ export default function SiteRules() {
               placeholder="Notes (optional)"
               className="flex-1 min-w-[200px] rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-600"
             />
-            <button
+            <Button
+              variant="primary"
               onClick={handleAddDomain}
               disabled={addingDomain || !newDomain.trim()}
-              className="rounded-full bg-cyan-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-cyan-500 disabled:opacity-50"
+              loading={addingDomain}
+              loadingText="Adding..."
             >
-              {addingDomain ? "Adding..." : "Add Domain"}
-            </button>
+              Add Domain
+            </Button>
           </div>
 
           {domainsError && (
@@ -275,54 +294,118 @@ export default function SiteRules() {
               <Spinner /> Loading domains...
             </div>
           ) : domains.length === 0 ? (
-            <p className="mt-4 text-sm text-slate-400">No domains configured. Add your first trusted domain above.</p>
+            <div className="mt-4">
+              <EmptyState
+                title="No domains configured"
+                description="Add your first trusted domain above to whitelist RSS sources."
+              />
+            </div>
           ) : (
-            <div className="mt-4 space-y-2">
-              {domains.map((domain) => (
-                <div
-                  key={domain.id}
-                  className={`flex items-center justify-between rounded-xl border p-3 ${
-                    domain.isActive
-                      ? "border-slate-800 bg-slate-950/70"
-                      : "border-slate-700 bg-slate-900/50 opacity-60"
-                  }`}
-                >
-                  <div>
-                    <p className={`font-mono text-sm ${domain.isActive ? "text-slate-200" : "text-slate-400"}`}>
-                      {domain.domain}
-                    </p>
-                    {domain.notes && (
-                      <p className="mt-0.5 text-xs text-slate-500">{domain.notes}</p>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleToggleDomain(domain.id, domain.isActive)}
-                      className={`rounded-lg px-3 py-1 text-xs font-medium transition ${
+            <>
+              {/* Search filter (shown when 10+ domains) */}
+              {domains.length >= 10 && (
+                <div className="mt-4">
+                  <input
+                    value={domainSearch}
+                    onChange={(e) => setDomainSearch(e.target.value)}
+                    placeholder="Filter domains..."
+                    className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-600"
+                  />
+                </div>
+              )}
+
+              <div className={`${domains.length >= 10 ? "mt-2" : "mt-4"} space-y-2`}>
+                {pagedDomains.length === 0 ? (
+                  <p className="py-4 text-center text-sm text-slate-500">
+                    No domains match "{domainSearch}"
+                  </p>
+                ) : (
+                  pagedDomains.map((domain) => (
+                    <div
+                      key={domain.id}
+                      className={`flex items-center justify-between rounded-xl border p-3 ${
                         domain.isActive
-                          ? "bg-amber-500/20 text-amber-300 hover:bg-amber-500/30"
-                          : "bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
+                          ? "border-slate-800 bg-slate-950/70"
+                          : "border-slate-700 bg-slate-900/50 opacity-60"
                       }`}
                     >
-                      {domain.isActive ? "Disable" : "Enable"}
-                    </button>
+                      <div>
+                        <p className={`font-mono text-sm ${domain.isActive ? "text-slate-200" : "text-slate-400"}`}>
+                          {domain.domain}
+                        </p>
+                        {domain.notes && (
+                          <p className="mt-0.5 text-xs text-slate-500">{domain.notes}</p>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleToggleDomain(domain.id, domain.isActive)}
+                          className={`rounded-lg px-3 py-1 text-xs font-medium transition ${
+                            domain.isActive
+                              ? "bg-amber-500/20 text-amber-200 hover:bg-amber-500/30"
+                              : "bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30"
+                          }`}
+                        >
+                          {domain.isActive ? "Disable" : "Enable"}
+                        </button>
+                        <Button
+                          variant="danger-soft"
+                          size="sm"
+                          onClick={() => handleDeleteDomain(domain.id)}
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Pagination controls */}
+              {filteredDomains.length > DOMAINS_PER_PAGE && (
+                <div className="mt-3 flex items-center justify-between">
+                  <p className="text-xs text-slate-500">
+                    Showing {(domainPage - 1) * DOMAINS_PER_PAGE + 1}–
+                    {Math.min(domainPage * DOMAINS_PER_PAGE, filteredDomains.length)} of{" "}
+                    {filteredDomains.length}
+                    {domainSearch && ` (filtered from ${domains.length})`}
+                  </p>
+                  <div className="flex gap-2">
                     <button
-                      onClick={() => handleDeleteDomain(domain.id)}
-                      className="rounded-lg bg-red-500/20 px-3 py-1 text-xs font-medium text-red-300 transition hover:bg-red-500/30"
+                      onClick={() => setDomainPage((p) => Math.max(1, p - 1))}
+                      disabled={domainPage <= 1}
+                      className="rounded-lg border border-slate-700 px-3 py-1 text-xs text-slate-300 transition hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
-                      Delete
+                      Prev
+                    </button>
+                    <span className="flex items-center text-xs text-slate-400">
+                      {domainPage} / {totalPages}
+                    </span>
+                    <button
+                      onClick={() => setDomainPage((p) => Math.min(totalPages, p + 1))}
+                      disabled={domainPage >= totalPages}
+                      className="rounded-lg border border-slate-700 px-3 py-1 text-xs text-slate-300 transition hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Next
                     </button>
                   </div>
                 </div>
-              ))}
-            </div>
+              )}
+
+              {/* Total domain count */}
+              {!domainSearch && domains.length > DOMAINS_PER_PAGE && (
+                <p className="mt-1 text-xs text-slate-600">
+                  {domains.length} domains total
+                </p>
+              )}
+            </>
           )}
         </section>
       )}
 
       {/* Feed Limits Tab */}
       {activeTab === "limits" && (
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
           <h2 className="text-lg font-semibold">Feed Limits</h2>
           <p className="mt-1 text-sm text-slate-400">
             Global defaults for RSS ingestion limits. Set via environment variables.
@@ -339,7 +422,7 @@ export default function SiteRules() {
                 <p className="mt-2 text-2xl font-semibold text-slate-100">
                   {securityConfig.maxFeedSizeMb} MB
                 </p>
-                <p className="mt-1 text-xs text-slate-400">
+                <p className="mt-1 text-xs text-slate-500">
                   RSS feeds larger than this are rejected
                 </p>
               </div>
@@ -348,7 +431,7 @@ export default function SiteRules() {
                 <p className="mt-2 text-2xl font-semibold text-slate-100">
                   {securityConfig.maxArticlesPerFetch}
                 </p>
-                <p className="mt-1 text-xs text-slate-400">
+                <p className="mt-1 text-xs text-slate-500">
                   Max articles per single RSS fetch
                 </p>
               </div>
@@ -357,7 +440,7 @@ export default function SiteRules() {
                 <p className="mt-2 text-2xl font-semibold text-slate-100">
                   {securityConfig.maxArticlesPerSourceDaily}
                 </p>
-                <p className="mt-1 text-xs text-slate-400">
+                <p className="mt-1 text-xs text-slate-500">
                   Max articles per source per day
                 </p>
               </div>
@@ -370,7 +453,7 @@ export default function SiteRules() {
             <p className="text-sm text-slate-300">
               To change these limits, update the environment variables:
             </p>
-            <pre className="mt-2 text-xs text-slate-400 font-mono">
+            <pre className="mt-2 text-xs text-slate-500 font-mono">
 {`MAX_FEED_SIZE_MB=5
 MAX_ARTICLES_PER_FETCH=100
 MAX_ARTICLES_PER_SOURCE_DAILY=500`}
@@ -381,7 +464,7 @@ MAX_ARTICLES_PER_SOURCE_DAILY=500`}
 
       {/* API Security Tab */}
       {activeTab === "api" && (
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
           <h2 className="text-lg font-semibold">API Security</h2>
           <p className="mt-1 text-sm text-slate-400">
             CORS and rate limiting configuration. Set via environment variables.
@@ -399,7 +482,7 @@ MAX_ARTICLES_PER_SOURCE_DAILY=500`}
                 <p className="mt-2 text-2xl font-semibold text-slate-100">
                   {securityConfig.apiRateLimitPerMinute} <span className="text-sm font-normal text-slate-400">/ minute</span>
                 </p>
-                <p className="mt-1 text-xs text-slate-400">
+                <p className="mt-1 text-xs text-slate-500">
                   Requests exceeding this limit receive 429 Too Many Requests
                 </p>
               </div>
@@ -417,7 +500,7 @@ MAX_ARTICLES_PER_SOURCE_DAILY=500`}
                     </span>
                   ))}
                 </div>
-                <p className="mt-2 text-xs text-slate-400">
+                <p className="mt-2 text-xs text-slate-500">
                   Only these origins can make cross-origin requests to the API
                 </p>
               </div>
@@ -430,7 +513,7 @@ MAX_ARTICLES_PER_SOURCE_DAILY=500`}
             <p className="text-sm text-slate-300">
               To change these settings, update the environment variables:
             </p>
-            <pre className="mt-2 text-xs text-slate-400 font-mono">
+            <pre className="mt-2 text-xs text-slate-500 font-mono">
 {`ALLOWED_ORIGINS=https://yourdomain.com
 API_RATE_LIMIT_PER_MINUTE=200`}
             </pre>
@@ -527,7 +610,7 @@ API_RATE_LIMIT_PER_MINUTE=200`}
                   }}
                   className={`rounded-full px-4 py-2 text-sm font-medium transition ${
                     translationConfig?.posting_language === "en"
-                      ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50"
+                      ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/30"
                       : "bg-slate-700 text-slate-300 hover:bg-slate-600"
                   }`}
                 >
@@ -542,7 +625,7 @@ API_RATE_LIMIT_PER_MINUTE=200`}
                   }}
                   className={`rounded-full px-4 py-2 text-sm font-medium transition ${
                     translationConfig?.posting_language === "ka"
-                      ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/50"
+                      ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-500/30"
                       : "bg-slate-700 text-slate-300 hover:bg-slate-600"
                   }`}
                 >
@@ -673,7 +756,7 @@ API_RATE_LIMIT_PER_MINUTE=200`}
             aggressive (loosely related articles may also be deduped).
           </p>
 
-          <div className="mt-6 rounded-xl border border-slate-700 bg-slate-950/70 p-5">
+          <div className="mt-6 rounded-xl border border-slate-700 bg-slate-950/70 p-6">
             <div className="flex items-center justify-between mb-4">
               <span className="text-sm text-slate-300">Similarity Threshold</span>
               <span className="text-2xl font-semibold text-slate-100">
@@ -696,7 +779,7 @@ API_RATE_LIMIT_PER_MINUTE=200`}
               <span>95% — Strict (only near-identical)</span>
             </div>
 
-            <div className="mt-3 text-xs text-slate-400">
+            <div className="mt-3 text-xs text-slate-500">
               {dedupThreshold < 0.65 && (
                 <p className="text-amber-400">
                   Very aggressive — related but different articles may be incorrectly deduped.
@@ -715,7 +798,10 @@ API_RATE_LIMIT_PER_MINUTE=200`}
               )}
             </div>
 
-            <button
+            <Button
+              variant="primary"
+              fullWidth
+              className="mt-4"
               onClick={async () => {
                 setDedupSaving(true);
                 try {
@@ -730,16 +816,17 @@ API_RATE_LIMIT_PER_MINUTE=200`}
                 }
               }}
               disabled={dedupSaving}
-              className="mt-4 w-full rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-cyan-500 disabled:opacity-50"
+              loading={dedupSaving}
+              loadingText="Saving..."
             >
-              {dedupSaving ? "Saving..." : "Save Threshold"}
-            </button>
+              Save Threshold
+            </Button>
           </div>
 
           {dedupSavedValue != null && (
             <div className={`mt-4 flex items-center gap-2 rounded-xl border px-4 py-3 ${dedupSource === "database" ? "border-slate-700 bg-slate-950/50" : "border-amber-800/50 bg-amber-950/20"}`}>
               <span className={`h-2 w-2 rounded-full ${dedupSource === "database" ? "bg-emerald-500" : "bg-amber-500"}`} />
-              <span className="text-xs text-slate-400">
+              <span className="text-xs text-slate-500">
                 {dedupSource === "database" ? (
                   <>Worker using: <span className="font-medium text-slate-200">{Math.round(dedupSavedValue * 100)}%</span> <span className="text-slate-500">(saved in database)</span></>
                 ) : (
@@ -761,6 +848,16 @@ API_RATE_LIMIT_PER_MINUTE=200`}
             </p>
           </div>
         </section>
+      )}
+      {domainToDelete && (
+        <ConfirmModal
+          title="Remove Domain"
+          message="Remove this domain from the whitelist? RSS sources from this domain will no longer be allowed."
+          confirmLabel="Remove"
+          variant="danger"
+          onConfirm={confirmDeleteDomain}
+          onCancel={() => setDomainToDelete(null)}
+        />
       )}
     </div>
   );

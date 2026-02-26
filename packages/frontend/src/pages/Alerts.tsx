@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import Spinner from "../components/Spinner";
+import ConfirmModal from "../components/ConfirmModal";
+import Button from "../components/ui/Button";
+import EmptyState from "../components/ui/EmptyState";
 import {
   listAlertRules,
   createAlertRule,
@@ -48,7 +51,7 @@ function scoreLabel(score: number): string {
 function deliveryStatusClass(status: AlertDelivery["status"]): string {
   if (status === "sent") return "rounded-full bg-emerald-500/20 px-2 py-0.5 text-xs text-emerald-300";
   if (status === "failed") return "rounded-full bg-red-500/20 px-2 py-0.5 text-xs text-red-300";
-  return "rounded-full bg-slate-700 px-2 py-0.5 text-xs text-slate-400";
+  return "rounded-full bg-slate-700 px-2 py-0.5 text-xs text-slate-500";
 }
 
 // ─── Create Form ──────────────────────────────────────────────────────────────
@@ -84,6 +87,9 @@ function CreateForm({ onCreated }: CreateFormProps) {
     if (e.key === "Enter") {
       e.preventDefault();
       commitKeyword();
+    }
+    if (e.key === "Escape") {
+      setForm((prev) => ({ ...prev, keywordInput: "" }));
     }
   };
 
@@ -149,7 +155,7 @@ function CreateForm({ onCreated }: CreateFormProps) {
   };
 
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+    <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
       <h2 className="mb-4 text-base font-semibold text-slate-100">New Alert Rule</h2>
       <form onSubmit={handleSubmit} className="space-y-4">
         {/* Name */}
@@ -198,11 +204,19 @@ function CreateForm({ onCreated }: CreateFormProps) {
               className="min-w-32 flex-1 bg-transparent text-sm text-slate-200 outline-none placeholder:text-slate-600"
             />
           </div>
-          {hasShortKeyword && (
-            <p className="mt-1.5 text-xs text-amber-400">
-              Warning: some keywords are shorter than 3 characters and may produce excessive matches.
-            </p>
-          )}
+          <div className="mt-1.5 flex items-center gap-3">
+            <span className="text-xs text-slate-500">{form.keywords.length}/50</span>
+            {hasShortKeyword && (
+              <span className="text-xs text-amber-400">
+                Warning: some keywords are shorter than 3 characters and may produce excessive matches.
+              </span>
+            )}
+            {form.keywordInput.trim().length > 0 && form.keywordInput.trim().length < 3 && (
+              <span className="text-xs text-amber-400">
+                Tag should be at least 3 characters
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Min Score + Chat ID row */}
@@ -241,13 +255,16 @@ function CreateForm({ onCreated }: CreateFormProps) {
         </div>
 
         <div className="flex justify-end">
-          <button
+          <Button
             type="submit"
+            variant="primary"
+            size="lg"
             disabled={isSubmitting}
-            className="rounded-xl bg-emerald-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+            loading={isSubmitting}
+            loadingText="Creating..."
           >
-            {isSubmitting ? "Creating..." : "Create Rule"}
-          </button>
+            Create Rule
+          </Button>
         </div>
       </form>
     </div>
@@ -313,7 +330,7 @@ function DeliveriesTable({ ruleId }: DeliveriesTableProps) {
   }
 
   return (
-    <div className="mt-3 overflow-hidden rounded-xl border border-slate-800">
+    <div className="mt-3 overflow-x-auto rounded-xl border border-slate-800">
       <table className="w-full text-xs">
         <thead>
           <tr className="border-b border-slate-800 bg-slate-900/60">
@@ -361,7 +378,7 @@ function RuleCard({ rule, onToggle, onDelete, isToggling }: RuleCardProps) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+    <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
       {/* Row 1: name + active toggle */}
       <div className="flex items-start justify-between gap-3">
         <h3 className="text-lg font-bold text-slate-100 leading-tight">{rule.name}</h3>
@@ -378,12 +395,13 @@ function RuleCard({ rule, onToggle, onDelete, isToggling }: RuleCardProps) {
           >
             {rule.active ? "Active" : "Inactive"}
           </button>
-          <button
+          <Button
+            variant="danger"
+            size="sm"
             onClick={() => onDelete(rule)}
-            className="rounded-xl border border-red-700/50 px-3 py-1.5 text-xs text-red-400 hover:bg-red-900/30"
           >
             Delete
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -428,7 +446,8 @@ function RuleCard({ rule, onToggle, onDelete, isToggling }: RuleCardProps) {
       <div className="mt-3 border-t border-slate-800/60 pt-3">
         <button
           onClick={() => setExpanded((v) => !v)}
-          className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200"
+          aria-expanded={expanded}
+          className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-200"
         >
           <svg
             className={["h-3.5 w-3.5 transition-transform", expanded ? "rotate-90" : ""].join(" ")}
@@ -453,6 +472,7 @@ export default function Alerts() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
+  const [deleteTarget, setDeleteTarget] = useState<AlertRule | null>(null);
 
   const loadRules = useCallback(async () => {
     setIsLoading(true);
@@ -504,21 +524,23 @@ export default function Alerts() {
     }
   }, []);
 
-  const handleDelete = useCallback(async (rule: AlertRule) => {
-    const confirmed = window.confirm(
-      `Delete alert rule "${rule.name}"? This action cannot be undone.`,
-    );
-    if (!confirmed) return;
+  const handleDelete = useCallback((rule: AlertRule) => {
+    setDeleteTarget(rule);
+  }, []);
 
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
     try {
-      await deleteAlertRule(rule.id);
-      setRules((prev) => prev.filter((r) => r.id !== rule.id));
+      await deleteAlertRule(deleteTarget.id);
+      setRules((prev) => prev.filter((r) => r.id !== deleteTarget.id));
       toast.success("Alert rule deleted");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to delete alert rule";
       toast.error(message);
+    } finally {
+      setDeleteTarget(null);
     }
-  }, []);
+  };
 
   return (
     <div className="space-y-6">
@@ -546,23 +568,23 @@ export default function Alerts() {
         )}
 
         {!isLoading && error && (
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-8 text-center">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6 text-center">
             <p className="text-sm text-red-400">{error}</p>
-            <button
+            <Button
+              variant="secondary"
+              className="mt-4"
               onClick={loadRules}
-              className="mt-4 rounded-xl bg-slate-800 px-4 py-2 text-sm text-slate-300 hover:bg-slate-700"
             >
               Retry
-            </button>
+            </Button>
           </div>
         )}
 
         {!isLoading && !error && rules.length === 0 && (
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-12 text-center">
-            <p className="text-sm text-slate-500">
-              No alert rules yet. Create your first rule above.
-            </p>
-          </div>
+          <EmptyState
+            title="No alert rules yet"
+            description="Create your first keyword alert rule above to get instant Telegram notifications."
+          />
         )}
 
         {!isLoading &&
@@ -577,6 +599,17 @@ export default function Alerts() {
             />
           ))}
       </div>
+
+      {deleteTarget && (
+        <ConfirmModal
+          title="Delete Alert Rule"
+          message={`Delete alert rule "${deleteTarget.name}"? This action cannot be undone.`}
+          confirmLabel="Delete"
+          variant="danger"
+          onConfirm={confirmDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
     </div>
   );
 }

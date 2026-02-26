@@ -1,54 +1,66 @@
-import { useMemo, useState } from "react";
-import type { Sector, Source, StatsSource, ProviderHealthResult, SourceQuality } from "../api";
-import { checkProviderHealth } from "../api";
+import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
+import {
+  batchSourceAction,
+  checkProviderHealth,
+  createSource,
+  deleteSource,
+  getConstraints,
+  getSourceQuality,
+  getStatsSources,
+  listSectors,
+  listSources,
+  runIngest,
+  updateSource,
+  type Constraints,
+  type ProviderHealthResult,
+  type Sector,
+  type Source,
+  type SourceQuality,
+  type StatsSource,
+} from "../api";
+import ConfirmModal from "../components/ConfirmModal";
 import Spinner from "../components/Spinner";
 import ApiHealthModal from "../components/ApiHealthModal";
+import Button from "../components/ui/Button";
+import EmptyState from "../components/ui/EmptyState";
 
-type HomeProps = {
-  sources: Source[];
-  sectors: Sector[];
-  statsLookup: Map<string, StatsSource>;
-  sourceQuality: Record<string, SourceQuality>;
-  activeCount: number;
-  isLoading: boolean;
-  error: string | null;
-  sourceForm: {
-    url: string;
-    name: string;
-    sectorId: string;
-    maxAgeDays: string;
-    ingestIntervalMinutes: string;
-  };
-  sourceErrors: {
+const emptySourceForm = {
+  url: "",
+  name: "",
+  sectorId: "",
+  maxAgeDays: "",
+  ingestIntervalMinutes: "",
+};
+
+export default function Home() {
+  const [sources, setSources] = useState<Source[]>([]);
+  const [sectors, setSectors] = useState<Sector[]>([]);
+  const [constraints, setConstraints] = useState<Constraints | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [sourceForm, setSourceForm] = useState(emptySourceForm);
+  const [sourceErrors, setSourceErrors] = useState<{
     url?: string;
     sectorId?: string;
     maxAgeDays?: string;
     ingestIntervalMinutes?: string;
-  };
-  maxAgeDrafts: Record<string, string>;
-  sourceIntervalDrafts: Record<string, string>;
-  sectorDrafts: Record<string, string>;
-  filters: { sectorId: string; maxAgeDays: string; search: string };
-  selectedCount: number;
-  selectedIds: Record<string, boolean>;
-  isTriggering: boolean;
-  onRunIngest: () => void;
-  onRefresh: () => void;
-  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
-  onToggle: (source: Source) => void;
-  onDeletePermanent: (source: Source) => void;
-  onSaveChanges: (source: Source) => void;
-  onFilterChange: (next: { sectorId: string; maxAgeDays: string; search: string }) => void;
-  onSourceFormChange: (next: HomeProps["sourceForm"]) => void;
-  onMaxAgeDraftChange: (id: string, value: string) => void;
-  onSourceIntervalDraftChange: (id: string, value: string) => void;
-  onSectorDraftChange: (id: string, value: string) => void;
-  onSelectToggle: (id: string, value: boolean) => void;
-  onBatchDeactivate: () => void;
-  onBatchDelete: () => void;
-};
+  }>({});
+  const [isTriggering, setIsTriggering] = useState(false);
+  const [maxAgeDrafts, setMaxAgeDrafts] = useState<Record<string, string>>({});
+  const [sectorDrafts, setSectorDrafts] = useState<Record<string, string>>({});
+  const [sourceIntervalDrafts, setSourceIntervalDrafts] = useState<Record<string, string>>({});
+  const [filters, setFilters] = useState({ sectorId: "", maxAgeDays: "", search: "" });
+  const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
+  const [confirmDeleteSource, setConfirmDeleteSource] = useState<Source | null>(null);
+  const [confirmBatchAction, setConfirmBatchAction] = useState<{
+    action: "deactivate" | "delete";
+    count: number;
+    ids: string[];
+  } | null>(null);
+  const [sourceQuality, setSourceQuality] = useState<Record<string, SourceQuality>>({});
+  const [statsSources, setStatsSources] = useState<StatsSource[]>([]);
 
-export default function Home(props: HomeProps) {
   const [sortBy, setSortBy] = useState<"default" | "signal-best" | "signal-worst" | "name">(
     "default",
   );
@@ -57,6 +69,296 @@ export default function Home(props: HomeProps) {
   const [healthResults, setHealthResults] = useState<ProviderHealthResult[] | null>(null);
   const [healthCheckedAt, setHealthCheckedAt] = useState<string | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
+
+  const activeCount = useMemo(() => sources.filter((s) => s.active).length, [sources]);
+  const selectedCount = useMemo(
+    () => Object.values(selectedIds).filter(Boolean).length,
+    [selectedIds],
+  );
+  const statsLookup = useMemo(() => {
+    const map = new Map<string, StatsSource>();
+    statsSources.forEach((s) => map.set(s.id, s));
+    return map;
+  }, [statsSources]);
+
+  const refresh = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const [sourcesData, sectorsData, constraintsData] = await Promise.all([
+        listSources(),
+        listSectors(),
+        getConstraints(),
+      ]);
+      setSources(sourcesData);
+      setSectors(sectorsData);
+      setConstraints(constraintsData);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to load sources";
+      setError(message);
+      toast.error(message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const refreshStats = async () => {
+    try {
+      const [sourcesData, qualityData] = await Promise.all([
+        getStatsSources(),
+        getSourceQuality(),
+      ]);
+      setStatsSources(sourcesData);
+      setSourceQuality(qualityData);
+    } catch {
+      // stats are non-critical, don't show error
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+    refreshStats();
+  }, []);
+
+  const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSourceErrors({});
+    if (!sourceForm.url) {
+      setSourceErrors((prev) => ({ ...prev, url: "URL is required" }));
+      setError("URL is required");
+      return;
+    }
+    if (!sourceForm.sectorId) {
+      setSourceErrors((prev) => ({ ...prev, sectorId: "Sector is required" }));
+      setError("Sector is required");
+      return;
+    }
+
+    const maxAgeMin = constraints?.maxAge.min ?? 1;
+    const maxAgeMax = constraints?.maxAge.max ?? 15;
+    const maxAge = sourceForm.maxAgeDays.trim() === "" ? null : Number(sourceForm.maxAgeDays);
+    if (maxAge !== null && (Number.isNaN(maxAge) || maxAge < maxAgeMin || maxAge > maxAgeMax)) {
+      setSourceErrors((prev) => ({
+        ...prev,
+        maxAgeDays: `Max age must be between ${maxAgeMin} and ${maxAgeMax}`,
+      }));
+      setError(`Max age must be between ${maxAgeMin} and ${maxAgeMax}`);
+      return;
+    }
+
+    const intervalMin = constraints?.interval.min ?? 1;
+    const intervalMax = constraints?.interval.max ?? 4320;
+    const intervalRaw = sourceForm.ingestIntervalMinutes.trim();
+    if (!intervalRaw) {
+      setSourceErrors((prev) => ({
+        ...prev,
+        ingestIntervalMinutes: "Interval is required",
+      }));
+      setError("Interval is required");
+      return;
+    }
+    const intervalValue = Number(intervalRaw);
+    if (Number.isNaN(intervalValue) || intervalValue < intervalMin || intervalValue > intervalMax) {
+      setSourceErrors((prev) => ({
+        ...prev,
+        ingestIntervalMinutes: `Interval must be ${intervalMin}-${intervalMax}`,
+      }));
+      setError(`Interval must be between ${intervalMin} and ${intervalMax} minutes`);
+      return;
+    }
+
+    try {
+      const created = await createSource({
+        url: sourceForm.url,
+        name: sourceForm.name,
+        sector_id: sourceForm.sectorId,
+        max_age_days: maxAge,
+        ingest_interval_minutes: intervalValue,
+      });
+      setSources((prev) => [created, ...prev]);
+      setSourceForm(emptySourceForm);
+      toast.success("Source added");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to create source";
+      if (!message.toLowerCase().includes("already exists")) {
+        setError(message);
+      }
+      toast.error(message);
+    }
+  };
+
+  const onToggle = async (source: Source) => {
+    try {
+      const updated = await updateSource(source.id, { active: !source.active });
+      setSources((prev) => prev.map((item) => (item.id === source.id ? updated : item)));
+      toast.success(source.active ? "Source deactivated" : "Source activated");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update source";
+      setError(message);
+      toast.error(message);
+    }
+  };
+
+  const onConfirmDelete = async () => {
+    if (!confirmDeleteSource) return;
+    try {
+      const deleted = await deleteSource(confirmDeleteSource.id, true);
+      setSources((prev) => prev.filter((item) => item.id !== deleted.id));
+      toast.success("Source deleted");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to delete source";
+      setError(message);
+      toast.error(message);
+    } finally {
+      setConfirmDeleteSource(null);
+    }
+  };
+
+  const onSaveChanges = async (source: Source) => {
+    const rawValue =
+      maxAgeDrafts[source.id] ??
+      String(source.max_age_days ?? source.sectors?.default_max_age_days ?? 5);
+
+    const maMin = constraints?.maxAge.min ?? 1;
+    const maMax = constraints?.maxAge.max ?? 15;
+    let maxAgeValue: number | null = null;
+    if (rawValue.trim() !== "") {
+      const parsed = Number(rawValue);
+      if (Number.isNaN(parsed) || parsed < maMin || parsed > maMax) {
+        setError(`Max age must be between ${maMin} and ${maMax}`);
+        toast.error(`Max age must be between ${maMin} and ${maMax}`);
+        return;
+      }
+      maxAgeValue = parsed;
+    }
+
+    const sectorDraft = sectorDrafts[source.id];
+    const sectorId = sectorDraft ?? source.sector_id ?? "";
+    const sectorChanged = sectorId !== (source.sector_id ?? "");
+
+    if (sectorChanged && !sectorId) {
+      setError("Select a sector to save");
+      toast.error("Select a sector to save");
+      return;
+    }
+    const maxAgeChanged =
+      maxAgeValue !== (source.max_age_days ?? source.sectors?.default_max_age_days ?? 5);
+
+    const intMin = constraints?.interval.min ?? 1;
+    const intMax = constraints?.interval.max ?? 4320;
+    const intervalValueRaw =
+      sourceIntervalDrafts[source.id] ?? String(source.ingest_interval_minutes);
+    if (!intervalValueRaw.trim()) {
+      setError("Interval is required");
+      toast.error("Interval is required");
+      return;
+    }
+    const intervalValue = Number(intervalValueRaw);
+    if (Number.isNaN(intervalValue) || intervalValue < intMin || intervalValue > intMax) {
+      setError(`Interval must be between ${intMin} and ${intMax} minutes`);
+      toast.error(`Interval must be between ${intMin} and ${intMax} minutes`);
+      return;
+    }
+    const intervalChanged = intervalValue !== source.ingest_interval_minutes;
+
+    if (!sectorChanged && !maxAgeChanged && !intervalChanged) {
+      toast("No changes to save");
+      return;
+    }
+
+    try {
+      const updated = await updateSource(source.id, {
+        ...(sectorChanged ? { sector_id: sectorId } : {}),
+        max_age_days: maxAgeValue,
+        ingest_interval_minutes: intervalValue,
+      });
+      setSources((prev) => prev.map((item) => (item.id === source.id ? updated : item)));
+      setMaxAgeDrafts((prev) => {
+        const next = { ...prev };
+        delete next[source.id];
+        return next;
+      });
+      setSectorDrafts((prev) => {
+        const next = { ...prev };
+        delete next[source.id];
+        return next;
+      });
+      setSourceIntervalDrafts((prev) => {
+        const next = { ...prev };
+        delete next[source.id];
+        return next;
+      });
+
+      if (sectorChanged && maxAgeChanged && intervalChanged) {
+        toast.success("Sector, max age, and interval updated");
+      } else if (sectorChanged && maxAgeChanged) {
+        toast.success("Sector and max age updated");
+      } else if (sectorChanged && intervalChanged) {
+        toast.success("Sector and interval updated");
+      } else if (maxAgeChanged && intervalChanged) {
+        toast.success("Max age and interval updated");
+      } else if (sectorChanged) {
+        toast.success("Sector updated");
+      } else if (maxAgeChanged) {
+        toast.success("Max age updated");
+      } else {
+        toast.success("Interval updated");
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update source";
+      setError(message);
+      toast.error(message);
+    }
+  };
+
+  const onRunIngest = async () => {
+    setIsTriggering(true);
+    setError(null);
+    try {
+      await runIngest();
+      toast.success("Ingest triggered");
+      setTimeout(() => refreshStats(), 5_000);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to trigger ingest";
+      setError(message);
+      toast.error(message);
+    } finally {
+      setIsTriggering(false);
+    }
+  };
+
+  const runBatchAction = (action: "deactivate" | "delete") => {
+    const ids = Object.entries(selectedIds)
+      .filter(([, selected]) => selected)
+      .map(([id]) => id);
+    if (!ids.length) {
+      toast.error("Select at least one source");
+      return;
+    }
+    setConfirmBatchAction({ action, count: ids.length, ids });
+  };
+
+  const onConfirmBatch = async () => {
+    if (!confirmBatchAction) return;
+    const { action, ids } = confirmBatchAction;
+    try {
+      const updated = await batchSourceAction({ ids, action });
+      if (action === "delete") {
+        setSources((prev) => prev.filter((item) => !ids.includes(item.id)));
+      } else {
+        const updatedMap = new Map(updated.map((item) => [item.id, item]));
+        setSources((prev) => prev.map((item) => updatedMap.get(item.id) ?? item));
+      }
+      setSelectedIds({});
+      toast.success(action === "delete" ? "Sources deleted" : "Sources deactivated");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update sources";
+      setError(message);
+      toast.error(message);
+    } finally {
+      setConfirmBatchAction(null);
+    }
+  };
 
   const onCheckApiHealth = async () => {
     setHealthModalOpen(true);
@@ -75,228 +377,170 @@ export default function Home(props: HomeProps) {
   };
 
   const filteredSources = useMemo(() => {
-    const maxAgeFilter = props.filters.maxAgeDays.trim() ? Number(props.filters.maxAgeDays) : null;
+    const maxAgeFilter = filters.maxAgeDays.trim() ? Number(filters.maxAgeDays) : null;
     const maxAgeValid =
       maxAgeFilter === null ||
       (!Number.isNaN(maxAgeFilter) && maxAgeFilter >= 1 && maxAgeFilter <= 15);
-    const searchQuery = props.filters.search.trim().toLowerCase();
+    const searchQuery = filters.search.trim().toLowerCase();
 
-    const filtered = props.sources.filter((source) => {
-      if (props.filters.sectorId && source.sector_id !== props.filters.sectorId) {
-        return false;
-      }
-      if (!maxAgeValid) {
-        return true;
-      }
+    const filtered = sources.filter((source) => {
+      if (filters.sectorId && source.sector_id !== filters.sectorId) return false;
+      if (!maxAgeValid) return true;
       if (maxAgeFilter !== null) {
         const effectiveMaxAge = source.max_age_days ?? source.sectors?.default_max_age_days ?? 1;
-        if (effectiveMaxAge !== maxAgeFilter) {
-          return false;
-        }
+        if (effectiveMaxAge !== maxAgeFilter) return false;
       }
       if (searchQuery) {
         const haystack = `${source.name ?? ""} ${source.url}`.toLowerCase();
-        if (!haystack.includes(searchQuery)) {
-          return false;
-        }
+        if (!haystack.includes(searchQuery)) return false;
       }
       return true;
     });
 
     if (sortBy === "name") {
-      return [...filtered].sort((a, b) =>
-        (a.name ?? a.url).localeCompare(b.name ?? b.url),
-      );
+      return [...filtered].sort((a, b) => (a.name ?? a.url).localeCompare(b.name ?? b.url));
     }
     if (sortBy === "signal-best" || sortBy === "signal-worst") {
       return [...filtered].sort((a, b) => {
-        const qa = props.sourceQuality[a.id];
-        const qb = props.sourceQuality[b.id];
-        const ra = qa?.signal_ratio ?? -1;
-        const rb = qb?.signal_ratio ?? -1;
+        const ra = sourceQuality[a.id]?.signal_ratio ?? -1;
+        const rb = sourceQuality[b.id]?.signal_ratio ?? -1;
         return sortBy === "signal-best" ? rb - ra : ra - rb;
       });
     }
     return filtered;
-  }, [props.sources, props.filters, props.sourceQuality, sortBy]);
+  }, [sources, filters, sourceQuality, sortBy]);
 
   return (
     <>
       <section className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Media Watch Tower</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Media Watch Tower</h1>
           <p className="mt-2 text-sm text-slate-400">
-            {props.activeCount} active sources - {props.sources.length} total
+            {activeCount} active sources - {sources.length} total
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <button
-            onClick={props.onRunIngest}
-            disabled={props.isTriggering}
-            className="rounded-full border border-emerald-500/50 px-4 py-2 text-sm text-emerald-200 transition hover:border-emerald-300 disabled:opacity-50"
+          <Button
+            variant="primary"
+            onClick={onRunIngest}
+            disabled={isTriggering}
+            loading={isTriggering}
+            loadingText="Ingesting..."
           >
-            {props.isTriggering ? "Triggering..." : "Run ingest"}
-          </button>
-          <button
-            onClick={props.onRefresh}
-            className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:border-slate-500"
-          >
+            Run ingest
+          </Button>
+          <Button variant="secondary" onClick={refresh}>
             Refresh
-          </button>
-          <button
-            onClick={onCheckApiHealth}
-            className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:border-slate-500"
-          >
+          </Button>
+          <Button variant="secondary" onClick={onCheckApiHealth}>
             Check API Health
-          </button>
+          </Button>
         </div>
       </section>
 
       <div className="grid gap-4 md:grid-cols-[3fr_2fr]">
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
           <h2 className="text-sm font-semibold text-slate-300">Add source</h2>
-          <form onSubmit={props.onSubmit} className="mt-3 grid gap-2.5 grid-cols-2">
+          <form onSubmit={onSubmit} className="mt-3 grid gap-2.5 grid-cols-2">
             <input
-              value={props.sourceForm.url}
-              onChange={(event) =>
-                props.onSourceFormChange({
-                  ...props.sourceForm,
-                  url: event.target.value,
-                })
-              }
+              value={sourceForm.url}
+              onChange={(e) => setSourceForm({ ...sourceForm, url: e.target.value })}
               placeholder="RSS URL"
               className="col-span-2 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-600"
             />
-            {props.sourceErrors.url ? (
-              <p className="col-span-2 text-xs text-red-400">{props.sourceErrors.url}</p>
+            {sourceErrors.url ? (
+              <p className="col-span-2 text-xs text-red-400">{sourceErrors.url}</p>
             ) : null}
             <input
-              value={props.sourceForm.name}
-              onChange={(event) =>
-                props.onSourceFormChange({
-                  ...props.sourceForm,
-                  name: event.target.value,
-                })
-              }
+              value={sourceForm.name}
+              onChange={(e) => setSourceForm({ ...sourceForm, name: e.target.value })}
               placeholder="Name (optional)"
               className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-600"
             />
             <select
-              value={props.sourceForm.sectorId}
-              onChange={(event) =>
-                props.onSourceFormChange({
-                  ...props.sourceForm,
-                  sectorId: event.target.value,
-                })
-              }
+              value={sourceForm.sectorId}
+              onChange={(e) => setSourceForm({ ...sourceForm, sectorId: e.target.value })}
               className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-600"
             >
               <option value="" disabled>
                 Select sector
               </option>
-              {props.sectors.map((sector) => (
+              {sectors.map((sector) => (
                 <option key={sector.id} value={sector.id}>
                   {sector.name}
                 </option>
               ))}
             </select>
-            {props.sectors.length === 0 ? (
+            {sectors.length === 0 ? (
               <p className="col-span-2 text-xs text-amber-300">
                 Create a sector before adding sources.
               </p>
             ) : null}
-            {props.sourceErrors.sectorId ? (
-              <p className="col-span-2 text-xs text-red-400">{props.sourceErrors.sectorId}</p>
+            {sourceErrors.sectorId ? (
+              <p className="col-span-2 text-xs text-red-400">{sourceErrors.sectorId}</p>
             ) : null}
             <input
-              value={props.sourceForm.maxAgeDays}
-              onChange={(event) =>
-                props.onSourceFormChange({
-                  ...props.sourceForm,
-                  maxAgeDays: event.target.value,
-                })
-              }
+              value={sourceForm.maxAgeDays}
+              onChange={(e) => setSourceForm({ ...sourceForm, maxAgeDays: e.target.value })}
               placeholder="Max age (1-15 days)"
               className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-600"
             />
-            {props.sourceErrors.maxAgeDays ? (
-              <p className="col-span-2 text-xs text-red-400">{props.sourceErrors.maxAgeDays}</p>
+            {sourceErrors.maxAgeDays ? (
+              <p className="col-span-2 text-xs text-red-400">{sourceErrors.maxAgeDays}</p>
             ) : null}
             <input
-              value={props.sourceForm.ingestIntervalMinutes}
-              onChange={(event) =>
-                props.onSourceFormChange({
-                  ...props.sourceForm,
-                  ingestIntervalMinutes: event.target.value,
-                })
+              value={sourceForm.ingestIntervalMinutes}
+              onChange={(e) =>
+                setSourceForm({ ...sourceForm, ingestIntervalMinutes: e.target.value })
               }
               placeholder="Interval (1-4320 min)"
               className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-600"
             />
-            {props.sourceErrors.ingestIntervalMinutes ? (
+            {sourceErrors.ingestIntervalMinutes ? (
               <p className="col-span-2 text-xs text-red-400">
-                {props.sourceErrors.ingestIntervalMinutes}
+                {sourceErrors.ingestIntervalMinutes}
               </p>
             ) : null}
             <div className="col-span-2">
-              <button
-                type="submit"
-                disabled={props.sectors.length === 0}
-                className="w-full rounded-lg bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-900 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-              >
+              <Button variant="primary" type="submit" fullWidth disabled={sectors.length === 0}>
                 Add
-              </button>
+              </Button>
             </div>
           </form>
         </section>
 
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
           <h2 className="text-sm font-semibold text-slate-300">Filters</h2>
           <div className="mt-3 grid gap-2.5">
             <input
-              value={props.filters.search}
-              onChange={(event) =>
-                props.onFilterChange({
-                  ...props.filters,
-                  search: event.target.value,
-                })
-              }
+              value={filters.search}
+              onChange={(e) => setFilters({ ...filters, search: e.target.value })}
               placeholder="Search name or URL"
               className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-600"
             />
             <select
-              value={props.filters.sectorId}
-              onChange={(event) =>
-                props.onFilterChange({
-                  ...props.filters,
-                  sectorId: event.target.value,
-                })
-              }
+              value={filters.sectorId}
+              onChange={(e) => setFilters({ ...filters, sectorId: e.target.value })}
               className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-600"
             >
               <option value="">All sectors</option>
-              {props.sectors.map((sector) => (
+              {sectors.map((sector) => (
                 <option key={sector.id} value={sector.id}>
                   {sector.name}
                 </option>
               ))}
             </select>
             <input
-              value={props.filters.maxAgeDays}
-              onChange={(event) =>
-                props.onFilterChange({
-                  ...props.filters,
-                  maxAgeDays: event.target.value,
-                })
-              }
+              value={filters.maxAgeDays}
+              onChange={(e) => setFilters({ ...filters, maxAgeDays: e.target.value })}
               placeholder="Max age days (1-15)"
               className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-600"
             />
           </div>
-          {props.filters.maxAgeDays.trim() !== "" ? (
-            Number.isNaN(Number(props.filters.maxAgeDays)) ||
-            Number(props.filters.maxAgeDays) < 1 ||
-            Number(props.filters.maxAgeDays) > 15 ? (
+          {filters.maxAgeDays.trim() !== "" ? (
+            Number.isNaN(Number(filters.maxAgeDays)) ||
+            Number(filters.maxAgeDays) < 1 ||
+            Number(filters.maxAgeDays) > 15 ? (
               <p className="mt-2 text-xs text-red-400">
                 Filter max age must be between 1 and 15
               </p>
@@ -310,7 +554,7 @@ export default function Home(props: HomeProps) {
           <h2 className="text-lg font-semibold">
             Sources
             <span className="ml-2 text-sm font-normal text-slate-500">
-              {filteredSources.length} of {props.sources.length}
+              {filteredSources.length} of {sources.length}
             </span>
           </h2>
           <div className="flex items-center gap-3">
@@ -325,29 +569,31 @@ export default function Home(props: HomeProps) {
               <option value="signal-worst">Worst signal first</option>
               <option value="name">Name A-Z</option>
             </select>
-            {props.selectedCount > 0 ? (
-              <span className="text-xs text-slate-400">{props.selectedCount} selected</span>
+            {selectedCount > 0 ? (
+              <span className="text-xs text-slate-500">{selectedCount} selected</span>
             ) : null}
-            <button
-              onClick={props.onBatchDeactivate}
-              disabled={props.selectedCount === 0}
-              className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 transition hover:border-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
+            <Button
+              variant="secondary"
+              size="xs"
+              onClick={() => runBatchAction("deactivate")}
+              disabled={selectedCount === 0}
             >
               Deactivate selected
-            </button>
-            <button
-              onClick={props.onBatchDelete}
-              disabled={props.selectedCount === 0}
-              className="rounded-full border border-red-500/60 px-3 py-1 text-xs text-red-200 transition hover:border-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+            </Button>
+            <Button
+              variant="danger"
+              size="xs"
+              onClick={() => runBatchAction("delete")}
+              disabled={selectedCount === 0}
             >
               Delete selected
-            </button>
-            {props.isLoading ? <Spinner /> : null}
+            </Button>
+            {isLoading ? <Spinner /> : null}
           </div>
         </div>
 
-        {props.error ? <p className="mt-3 text-sm text-red-400">{props.error}</p> : null}
-        {!props.isLoading && props.sources.length > 0 && props.activeCount === 0 ? (
+        {error ? <p className="mt-3 text-sm text-red-400">{error}</p> : null}
+        {!isLoading && sources.length > 0 && activeCount === 0 ? (
           <p className="mt-3 text-sm text-amber-300">
             All sources are inactive. Ingest will not pull any items.
           </p>
@@ -355,8 +601,8 @@ export default function Home(props: HomeProps) {
 
         <div className="mt-4 grid gap-3">
           {filteredSources.map((source) => {
-            const stats = props.statsLookup.get(source.id);
-            const quality = props.sourceQuality[source.id];
+            const stats = statsLookup.get(source.id);
+            const quality = sourceQuality[source.id];
             const healthStatus = stats?.is_stale
               ? "stale"
               : stats?.last_run?.status === "error"
@@ -381,7 +627,6 @@ export default function Home(props: HomeProps) {
                     ? "Stale - no recent updates"
                     : "No fetch data yet";
 
-            // Signal ratio badge color
             const signalColor = !quality
               ? "text-slate-500"
               : quality.signal_ratio >= 40
@@ -390,16 +635,38 @@ export default function Home(props: HomeProps) {
                   ? "text-amber-400"
                   : "text-red-400";
 
+            const hasDraftChanges =
+              (maxAgeDrafts[source.id] !== undefined &&
+                maxAgeDrafts[source.id] !== String(source.max_age_days ?? source.sectors?.default_max_age_days ?? 1)) ||
+              (sectorDrafts[source.id] !== undefined &&
+                sectorDrafts[source.id] !== (source.sector_id ?? "")) ||
+              (sourceIntervalDrafts[source.id] !== undefined &&
+                sourceIntervalDrafts[source.id] !== String(source.ingest_interval_minutes));
+
+            const revertDrafts = () => {
+              setMaxAgeDrafts((prev) => ({ ...prev, [source.id]: String(source.max_age_days ?? source.sectors?.default_max_age_days ?? 1) }));
+              setSectorDrafts((prev) => ({ ...prev, [source.id]: source.sector_id ?? "" }));
+              setSourceIntervalDrafts((prev) => ({ ...prev, [source.id]: String(source.ingest_interval_minutes) }));
+            };
+
+            const handleEscape = (e: React.KeyboardEvent) => {
+              if (e.key === "Escape") revertDrafts();
+            };
+
             return (
               <div
                 key={source.id}
-                className="flex items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-950/70 px-4 py-3"
+                className={`flex items-center justify-between gap-4 rounded-xl border px-4 py-3 transition-colors ${
+                  hasDraftChanges
+                    ? "border-emerald-800/50 bg-emerald-950/20"
+                    : "border-slate-800 bg-slate-950/70"
+                }`}
               >
                 <div className="flex items-center gap-3 min-w-0 flex-shrink">
                   <input
                     type="checkbox"
-                    checked={Boolean(props.selectedIds[source.id])}
-                    onChange={(event) => props.onSelectToggle(source.id, event.target.checked)}
+                    checked={Boolean(selectedIds[source.id])}
+                    onChange={(e) => setSelectedIds((prev) => ({ ...prev, [source.id]: e.target.checked }))}
                     className="h-4 w-4 flex-shrink-0 accent-emerald-400"
                   />
                   <span
@@ -425,9 +692,7 @@ export default function Home(props: HomeProps) {
                         onClick={(e) => {
                           e.stopPropagation();
                           navigator.clipboard.writeText(source.url);
-                          const btn = e.currentTarget;
-                          btn.textContent = "✓";
-                          setTimeout(() => { btn.textContent = "Copy URL"; }, 1200);
+                          toast.success("URL copied");
                         }}
                         className="flex-shrink-0 rounded border border-slate-700 px-1.5 py-0.5 text-[10px] text-slate-400 hover:border-slate-500 hover:text-slate-200 transition"
                       >
@@ -454,7 +719,7 @@ export default function Home(props: HomeProps) {
                         >
                           {quality.signal_ratio}%
                         </span>
-                        <div className="w-44" title="Score distribution bar — each colored segment represents a score level (1 to 5, left to right). Wider segments mean more articles at that score. Red/orange = low scores, green = high scores.">
+                        <div className="w-60" title="Score distribution bar — each colored segment represents a score level (1 to 5, left to right). Wider segments mean more articles at that score. Red/orange = low scores, green = high scores.">
                           <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-slate-800">
                             {segments.map(({ score, count }) => (
                               <div
@@ -504,12 +769,13 @@ export default function Home(props: HomeProps) {
                       Sector
                     </span>
                     <select
-                      value={props.sectorDrafts[source.id] ?? source.sector_id ?? ""}
-                      onChange={(event) => props.onSectorDraftChange(source.id, event.target.value)}
+                      value={sectorDrafts[source.id] ?? source.sector_id ?? ""}
+                      onChange={(e) => setSectorDrafts((prev) => ({ ...prev, [source.id]: e.target.value }))}
+                      onKeyDown={handleEscape}
                       className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
                     >
                       <option value="">Unassigned</option>
-                      {props.sectors.map((sector) => (
+                      {sectors.map((sector) => (
                         <option key={sector.id} value={sector.id}>
                           {sector.name}
                         </option>
@@ -522,10 +788,11 @@ export default function Home(props: HomeProps) {
                     </span>
                     <input
                       value={
-                        props.maxAgeDrafts[source.id] ??
+                        maxAgeDrafts[source.id] ??
                         String(source.max_age_days ?? source.sectors?.default_max_age_days ?? 1)
                       }
-                      onChange={(event) => props.onMaxAgeDraftChange(source.id, event.target.value)}
+                      onChange={(e) => setMaxAgeDrafts((prev) => ({ ...prev, [source.id]: e.target.value }))}
+                      onKeyDown={handleEscape}
                       className="w-20 rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
                     />
                   </div>
@@ -535,24 +802,27 @@ export default function Home(props: HomeProps) {
                     </span>
                     <input
                       value={
-                        props.sourceIntervalDrafts[source.id] ??
+                        sourceIntervalDrafts[source.id] ??
                         String(source.ingest_interval_minutes)
                       }
-                      onChange={(event) =>
-                        props.onSourceIntervalDraftChange(source.id, event.target.value)
+                      onChange={(e) =>
+                        setSourceIntervalDrafts((prev) => ({ ...prev, [source.id]: e.target.value }))
                       }
+                      onKeyDown={handleEscape}
                       className="w-24 rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
                     />
                   </div>
-                  <button
-                    onClick={() => props.onSaveChanges(source)}
-                    className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 transition hover:border-slate-400 hover:text-white"
-                  >
+                  <Button variant="primary" size="xs" onClick={() => onSaveChanges(source)}>
                     Save
-                  </button>
+                  </Button>
+                  {hasDraftChanges && (
+                    <Button variant="ghost" size="xs" onClick={revertDrafts}>
+                      Cancel
+                    </Button>
+                  )}
                   <div className="flex items-center gap-3">
                     <button
-                      onClick={() => props.onToggle(source)}
+                      onClick={() => onToggle(source)}
                       className={`rounded-full px-3 py-1 text-xs font-semibold ${
                         source.active
                           ? "bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30"
@@ -562,7 +832,7 @@ export default function Home(props: HomeProps) {
                       {source.active ? "Active" : "Inactive"}
                     </button>
                     <button
-                      onClick={() => props.onDeletePermanent(source)}
+                      onClick={() => setConfirmDeleteSource(source)}
                       className="text-xs text-red-400 hover:text-red-200 hover:underline"
                     >
                       Delete
@@ -572,8 +842,11 @@ export default function Home(props: HomeProps) {
               </div>
             );
           })}
-          {!props.isLoading && props.sources.length === 0 ? (
-            <p className="text-sm text-slate-400">No sources yet.</p>
+          {!isLoading && sources.length === 0 ? (
+            <EmptyState
+              title="No sources yet"
+              description="Add your first RSS source using the form above to start monitoring."
+            />
           ) : null}
         </div>
       </section>
@@ -585,6 +858,35 @@ export default function Home(props: HomeProps) {
           loading={healthLoading}
           error={healthError}
           onClose={() => setHealthModalOpen(false)}
+        />
+      )}
+
+      {confirmDeleteSource && (
+        <ConfirmModal
+          title="Delete source"
+          message={
+            <>
+              Permanently delete{" "}
+              <span className="text-slate-200">
+                {confirmDeleteSource.name ?? confirmDeleteSource.url}
+              </span>
+              ? Feed history will be kept.
+            </>
+          }
+          confirmLabel="Delete"
+          variant="danger"
+          onConfirm={onConfirmDelete}
+          onCancel={() => setConfirmDeleteSource(null)}
+        />
+      )}
+      {confirmBatchAction && (
+        <ConfirmModal
+          title="Confirm batch"
+          message={`${confirmBatchAction.action === "delete" ? "Delete" : "Deactivate"} ${confirmBatchAction.count} selected source(s)?`}
+          confirmLabel={confirmBatchAction.action === "delete" ? "Delete" : "Deactivate"}
+          variant="danger"
+          onConfirm={onConfirmBatch}
+          onCancel={() => setConfirmBatchAction(null)}
         />
       )}
     </>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import Spinner from "../components/Spinner";
+import Button from "../components/ui/Button";
 import { useServerEventsContext } from "../contexts/ServerEventsContext";
 import {
   listSocialAccounts,
@@ -26,10 +27,10 @@ const PLATFORM_ICONS: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, { dot: string; badge: string; text: string }> = {
-  active: { dot: "bg-emerald-500", badge: "bg-emerald-500/20 text-emerald-400", text: "Active" },
-  expiring: { dot: "bg-amber-500", badge: "bg-amber-500/20 text-amber-400", text: "Expiring" },
-  expired: { dot: "bg-red-500", badge: "bg-red-500/20 text-red-400", text: "Expired" },
-  error: { dot: "bg-red-500", badge: "bg-red-500/20 text-red-400", text: "Error" },
+  active: { dot: "bg-emerald-500", badge: "bg-emerald-500/20 text-emerald-200", text: "Active" },
+  expiring: { dot: "bg-amber-500", badge: "bg-amber-500/20 text-amber-200", text: "Expiring" },
+  expired: { dot: "bg-red-500", badge: "bg-red-500/20 text-red-200", text: "Expired" },
+  error: { dot: "bg-red-500", badge: "bg-red-500/20 text-red-200", text: "Error" },
 };
 
 const formatRelativeTime = (isoString: string): string => {
@@ -304,13 +305,15 @@ export default function PlatformSettings() {
               Token validity and platform API health
             </p>
           </div>
-          <button
+          <Button
+            variant="secondary"
             onClick={handleRefreshHealth}
             disabled={isRefreshing}
-            className="rounded-lg border border-slate-700 px-3 py-2 text-sm hover:border-slate-500 disabled:opacity-50"
+            loading={isRefreshing}
+            loadingText="Checking..."
           >
-            {isRefreshing ? "Checking..." : "Refresh"}
-          </button>
+            Refresh
+          </Button>
         </div>
 
         <div className="mt-6 space-y-4">
@@ -445,15 +448,17 @@ export default function PlatformSettings() {
                       }
                       className="w-16 rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
                     />
-                    <span className="text-xs text-slate-400">/hr</span>
+                    <span className="text-xs text-slate-500">/hr</span>
                     {hasChanges && (
-                      <button
+                      <Button
+                        variant="primary"
+                        size="xs"
                         onClick={() => handleRateLimitSave(account.id, account.platform)}
                         disabled={isSaving}
-                        className="rounded-lg bg-emerald-600 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+                        loading={isSaving}
                       >
-                        {isSaving ? "..." : "Save"}
-                      </button>
+                        Save
+                      </Button>
                     )}
                   </div>
                 </div>

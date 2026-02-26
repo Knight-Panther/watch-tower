@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import Spinner from "../components/Spinner";
+import Button from "../components/ui/Button";
 import {
   getImageGenerationConfig,
   updateImageGenerationConfig,
@@ -82,6 +83,7 @@ export default function ImageTemplate() {
 
   // Canvas ref for live preview
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [showGrid, setShowGrid] = useState(false);
 
   // Load config on mount
   useEffect(() => {
@@ -215,9 +217,50 @@ export default function ImageTemplate() {
     ctx.fillText("XTelo", wmX + wmWidth / 2, wmY);
     ctx.globalAlpha = 1;
 
+    // Grid guides
+    if (showGrid) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(99, 200, 160, 0.35)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([6, 4]);
+
+      // Thirds
+      for (const frac of [1 / 3, 2 / 3]) {
+        ctx.beginPath();
+        ctx.moveTo(W * frac, 0);
+        ctx.lineTo(W * frac, H);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(0, H * frac);
+        ctx.lineTo(W, H * frac);
+        ctx.stroke();
+      }
+
+      // Center crosshair
+      ctx.strokeStyle = "rgba(99, 200, 160, 0.55)";
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.moveTo(W / 2, 0);
+      ctx.lineTo(W / 2, H);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, H / 2);
+      ctx.lineTo(W, H / 2);
+      ctx.stroke();
+
+      // Safe margins (10%)
+      ctx.strokeStyle = "rgba(250, 200, 80, 0.25)";
+      ctx.setLineDash([2, 6]);
+      const mx = W * 0.1;
+      const my = H * 0.1;
+      ctx.strokeRect(mx, my, W - mx * 2, H - my * 2);
+
+      ctx.restore();
+    }
+
     // Reset
     ctx.textAlign = "left";
-  }, [template, genConfig.size]);
+  }, [template, genConfig.size, showGrid]);
 
   const updateGen = <K extends keyof ImageGenerationConfig>(
     key: K,
@@ -267,7 +310,7 @@ export default function ImageTemplate() {
   return (
     <div className="grid gap-6">
       {/* Header */}
-      <section className="sticky top-28 z-10 rounded-2xl border border-slate-800 bg-slate-900 p-5">
+      <section className="sticky top-28 z-10 rounded-2xl border border-slate-800 bg-slate-900 p-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Image Template</h1>
@@ -276,20 +319,19 @@ export default function ImageTemplate() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <button
-              onClick={handleReset}
-              disabled={isSaving}
-              className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 transition hover:border-slate-500"
-            >
+            <Button variant="secondary" onClick={handleReset} disabled={isSaving}>
               Reset Defaults
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="primary"
+              size="lg"
               onClick={handleSave}
               disabled={isSaving || !hasChanges}
-              className="rounded-xl bg-emerald-600 px-6 py-2.5 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50"
+              loading={isSaving}
+              loadingText="Saving..."
             >
-              {isSaving ? "Saving..." : "Save"}
-            </button>
+              Save
+            </Button>
           </div>
         </div>
       </section>
@@ -298,7 +340,7 @@ export default function ImageTemplate() {
         {/* Left: Controls */}
         <div className="space-y-6">
           {/* Generation Settings */}
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
             <h2 className="text-lg font-semibold">Generation Settings</h2>
             <p className="mt-1 text-sm text-slate-400">
               Control when and how images are generated.
@@ -416,7 +458,7 @@ export default function ImageTemplate() {
           </section>
 
           {/* Title Settings */}
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
             <h2 className="text-lg font-semibold">Title Overlay</h2>
             <div className="mt-4 space-y-4">
               {/* Position presets */}
@@ -444,7 +486,7 @@ export default function ImageTemplate() {
               {/* X/Y sliders */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs text-slate-400">
+                  <label className="text-xs text-slate-500">
                     X Position ({template.titlePosition.x}%)
                   </label>
                   <input
@@ -462,7 +504,7 @@ export default function ImageTemplate() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-400">
+                  <label className="text-xs text-slate-500">
                     Y Position ({template.titlePosition.y}%)
                   </label>
                   <input
@@ -483,7 +525,7 @@ export default function ImageTemplate() {
 
               {/* Alignment */}
               <div>
-                <p className="text-xs text-slate-400">Alignment</p>
+                <p className="text-xs text-slate-500">Alignment</p>
                 <div className="mt-1 flex gap-2">
                   {(["left", "center", "right"] as const).map((a) => (
                     <button
@@ -503,7 +545,7 @@ export default function ImageTemplate() {
 
               {/* Max Width */}
               <div>
-                <label className="text-xs text-slate-400">
+                <label className="text-xs text-slate-500">
                   Max Width ({template.titleMaxWidth}%)
                 </label>
                 <input
@@ -518,7 +560,7 @@ export default function ImageTemplate() {
 
               {/* Font Size */}
               <div>
-                <label className="text-xs text-slate-400">
+                <label className="text-xs text-slate-500">
                   Font Size ({template.titleFontSize}px)
                 </label>
                 <input
@@ -533,7 +575,7 @@ export default function ImageTemplate() {
 
               {/* Title Color */}
               <div className="flex items-center gap-3">
-                <label className="text-xs text-slate-400">Color</label>
+                <label className="text-xs text-slate-500">Color</label>
                 <input
                   type="color"
                   value={template.titleColor.slice(0, 7)}
@@ -546,7 +588,7 @@ export default function ImageTemplate() {
           </section>
 
           {/* Backdrop Settings */}
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">Backdrop</h2>
               <button
@@ -565,7 +607,7 @@ export default function ImageTemplate() {
             {template.backdropEnabled && (
               <div className="mt-4 space-y-4">
                 <div className="flex items-center gap-3">
-                  <label className="text-xs text-slate-400">Color</label>
+                  <label className="text-xs text-slate-500">Color</label>
                   <input
                     type="color"
                     value={backdropHex}
@@ -576,7 +618,7 @@ export default function ImageTemplate() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-400">Opacity ({backdropOpacity}%)</label>
+                  <label className="text-xs text-slate-500">Opacity ({backdropOpacity}%)</label>
                   <input
                     type="range"
                     min={10}
@@ -589,7 +631,7 @@ export default function ImageTemplate() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-400">
+                  <label className="text-xs text-slate-500">
                     Padding ({template.backdropPadding}px)
                   </label>
                   <input
@@ -602,7 +644,7 @@ export default function ImageTemplate() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-400">
+                  <label className="text-xs text-slate-500">
                     Border Radius ({template.backdropBorderRadius}px)
                   </label>
                   <input
@@ -619,11 +661,11 @@ export default function ImageTemplate() {
           </section>
 
           {/* Watermark Settings */}
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
             <h2 className="text-lg font-semibold">Watermark</h2>
             <div className="mt-4 space-y-4">
               <div>
-                <p className="text-xs text-slate-400">Position Preset</p>
+                <p className="text-xs text-slate-500">Position Preset</p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {WATERMARK_PRESETS.map((p) => (
                     <button
@@ -643,7 +685,7 @@ export default function ImageTemplate() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs text-slate-400">
+                  <label className="text-xs text-slate-500">
                     X ({template.watermarkPosition.x}%)
                   </label>
                   <input
@@ -661,7 +703,7 @@ export default function ImageTemplate() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-400">
+                  <label className="text-xs text-slate-500">
                     Y ({template.watermarkPosition.y}%)
                   </label>
                   <input
@@ -680,7 +722,7 @@ export default function ImageTemplate() {
                 </div>
               </div>
               <div>
-                <label className="text-xs text-slate-400">
+                <label className="text-xs text-slate-500">
                   Scale ({Math.round(template.watermarkScale * 100)}%)
                 </label>
                 <input
@@ -698,8 +740,21 @@ export default function ImageTemplate() {
 
         {/* Right: Live Preview */}
         <div className="lg:sticky lg:top-48 lg:self-start">
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
-            <h2 className="text-lg font-semibold">Live Preview</h2>
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Live Preview</h2>
+              <button
+                onClick={() => setShowGrid((v) => !v)}
+                className={[
+                  "rounded-lg border px-3 py-1 text-xs font-medium transition",
+                  showGrid
+                    ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
+                    : "border-slate-700 text-slate-500 hover:border-slate-500",
+                ].join(" ")}
+              >
+                Grid
+              </button>
+            </div>
             <p className="mt-1 text-sm text-slate-400">
               Preview shows approximate layout. Actual images use AI-generated backgrounds.
             </p>
@@ -728,9 +783,9 @@ export default function ImageTemplate() {
           </section>
 
           {/* Cost estimate */}
-          <section className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+          <section className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
             <h3 className="text-sm font-semibold text-slate-300">Estimated Cost</h3>
-            <p className="mt-2 text-xs text-slate-400">
+            <p className="mt-2 text-xs text-slate-500">
               Based on {genConfig.quality} quality, {genConfig.size} size:
             </p>
             <div className="mt-2 grid grid-cols-2 gap-2 text-xs">

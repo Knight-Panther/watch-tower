@@ -1,15 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { StatsOverview, StatsSource, ResetResult } from "../api";
-import { resetAllData } from "../api";
-import Spinner from "../components/Spinner";
-
-type MonitoringProps = {
-  overview: StatsOverview | null;
-  sources: StatsSource[];
-  isLoading: boolean;
-  error: string | null;
-  onRefresh: () => void;
-};
+import { getStatsOverview, getStatsSources, resetAllData } from "../api";
+import { Skeleton, SkeletonText } from "../components/ui/Skeleton";
+import Button from "../components/ui/Button";
 
 type StatusFilter = "all" | "stale" | "error" | "ok";
 
@@ -50,13 +43,11 @@ const formatDuration = (value: number | null) => {
   return `${Math.round(value / 60000)}m`;
 };
 
-export default function Monitoring({
-  overview,
-  sources,
-  isLoading,
-  error,
-  onRefresh,
-}: MonitoringProps) {
+export default function Monitoring() {
+  const [overview, setOverview] = useState<StatsOverview | null>(null);
+  const [sources, setSources] = useState<StatsSource[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [activeOnly, setActiveOnly] = useState(true);
   const [sectorFilter, setSectorFilter] = useState("all");
@@ -65,6 +56,27 @@ export default function Monitoring({
   const [isResetting, setIsResetting] = useState(false);
   const [resetResult, setResetResult] = useState<ResetResult | null>(null);
   const [resetError, setResetError] = useState<string | null>(null);
+
+  const onRefresh = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const [overviewData, sourcesData] = await Promise.all([
+        getStatsOverview(),
+        getStatsSources(),
+      ]);
+      setOverview(overviewData);
+      setSources(sourcesData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load monitoring stats");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    onRefresh();
+  }, []);
 
   const handleReset = async () => {
     setIsResetting(true);
@@ -121,27 +133,21 @@ export default function Monitoring({
   return (
     <div className="grid gap-4">
       {/* Header - sticky below nav */}
-      <section className="sticky top-32 z-10 rounded-2xl border border-slate-800 bg-slate-900 p-5">
+      <section className="sticky top-32 z-10 rounded-2xl border border-slate-800 bg-slate-900 p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-semibold tracking-tight">Monitoring</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">Monitoring</h1>
             <p className="mt-1 text-sm text-slate-400">
               Source health, queue pressure, and freshness.
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <button
-              onClick={onRefresh}
-              className="rounded-full border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:border-slate-500"
-            >
+            <Button variant="secondary" onClick={onRefresh}>
               Refresh
-            </button>
-            <button
-              onClick={() => setShowResetModal(true)}
-              className="rounded-full border border-red-800/60 bg-red-950/30 px-4 py-2 text-sm text-red-300 transition hover:border-red-600 hover:bg-red-950/50"
-            >
+            </Button>
+            <Button variant="danger" onClick={() => setShowResetModal(true)}>
               Reset Data
-            </button>
+            </Button>
           </div>
         </div>
         {error ? <p className="mt-3 text-sm text-red-400">{error}</p> : null}
@@ -188,7 +194,7 @@ export default function Monitoring({
         </div>
       </section>
 
-      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
+      <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold">Sources</h2>
           <div className="flex flex-wrap items-center gap-2">
@@ -216,15 +222,15 @@ export default function Monitoring({
               className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200"
             >
               <option value="all">All status</option>
-              <option value="ok">OK</option>
-              <option value="stale">Stale</option>
-              <option value="error">Error</option>
+              <option value="ok">OK — last fetch succeeded</option>
+              <option value="stale">Stale — no fetch in 2+ expected intervals</option>
+              <option value="error">Error — last fetch failed</option>
             </select>
             <button
               onClick={() => setActiveOnly((prev) => !prev)}
               className={`rounded-full border px-3 py-1 text-xs transition ${
                 activeOnly
-                  ? "border-emerald-500/40 text-emerald-200"
+                  ? "border-emerald-500/30 text-emerald-200"
                   : "border-slate-700 text-slate-300"
               }`}
             >
@@ -240,10 +246,10 @@ export default function Monitoring({
                 ? "Error"
                 : "OK";
             const statusTone = source.is_stale
-              ? "border-amber-500/40 text-amber-200"
+              ? "border-amber-500/30 text-amber-200"
               : source.last_run?.status === "error"
-                ? "border-red-500/40 text-red-200"
-                : "border-emerald-500/40 text-emerald-200";
+                ? "border-red-500/30 text-red-200"
+                : "border-emerald-500/30 text-emerald-200";
             return (
               <div
                 key={source.id}
@@ -261,7 +267,7 @@ export default function Monitoring({
                   <span className="text-sm font-semibold text-slate-100">
                     {source.name ?? "Untitled source"}
                   </span>
-                  <span className="text-xs text-slate-400 truncate max-w-[280px]" title={source.url}>
+                  <span className="text-xs text-slate-500 truncate max-w-[280px]" title={source.url}>
                     {source.url}
                   </span>
                   <span className="rounded-full border border-slate-700 px-2 py-0.5 text-[10px] text-slate-400">
@@ -302,11 +308,18 @@ export default function Monitoring({
                   </span>
                   <span className="text-slate-200">{source.last_run?.item_added ?? "-"}</span>
                   <span className="text-[10px] uppercase tracking-wide text-slate-500">Error</span>
-                  <span className="text-slate-300 line-clamp-1">
-                    {source.last_run?.status === "error"
-                      ? (source.last_run.error_message ?? "Unknown error")
-                      : "-"}
-                  </span>
+                  {source.last_run?.status === "error" && source.last_run.error_message ? (
+                    <details className="text-slate-300">
+                      <summary className="cursor-pointer line-clamp-1 hover:text-slate-100 list-none">
+                        {source.last_run.error_message}
+                      </summary>
+                      <p className="mt-1 whitespace-pre-wrap break-all text-xs text-red-300/80 bg-red-950/20 rounded px-2 py-1">
+                        {source.last_run.error_message}
+                      </p>
+                    </details>
+                  ) : (
+                    <span className="text-slate-300">-</span>
+                  )}
                   <span className="text-[10px] uppercase tracking-wide text-slate-500">
                     Last update
                   </span>
@@ -324,10 +337,26 @@ export default function Monitoring({
           {filteredSources.length === 0 && !isLoading ? (
             <p className="text-sm text-slate-400">No sources match the filters.</p>
           ) : null}
-          {isLoading ? (
-            <div className="flex items-center gap-2 text-sm text-slate-400">
-              <Spinner /> Loading monitoring data...
-            </div>
+          {isLoading && filteredSources.length === 0 ? (
+            <>
+              {Array.from({ length: 4 }, (_, i) => (
+                <div
+                  key={i}
+                  className="grid gap-3 rounded-xl border border-slate-800 bg-slate-950/70 p-4 md:grid-cols-[2.2fr,3fr]"
+                >
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Skeleton className="w-12 h-5 rounded-full" />
+                    <SkeletonText className="w-20 h-4" />
+                    <SkeletonText className="w-48 h-4" />
+                  </div>
+                  <div className="grid grid-rows-2 grid-flow-col auto-cols-fr gap-x-4 gap-y-2">
+                    {Array.from({ length: 8 }, (_, j) => (
+                      <SkeletonText key={j} className="w-16 h-3" />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </>
           ) : null}
         </div>
       </section>
@@ -360,7 +389,7 @@ export default function Monitoring({
       {/* Reset Confirmation Modal */}
       {showResetModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-xl">
+          <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-xl">
             <h3 className="text-lg font-semibold text-red-300">Reset All Data?</h3>
             <p className="mt-3 text-sm text-slate-300">
               This will permanently delete:
@@ -380,29 +409,25 @@ export default function Monitoring({
               <p className="mt-3 text-sm text-red-400">{resetError}</p>
             )}
             <div className="mt-6 flex justify-end gap-3">
-              <button
+              <Button
+                variant="secondary"
                 onClick={() => {
                   setShowResetModal(false);
                   setResetError(null);
                 }}
                 disabled={isResetting}
-                className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 transition hover:border-slate-500 disabled:opacity-50"
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="danger"
                 onClick={handleReset}
                 disabled={isResetting}
-                className="flex items-center gap-2 rounded-lg border border-red-700 bg-red-900/50 px-4 py-2 text-sm text-red-200 transition hover:bg-red-900 disabled:opacity-50"
+                loading={isResetting}
+                loadingText="Resetting..."
               >
-                {isResetting ? (
-                  <>
-                    <Spinner /> Resetting...
-                  </>
-                ) : (
-                  "Yes, Reset Everything"
-                )}
-              </button>
+                Yes, Reset Everything
+              </Button>
             </div>
           </div>
         </div>
