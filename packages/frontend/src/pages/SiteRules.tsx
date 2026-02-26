@@ -7,8 +7,6 @@ import {
   deleteAllowedDomain,
   updateAllowedDomain,
   getSecurityConfig,
-  getEmergencyStop,
-  setEmergencyStop,
   getTranslationConfig,
   updateTranslationConfig,
   getAutoApproveThreshold,
@@ -23,14 +21,14 @@ import {
 } from "../api";
 import Spinner from "../components/Spinner";
 
-type TabId = "domains" | "limits" | "api" | "emergency" | "thresholds" | "translation" | "dedup";
+type TabId = "domains" | "limits" | "api" | "thresholds" | "translation" | "dedup";
 
 export default function SiteRules() {
   // URL-based tab state
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
   const activeTab: TabId =
-    tabParam === "limits" || tabParam === "api" || tabParam === "emergency" || tabParam === "thresholds" || tabParam === "translation" || tabParam === "dedup"
+    tabParam === "limits" || tabParam === "api" || tabParam === "thresholds" || tabParam === "translation" || tabParam === "dedup"
       ? tabParam
       : "domains";
 
@@ -49,11 +47,6 @@ export default function SiteRules() {
   // Security config state
   const [securityConfig, setSecurityConfig] = useState<SecurityConfig | null>(null);
   const [configLoading, setConfigLoading] = useState(true);
-
-  // Kill switch state
-  const [emergencyStop, setEmergencyStopState] = useState(false);
-  const [killSwitchLoading, setKillSwitchLoading] = useState(true);
-  const [killSwitchToggling, setKillSwitchToggling] = useState(false);
 
   // Translation config state
   const [translationConfig, setTranslationConfig] = useState<TranslationConfig | null>(null);
@@ -97,19 +90,6 @@ export default function SiteRules() {
     }
   }, []);
 
-  // Load kill switch status
-  const loadKillSwitch = useCallback(async () => {
-    try {
-      setKillSwitchLoading(true);
-      const data = await getEmergencyStop();
-      setEmergencyStopState(data.enabled);
-    } catch {
-      // Non-critical
-    } finally {
-      setKillSwitchLoading(false);
-    }
-  }, []);
-
   // Load translation config
   const loadTranslationConfig = useCallback(async () => {
     try {
@@ -150,11 +130,10 @@ export default function SiteRules() {
   useEffect(() => {
     loadDomains();
     loadSecurityConfig();
-    loadKillSwitch();
     loadTranslationConfig();
     loadThresholds();
     loadDedupThreshold();
-  }, [loadDomains, loadSecurityConfig, loadKillSwitch, loadTranslationConfig, loadThresholds, loadDedupThreshold]);
+  }, [loadDomains, loadSecurityConfig, loadTranslationConfig, loadThresholds, loadDedupThreshold]);
 
   // Add domain
   const handleAddDomain = async () => {
@@ -190,24 +169,6 @@ export default function SiteRules() {
       await loadDomains();
     } catch (err) {
       setDomainsError(err instanceof Error ? err.message : "Failed to update domain");
-    }
-  };
-
-  // Toggle kill switch
-  const handleToggleKillSwitch = async () => {
-    const newState = !emergencyStop;
-    const action = newState ? "ACTIVATE" : "DEACTIVATE";
-    if (!confirm(`${action} emergency stop? ${newState ? "This will HALT ALL social posting!" : "This will resume normal posting."}`)) {
-      return;
-    }
-    try {
-      setKillSwitchToggling(true);
-      await setEmergencyStop(newState);
-      setEmergencyStopState(newState);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to toggle kill switch");
-    } finally {
-      setKillSwitchToggling(false);
     }
   };
 
@@ -255,7 +216,6 @@ export default function SiteRules() {
           { id: "domains", label: "Domain Whitelist" },
           { id: "limits", label: "Feed Limits" },
           { id: "api", label: "API Security" },
-          { id: "emergency", label: "Emergency Controls" },
           { id: "thresholds", label: "Score Thresholds" },
           { id: "dedup", label: "Dedup Sensitivity" },
           { id: "translation", label: "Translation" },
@@ -703,75 +663,6 @@ API_RATE_LIMIT_PER_MINUTE=200`}
         </section>
       )}
 
-      {/* Emergency Controls Tab */}
-      {activeTab === "emergency" && (
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
-          <h2 className="text-lg font-semibold">Emergency Controls</h2>
-          <p className="mt-1 text-sm text-slate-400">
-            Critical controls for emergency situations.
-          </p>
-
-          {/* Kill Switch */}
-          <div className={`mt-4 rounded-xl border-2 p-5 ${
-            emergencyStop
-              ? "border-red-500 bg-red-950/30"
-              : "border-slate-700 bg-slate-950/70"
-          }`}>
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-100">
-                  Kill Switch
-                </h3>
-                <p className="mt-1 text-sm text-slate-400">
-                  Immediately halt ALL social media posting across all platforms.
-                  The pipeline (fetch, embed, score) continues, but no posts go out.
-                </p>
-              </div>
-              {killSwitchLoading ? (
-                <Spinner />
-              ) : (
-                <button
-                  onClick={handleToggleKillSwitch}
-                  disabled={killSwitchToggling}
-                  className={`rounded-xl px-6 py-3 text-sm font-semibold transition ${
-                    emergencyStop
-                      ? "bg-emerald-600 text-white hover:bg-emerald-500"
-                      : "bg-red-600 text-white hover:bg-red-500"
-                  } disabled:opacity-50`}
-                >
-                  {killSwitchToggling
-                    ? "..."
-                    : emergencyStop
-                      ? "RESUME POSTING"
-                      : "STOP ALL POSTING"}
-                </button>
-              )}
-            </div>
-
-            {emergencyStop && (
-              <div className="mt-4 flex items-center gap-2 rounded-lg bg-red-900/50 p-3">
-                <svg className="h-5 w-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-                <span className="text-sm font-medium text-red-300">
-                  EMERGENCY STOP IS ACTIVE - No posts are being sent
-                </span>
-              </div>
-            )}
-          </div>
-
-          {/* Status */}
-          <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/70 p-4">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Current Status</p>
-            <div className="mt-2 flex items-center gap-2">
-              <span className={`h-3 w-3 rounded-full ${emergencyStop ? "bg-red-500" : "bg-emerald-500"}`} />
-              <span className={`text-lg font-semibold ${emergencyStop ? "text-red-300" : "text-emerald-300"}`}>
-                {emergencyStop ? "Posting Halted" : "Normal Operation"}
-              </span>
-            </div>
-          </div>
-        </section>
-      )}
       {/* Dedup Sensitivity Tab */}
       {activeTab === "dedup" && (
         <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">

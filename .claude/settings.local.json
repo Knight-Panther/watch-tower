@@ -1,30 +1,28 @@
 {
   "permissions": {
+    "defaultMode": "acceptEdits",
     "allow": [
-      "Bash(tree:*)",
-      "Bash(npm install)",
-      "Bash(npm run build:*)",
-      "Bash(npm run dev:*)",
-      "Bash(npm run db:*)",
-      "Bash(docker ps:*)",
-      "Bash(docker stop:*)",
-      "Bash(docker rm:*)",
-      "Bash(docker compose:*)",
-      "Bash(docker network ls:*)",
-      "Bash(docker volume ls:*)",
-      "Bash(docker volume rm:*)",
-      "Bash(docker network rm:*)",
-      "Bash(git status:*)",
-      "Bash(git add:*)",
-      "Bash(git rm:*)",
-      "Bash(npm run db:push:*)",
-      "Bash(npm install:*)",
-      "Bash(npx drizzle-kit:*)",
-      "Bash(netstat:*)",
-      "Bash(findstr:*)",
-      "Bash(powershell -Command:*)",
-      "Bash(npm run infra:up:*)",
-      "Bash(node -e:*)"
+      "Bash(npm *)",
+      "Bash(npx *)",
+      "Bash(node *)",
+      "Bash(git *)",
+      "Bash(docker *)",
+      "Bash(tree *)",
+      "Bash(netstat *)",
+      "Bash(findstr *)",
+      "Bash(powershell *)",
+      "Bash(codex *)",
+      "Bash(cmd /c *)"
+    ],
+    "ask": [
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ],
+    "deny": [
+      "Bash(git push --force *)",
+      "Bash(git reset --hard *)",
+      "Bash(rm -rf *)",
+      "Bash(npm publish *)"
     ]
   },
   "hooks": {
