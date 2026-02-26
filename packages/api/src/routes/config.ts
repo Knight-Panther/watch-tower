@@ -706,11 +706,39 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     if (body.model !== undefined && body.model.length > 100) {
       return reply.code(400).send({ error: "model must be 100 characters or less" });
     }
+    // Cross-validate model against provider when both are provided
+    const VALID_MODELS: Record<string, string[]> = {
+      claude: ["claude-sonnet-4-20250514", "claude-haiku-4-5-20251001", "claude-opus-4-20250514"],
+      openai: ["gpt-4o", "gpt-4o-mini", "o3-mini"],
+      deepseek: ["deepseek-chat", "deepseek-reasoner"],
+      gemini: ["gemini-2.5-flash", "gemini-2.5-pro"],
+    };
+    if (body.provider !== undefined && body.model !== undefined && body.model) {
+      const allowed = VALID_MODELS[body.provider];
+      if (allowed && !allowed.includes(body.model)) {
+        return reply.code(400).send({
+          error: `model '${body.model}' is not valid for provider '${body.provider}'`,
+        });
+      }
+    }
     if (body.translationProvider !== undefined && !["gemini", "openai"].includes(body.translationProvider)) {
       return reply.code(400).send({ error: "translationProvider must be 'gemini' or 'openai'" });
     }
     if (body.translationModel !== undefined && body.translationModel.length > 100) {
       return reply.code(400).send({ error: "translationModel must be 100 characters or less" });
+    }
+    // Cross-validate translation model against translation provider
+    const VALID_TRANSLATION_MODELS: Record<string, string[]> = {
+      gemini: ["gemini-2.5-flash", "gemini-2.5-pro"],
+      openai: ["gpt-4o-mini", "gpt-4o"],
+    };
+    if (body.translationProvider !== undefined && body.translationModel !== undefined && body.translationModel) {
+      const allowed = VALID_TRANSLATION_MODELS[body.translationProvider];
+      if (allowed && !allowed.includes(body.translationModel)) {
+        return reply.code(400).send({
+          error: `translationModel '${body.translationModel}' is not valid for provider '${body.translationProvider}'`,
+        });
+      }
     }
     if (body.translationPrompt !== undefined && body.translationPrompt.length > 1000) {
       return reply.code(400).send({ error: "translationPrompt must be 1000 characters or less" });

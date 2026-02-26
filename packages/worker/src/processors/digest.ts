@@ -86,7 +86,7 @@ type DigestResult = {
 
 const DEFAULT_SYSTEM_PROMPT = `You are a senior intelligence analyst. Deliver a telegraphic daily briefing.
 
-You will receive today's scored article feed. Identify what matters, merge related stories, skip noise.
+You will receive today's scored article feed — it may contain 10 or 100+ articles. Your job is NOT to summarize every article. Your job is to FILTER ruthlessly and surface only what a decision-maker must know today.
 
 Output ONLY bullet points. Each bullet is ONE short sentence — what happened and a brief hint at why it matters. End with source [#IDs].
 
@@ -97,7 +97,9 @@ Rules:
 - ONE sentence per bullet. Maximum 30 words. No filler, no elaboration.
 - End each bullet with source references like [#1] or [#1, #3]
 - Merge related articles into one bullet
-- 5-15 bullets depending on the day
+- TARGET 7-12 bullets. Slow news day: 5-7. Major day: up to 12. NEVER exceed 12.
+- The number of bullets must NOT scale with input size — 30 articles and 100 articles should produce roughly the same number of bullets
+- Skip anything routine, incremental, or already well-known. Only surface genuine developments.
 - Most impactful first
 - Write in English`;
 
@@ -192,6 +194,16 @@ export const compileAndSendDigest = async (
   const { db, telegramConfig, facebookConfig, linkedinConfig, apiKeys } = deps;
   const isTest = opts.isTest ?? false;
 
+  // 0. Emergency brake — skip all delivery if emergency_stop is active
+  const [stopRow] = await db
+    .select({ value: appConfig.value })
+    .from(appConfig)
+    .where(eq(appConfig.key, "emergency_stop"));
+  if (stopRow?.value === true || stopRow?.value === "true") {
+    logger.warn("[digest] emergency_stop active, skipping digest");
+    return { sent: false, articleCount: 0, messageCount: 0 };
+  }
+
   // 1. Read config
   const config = await readDigestConfig(db);
   if (!config.enabled && !isTest) {
@@ -227,7 +239,7 @@ export const compileAndSendDigest = async (
     }
   }
 
-  // 4. Query ALL qualifying articles (no limit)
+  // 4. Query qualifying articles (capped at 100 to prevent token overflow)
   //    Georgian mode: same article pool as English — translation is post-processing on final output
   const whereConditions = [
     gte(articles.scoredAt, lookback),
@@ -248,7 +260,8 @@ export const compileAndSendDigest = async (
     .from(articles)
     .leftJoin(sectors, eq(articles.sectorId, sectors.id))
     .where(and(...whereConditions))
-    .orderBy(desc(articles.importanceScore), desc(articles.publishedAt));
+    .orderBy(desc(articles.importanceScore), desc(articles.publishedAt))
+    .limit(100);
 
   // 5. Zero articles guard
   if (allArticles.length === 0) {
@@ -416,8 +429,8 @@ export const compileAndSendDigest = async (
 
     // Send cover image first (if enabled)
     if (config.imageTelegram && coverBuffer) {
-      const photoSent = await sendTelegramPhoto(telegramConfig!.botToken, config.telegramChatId, coverBuffer);
-      if (photoSent) { tgOk = true; totalMessages++; }
+      const photoResult = await sendTelegramPhoto(telegramConfig!.botToken, config.telegramChatId, coverBuffer);
+      if (photoResult.ok) { tgOk = true; totalMessages++; }
       else logger.warn("[digest] telegram cover photo failed to send");
       await new Promise((r) => setTimeout(r, 500));
     }
@@ -427,8 +440,8 @@ export const compileAndSendDigest = async (
         { msgIndex: i, msgLen: messages[i].length, preview: messages[i].slice(0, 300) },
         "[digest] telegram message chunk",
       );
-      const sent = await sendTelegramAlert(telegramConfig!.botToken, config.telegramChatId, messages[i]);
-      if (sent) { anySent = true; tgOk = true; }
+      const msgResult = await sendTelegramAlert(telegramConfig!.botToken, config.telegramChatId, messages[i]);
+      if (msgResult.ok) { anySent = true; tgOk = true; }
       else logger.warn({ msgIndex: i }, "[digest] telegram message failed to send");
       if (messages.length > 1) await new Promise((r) => setTimeout(r, 500));
     }

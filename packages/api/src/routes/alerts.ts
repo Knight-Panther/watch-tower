@@ -110,8 +110,8 @@ export const registerAlertsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     if (!Array.isArray(keywords) || keywords.length === 0) {
       return reply.code(400).send({ error: "keywords must be a non-empty array" });
     }
-    if (keywords.some((k: unknown) => typeof k !== "string" || (k as string).trim().length < 2)) {
-      return reply.code(400).send({ error: "Each keyword must be at least 2 characters" });
+    if (keywords.some((k: unknown) => typeof k !== "string" || (k as string).trim().length < 3)) {
+      return reply.code(400).send({ error: "Each keyword must be at least 3 characters" });
     }
     if (!telegram_chat_id || typeof telegram_chat_id !== "string") {
       return reply.code(400).send({ error: "telegram_chat_id is required" });

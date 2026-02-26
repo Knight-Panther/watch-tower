@@ -217,6 +217,7 @@ function CreateForm({ onCreated }: CreateFormProps) {
               </span>
             )}
           </div>
+          <p className="text-xs text-slate-600">Matches are case-insensitive</p>
         </div>
 
         {/* Min Score + Chat ID row */}
@@ -367,19 +368,264 @@ function DeliveriesTable({ ruleId }: DeliveriesTableProps) {
 
 // ─── Rule Card ────────────────────────────────────────────────────────────────
 
+type EditFormState = {
+  name: string;
+  keywordInput: string;
+  keywords: string[];
+  minScore: number;
+  telegramChatId: string;
+};
+
 type RuleCardProps = {
   rule: AlertRule;
   onToggle: (rule: AlertRule) => void;
   onDelete: (rule: AlertRule) => void;
+  onUpdated: (rule: AlertRule) => void;
   isToggling: boolean;
 };
 
-function RuleCard({ rule, onToggle, onDelete, isToggling }: RuleCardProps) {
+function RuleCard({ rule, onToggle, onDelete, onUpdated, isToggling }: RuleCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [editForm, setEditForm] = useState<EditFormState>({
+    name: "",
+    keywordInput: "",
+    keywords: [],
+    minScore: 4,
+    telegramChatId: "",
+  });
+  const editKeywordInputRef = useRef<HTMLInputElement>(null);
 
+  const hasShortEditKeyword = editForm.keywords.some((kw) => kw.length < 3);
+
+  const handleEditClick = () => {
+    setEditForm({
+      name: rule.name,
+      keywordInput: "",
+      keywords: [...rule.keywords],
+      minScore: rule.min_score,
+      telegramChatId: rule.telegram_chat_id,
+    });
+    setIsEditing(true);
+  };
+
+  const handleCancelEdit = () => {
+    setEditForm({
+      name: "",
+      keywordInput: "",
+      keywords: [],
+      minScore: 4,
+      telegramChatId: "",
+    });
+    setIsEditing(false);
+  };
+
+  const commitEditKeyword = () => {
+    const trimmed = editForm.keywordInput.trim();
+    if (!trimmed) return;
+    if (editForm.keywords.includes(trimmed)) {
+      toast.error("Keyword already added");
+      return;
+    }
+    if (editForm.keywords.length >= 50) {
+      toast.error("Maximum 50 keywords allowed");
+      return;
+    }
+    setEditForm((prev) => ({ ...prev, keywords: [...prev.keywords, trimmed], keywordInput: "" }));
+    editKeywordInputRef.current?.focus();
+  };
+
+  const handleEditKeywordKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitEditKeyword();
+    }
+    if (e.key === "Escape") {
+      setEditForm((prev) => ({ ...prev, keywordInput: "" }));
+    }
+  };
+
+  const removeEditKeyword = (index: number) => {
+    setEditForm((prev) => ({
+      ...prev,
+      keywords: prev.keywords.filter((_, i) => i !== index),
+    }));
+  };
+
+  const handleSave = async () => {
+    const name = editForm.name.trim();
+    const chatId = editForm.telegramChatId.trim();
+
+    if (!name) {
+      toast.error("Rule name is required");
+      return;
+    }
+    if (editForm.keywords.length === 0) {
+      toast.error("At least one keyword is required");
+      return;
+    }
+    if (!chatId) {
+      toast.error("Telegram Chat ID is required");
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const updated = await updateAlertRule(rule.id, {
+        name,
+        keywords: editForm.keywords,
+        min_score: editForm.minScore,
+        telegram_chat_id: chatId,
+      });
+      onUpdated(updated);
+      setIsEditing(false);
+      toast.success("Alert rule updated");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update alert rule";
+      toast.error(message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // ── Edit mode ──────────────────────────────────────────────────────────────
+  if (isEditing) {
+    return (
+      <div className="rounded-2xl border border-slate-700 bg-slate-900/40 p-6">
+        <h3 className="mb-4 text-base font-semibold text-slate-100">Edit Alert Rule</h3>
+        <div className="space-y-4">
+          {/* Name */}
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-slate-400">Rule Name</label>
+            <input
+              type="text"
+              placeholder="e.g., Google Mentions"
+              value={editForm.name}
+              onChange={(e) => setEditForm((prev) => ({ ...prev, name: e.target.value }))}
+              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
+            />
+          </div>
+
+          {/* Keywords */}
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-slate-400">
+              Keywords{" "}
+              <span className="text-slate-500">(press Enter to add)</span>
+            </label>
+            <div className="min-h-10 flex flex-wrap gap-2 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 focus-within:border-slate-500">
+              {editForm.keywords.map((kw, i) => (
+                <span
+                  key={i}
+                  className="inline-flex items-center gap-1 rounded-full bg-cyan-500/20 px-3 py-0.5 text-sm text-cyan-200"
+                >
+                  {kw}
+                  <button
+                    type="button"
+                    onClick={() => removeEditKeyword(i)}
+                    className="ml-0.5 text-cyan-400 hover:text-cyan-200 leading-none"
+                    aria-label={`Remove keyword ${kw}`}
+                  >
+                    x
+                  </button>
+                </span>
+              ))}
+              <input
+                ref={editKeywordInputRef}
+                type="text"
+                placeholder={editForm.keywords.length === 0 ? "Type a keyword and press Enter..." : ""}
+                value={editForm.keywordInput}
+                onChange={(e) => setEditForm((prev) => ({ ...prev, keywordInput: e.target.value }))}
+                onKeyDown={handleEditKeywordKeyDown}
+                onBlur={commitEditKeyword}
+                className="min-w-32 flex-1 bg-transparent text-sm text-slate-200 outline-none placeholder:text-slate-600"
+              />
+            </div>
+            <div className="mt-1.5 flex items-center gap-3">
+              <span className="text-xs text-slate-500">{editForm.keywords.length}/50</span>
+              {hasShortEditKeyword && (
+                <span className="text-xs text-amber-400">
+                  Warning: some keywords are shorter than 3 characters and may produce excessive matches.
+                </span>
+              )}
+              {editForm.keywordInput.trim().length > 0 && editForm.keywordInput.trim().length < 3 && (
+                <span className="text-xs text-amber-400">
+                  Tag should be at least 3 characters
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-600">Matches are case-insensitive</p>
+          </div>
+
+          {/* Min Score + Chat ID row */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-slate-400">
+                Minimum Score
+              </label>
+              <select
+                value={editForm.minScore}
+                onChange={(e) =>
+                  setEditForm((prev) => ({ ...prev, minScore: Number(e.target.value) }))
+                }
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
+              >
+                <option value={1}>1 — Any score</option>
+                <option value={2}>2 — Low+</option>
+                <option value={3}>3 — Medium+</option>
+                <option value={4}>4 — High+</option>
+                <option value={5}>5 — Critical only</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-slate-400">
+                Telegram Chat ID
+              </label>
+              <input
+                type="text"
+                placeholder="-100..."
+                value={editForm.telegramChatId}
+                onChange={(e) =>
+                  setEditForm((prev) => ({ ...prev, telegramChatId: e.target.value }))
+                }
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
+              />
+            </div>
+          </div>
+
+          {/* Save / Cancel */}
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={handleCancelEdit}
+              disabled={isSaving}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              onClick={handleSave}
+              disabled={isSaving}
+              loading={isSaving}
+              loadingText="Saving..."
+            >
+              Save
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Display mode ───────────────────────────────────────────────────────────
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-      {/* Row 1: name + active toggle */}
+      {/* Row 1: name + active toggle + edit + delete */}
       <div className="flex items-start justify-between gap-3">
         <h3 className="text-lg font-bold text-slate-100 leading-tight">{rule.name}</h3>
         <div className="flex shrink-0 items-center gap-2">
@@ -395,6 +641,13 @@ function RuleCard({ rule, onToggle, onDelete, isToggling }: RuleCardProps) {
           >
             {rule.active ? "Active" : "Inactive"}
           </button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleEditClick}
+          >
+            Edit
+          </Button>
           <Button
             variant="danger"
             size="sm"
@@ -429,9 +682,9 @@ function RuleCard({ rule, onToggle, onDelete, isToggling }: RuleCardProps) {
           {rule.telegram_chat_id}
         </span>
         <span className="text-xs text-slate-500">
-          {rule.sent_count > 0
-            ? `${rule.sent_count} sent`
-            : "never triggered"}
+          {rule.sent_count === 0 && rule.total_deliveries === 0
+            ? "never triggered"
+            : `${rule.sent_count} sent / ${rule.total_deliveries} total`}
         </span>
       </div>
 
@@ -502,6 +755,10 @@ export default function Alerts() {
       last_triggered_at: rule.last_triggered_at ?? null,
     };
     setRules((prev) => [withStats, ...prev]);
+  }, []);
+
+  const handleUpdated = useCallback((updated: AlertRule) => {
+    setRules((prev) => prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)));
   }, []);
 
   const handleToggle = useCallback(async (rule: AlertRule) => {
@@ -595,6 +852,7 @@ export default function Alerts() {
               rule={rule}
               onToggle={handleToggle}
               onDelete={handleDelete}
+              onUpdated={handleUpdated}
               isToggling={togglingIds.has(rule.id)}
             />
           ))}

@@ -30,7 +30,8 @@
       "Bash(grep -n \"text-slate-400\\\\|text-slate-500\" /c/Users/VM-Dev/Desktop/watch-tower/packages/frontend/src/components/*.tsx)",
       "Bash(grep -n \"aria-label\" packages/frontend/src/components/*.tsx packages/frontend/src/pages/*.tsx)",
       "Bash(grep -n \"max-h-\\\\[90vh\\\\]\" packages/frontend/src/components/*.tsx)",
-      "Bash(grep -n \"FocusTrap\" packages/frontend/src/components/*.tsx packages/frontend/src/pages/*.tsx)"
+      "Bash(grep -n \"FocusTrap\" packages/frontend/src/components/*.tsx packages/frontend/src/pages/*.tsx)",
+      "Bash(xargs grep -l \"customFields\\\\|content:encoded\")"
     ],
     "deny": [
       "Bash(git push --force *)",

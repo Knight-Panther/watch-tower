@@ -2,7 +2,7 @@ import type { Redis } from "ioredis";
 import { eq, sql } from "drizzle-orm";
 import { logger } from "@watch-tower/shared";
 import type { Database } from "@watch-tower/db";
-import { alertRules, alertDeliveries } from "@watch-tower/db";
+import { alertRules, alertDeliveries, appConfig } from "@watch-tower/db";
 import { sendTelegramAlert, cleanForTelegram } from "../utils/telegram-alert.js";
 import { matchesKeyword } from "./llm-brain.js";
 
@@ -24,7 +24,7 @@ const COOLDOWN_TTL_SECONDS = 300; // 5 minutes
 /**
  * Check a batch of just-scored articles against active alert rules.
  * For each matching rule+article pair:
- *   1. Check Redis cooldown (5-min window per rule+keyword)
+ *   1. Check Redis cooldown (5-min window per rule+article)
  *   2. Send Telegram message to configured chat
  *   3. Write audit row to alert_deliveries (ON CONFLICT DO NOTHING)
  *
@@ -42,6 +42,16 @@ export const checkAndFireAlerts = async ({
   articles: ScoredArticle[];
 }): Promise<void> => {
   if (articles.length === 0) return;
+
+  // Emergency brake — skip all alert delivery if emergency_stop is active
+  const [stopRow] = await db
+    .select({ value: appConfig.value })
+    .from(appConfig)
+    .where(eq(appConfig.key, "emergency_stop"));
+  if (stopRow?.value === true || stopRow?.value === "true") {
+    logger.warn("[alert] emergency_stop active, skipping all alerts");
+    return;
+  }
 
   // Fetch all active alert rules once per batch
   const activeRules = await db.select().from(alertRules).where(eq(alertRules.active, true));
@@ -71,8 +81,8 @@ export const checkAndFireAlerts = async ({
 
       if (!matchedKeywordValue) continue;
 
-      // Redis cooldown check — prevents alert storm within 5-minute window
-      const cooldownKey = `alert:cooldown:${rule.id}:${matchedKeywordValue}`;
+      // Redis cooldown check — keyed on rule+article to prevent duplicate alerts
+      const cooldownKey = `alert:cooldown:${rule.id}:${article.articleId}`;
       const alreadyCooling = (await redis.exists(cooldownKey)) > 0;
 
       if (alreadyCooling) {
@@ -89,13 +99,13 @@ export const checkAndFireAlerts = async ({
       // Format and send
       const message = formatAlertMessage(rule.name, matchedKeywordValue, article);
       const targetChatId = rule.telegramChatId || telegramConfig.defaultChatId;
-      const sent = await sendTelegramAlert(telegramConfig.botToken, targetChatId, message);
+      const result = await sendTelegramAlert(telegramConfig.botToken, targetChatId, message);
 
       // Set cooldown after send attempt
       await redis.set(cooldownKey, "1", "EX", COOLDOWN_TTL_SECONDS);
 
-      // Write audit row
-      const status = sent ? "sent" : "failed";
+      // Write audit row with actual error message from Telegram API
+      const status = result.ok ? "sent" : "failed";
       await db.execute(sql`
         INSERT INTO alert_deliveries (rule_id, article_id, matched_keyword, status, error_message)
         VALUES (
@@ -103,15 +113,15 @@ export const checkAndFireAlerts = async ({
           ${article.articleId}::uuid,
           ${matchedKeywordValue},
           ${status},
-          ${sent ? null : "Telegram send failed (see worker logs)"}
+          ${result.ok ? null : result.error ?? "Unknown error"}
         )
         ON CONFLICT (rule_id, article_id) DO NOTHING
       `);
 
-      if (sent) alertsSent++;
+      if (result.ok) alertsSent++;
 
       logger.info(
-        { ruleId: rule.id, articleId: article.articleId, keyword: matchedKeywordValue, sent },
+        { ruleId: rule.id, articleId: article.articleId, keyword: matchedKeywordValue, sent: result.ok },
         "[alert] alert fired",
       );
     }
@@ -140,4 +150,3 @@ const formatAlertMessage = (
   }
   return lines.join("\n");
 };
-

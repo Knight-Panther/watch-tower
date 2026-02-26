@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import Spinner from "../components/Spinner";
 import Button from "../components/ui/Button";
@@ -199,6 +199,23 @@ function formatLastSent(iso: string | null): string {
   return `${days} day${days === 1 ? "" : "s"} ago`;
 }
 
+const MODEL_SHORT_NAMES: Record<string, string> = {
+  "claude-sonnet-4-20250514": "Sonnet 4",
+  "claude-haiku-4-5-20251001": "Haiku 4.5",
+  "claude-opus-4-20250514": "Opus 4",
+  "gpt-4o": "GPT-4o",
+  "gpt-4o-mini": "GPT-4o Mini",
+  "o3-mini": "o3-mini",
+  "deepseek-chat": "DeepSeek Chat",
+  "deepseek-reasoner": "DeepSeek R1",
+  "gemini-2.5-flash": "Gemini Flash",
+  "gemini-2.5-pro": "Gemini Pro",
+};
+
+function shortModelName(model: string): string {
+  return MODEL_SHORT_NAMES[model] ?? model;
+}
+
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function DigestSettings() {
@@ -296,13 +313,50 @@ export default function DigestSettings() {
     }
   };
 
+  // ── D5: Poll for test digest result ────────────────────────────────────────
+  const [isPolling, setIsPolling] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const preTestCountRef = useRef(0);
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    setIsPolling(false);
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => () => stopPolling(), [stopPolling]);
+
   const handleTest = async () => {
     setIsTesting(true);
     try {
       const result = await sendTestDigest();
       toast.success(result.message);
-      // Refresh history after a delay to show the new run
-      setTimeout(loadHistory, 35_000);
+
+      // Start polling for the new digest run
+      preTestCountRef.current = history.length;
+      setIsPolling(true);
+      const startedAt = Date.now();
+      const MAX_POLL_MS = 120_000; // 2 minutes
+      const POLL_INTERVAL_MS = 5_000;
+
+      pollRef.current = setInterval(async () => {
+        if (Date.now() - startedAt > MAX_POLL_MS) {
+          stopPolling();
+          toast.info("Digest is still processing — refresh history manually when ready");
+          return;
+        }
+        try {
+          const data = await getDigestHistory(30);
+          if (data.length > preTestCountRef.current) {
+            setHistory(data);
+            stopPolling();
+            toast.success("Digest result received");
+          }
+        } catch { /* keep polling */ }
+      }, POLL_INTERVAL_MS);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to send test digest";
       toast.error(msg);
@@ -384,11 +438,11 @@ export default function DigestSettings() {
             <Button
               variant="secondary"
               onClick={handleTest}
-              disabled={isTesting}
+              disabled={isTesting || isPolling}
               loading={isTesting}
               loadingText="Sending..."
             >
-              Send Test
+              {isPolling ? "Waiting..." : "Send Test"}
             </Button>
           </div>
         </div>
@@ -720,19 +774,29 @@ export default function DigestSettings() {
                 <button
                   type="button"
                   onClick={() => setConfig({ ...config, imageTelegram: !config.imageTelegram })}
-                  title="Attach cover image"
+                  disabled={!config.telegramEnabled}
+                  title={config.telegramEnabled ? "Attach cover image" : "Enable Telegram first"}
                   className={[
                     "rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
-                    config.imageTelegram
-                      ? "bg-sky-500/20 text-sky-200 ring-1 ring-sky-500/50"
-                      : "bg-slate-700 text-slate-400 hover:bg-slate-600",
+                    !config.telegramEnabled
+                      ? "cursor-not-allowed bg-slate-800 text-slate-600 opacity-50"
+                      : config.imageTelegram
+                        ? "bg-sky-500/20 text-sky-200 ring-1 ring-sky-500/50"
+                        : "bg-slate-700 text-slate-400 hover:bg-slate-600",
                   ].join(" ")}
                 >
                   IMG
                 </button>
                 <button
                   type="button"
-                  onClick={() => setConfig({ ...config, telegramEnabled: !config.telegramEnabled })}
+                  onClick={() => {
+                    const next = !config.telegramEnabled;
+                    setConfig({
+                      ...config,
+                      telegramEnabled: next,
+                      ...(next ? {} : { imageTelegram: false }),
+                    });
+                  }}
                   className={[
                     "rounded-full px-4 py-1.5 text-xs font-medium transition-colors",
                     config.telegramEnabled
@@ -782,19 +846,29 @@ export default function DigestSettings() {
                 <button
                   type="button"
                   onClick={() => setConfig({ ...config, imageFacebook: !config.imageFacebook })}
-                  title="Attach cover image"
+                  disabled={!config.facebookEnabled}
+                  title={config.facebookEnabled ? "Attach cover image" : "Enable Facebook first"}
                   className={[
                     "rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
-                    config.imageFacebook
-                      ? "bg-sky-500/20 text-sky-200 ring-1 ring-sky-500/50"
-                      : "bg-slate-700 text-slate-400 hover:bg-slate-600",
+                    !config.facebookEnabled
+                      ? "cursor-not-allowed bg-slate-800 text-slate-600 opacity-50"
+                      : config.imageFacebook
+                        ? "bg-sky-500/20 text-sky-200 ring-1 ring-sky-500/50"
+                        : "bg-slate-700 text-slate-400 hover:bg-slate-600",
                   ].join(" ")}
                 >
                   IMG
                 </button>
                 <button
                   type="button"
-                  onClick={() => setConfig({ ...config, facebookEnabled: !config.facebookEnabled })}
+                  onClick={() => {
+                    const next = !config.facebookEnabled;
+                    setConfig({
+                      ...config,
+                      facebookEnabled: next,
+                      ...(next ? {} : { imageFacebook: false }),
+                    });
+                  }}
                   className={[
                     "rounded-full px-4 py-1.5 text-xs font-medium transition-colors",
                     config.facebookEnabled
@@ -822,19 +896,29 @@ export default function DigestSettings() {
                 <button
                   type="button"
                   onClick={() => setConfig({ ...config, imageLinkedin: !config.imageLinkedin })}
-                  title="Attach cover image"
+                  disabled={!config.linkedinEnabled}
+                  title={config.linkedinEnabled ? "Attach cover image" : "Enable LinkedIn first"}
                   className={[
                     "rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
-                    config.imageLinkedin
-                      ? "bg-sky-500/20 text-sky-200 ring-1 ring-sky-500/50"
-                      : "bg-slate-700 text-slate-400 hover:bg-slate-600",
+                    !config.linkedinEnabled
+                      ? "cursor-not-allowed bg-slate-800 text-slate-600 opacity-50"
+                      : config.imageLinkedin
+                        ? "bg-sky-500/20 text-sky-200 ring-1 ring-sky-500/50"
+                        : "bg-slate-700 text-slate-400 hover:bg-slate-600",
                   ].join(" ")}
                 >
                   IMG
                 </button>
                 <button
                   type="button"
-                  onClick={() => setConfig({ ...config, linkedinEnabled: !config.linkedinEnabled })}
+                  onClick={() => {
+                    const next = !config.linkedinEnabled;
+                    setConfig({
+                      ...config,
+                      linkedinEnabled: next,
+                      ...(next ? {} : { imageLinkedin: false }),
+                    });
+                  }}
                   className={[
                     "rounded-full px-4 py-1.5 text-xs font-medium transition-colors",
                     config.linkedinEnabled
@@ -918,6 +1002,15 @@ export default function DigestSettings() {
           </div>
         }
       >
+        {isPolling && (
+          <div className="mb-3 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2.5">
+            <Spinner />
+            <p className="text-xs font-medium text-amber-200">
+              Waiting for digest result... polling every 5s
+            </p>
+          </div>
+        )}
+
         {history.length === 0 ? (
           <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-8 text-center">
             <p className="text-sm text-slate-500">
@@ -991,7 +1084,9 @@ export default function DigestSettings() {
                       </div>
                     </td>
                     <td className="px-3 py-2.5 text-center text-slate-300">{run.articleCount}</td>
-                    <td className="px-3 py-2.5 text-xs text-slate-500">{run.model}</td>
+                    <td className="px-3 py-2.5 text-xs text-slate-500" title={run.model}>
+                      {shortModelName(run.model)}
+                    </td>
                     <td className="px-3 py-2.5 text-xs text-slate-500">
                       Scanned: {run.statsScanned} | Scored: {run.statsScored} | {run.minScore}+: {run.statsAboveThreshold}
                     </td>
