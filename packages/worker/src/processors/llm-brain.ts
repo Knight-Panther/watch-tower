@@ -59,6 +59,7 @@ type LLMBrainDeps = {
   distributionQueue?: Queue;
   redis?: Redis;
   telegramConfig?: { botToken: string; defaultChatId: string };
+  apiKeys?: { googleAi?: string; openai?: string };
 };
 
 const DEFAULT_BATCH_SIZE = 10;
@@ -102,6 +103,7 @@ export const createLLMBrainWorker = ({
   distributionQueue,
   redis,
   telegramConfig,
+  apiKeys,
 }: LLMBrainDeps) => {
   return new Worker(
     QUEUE_LLM_BRAIN,
@@ -397,7 +399,7 @@ export const createLLMBrainWorker = ({
           ? ""
           : `\n\nALERT KEYWORD MATCHING:
 Check if any of these alert keywords are semantically relevant to this article: [${keywords.join(", ")}]
-Include a "matched_alert_keywords" field in your JSON response — an array of matched keyword strings.
+Include a "matched_alert_keywords" field in your JSON response — an array of the EXACT keyword strings from the list above, copied unchanged.
 Only include keywords that are clearly relevant to the article's core topic, not just mentioned in passing.
 If no keywords match, return an empty array.
 Example: {"reasoning": "...", "score": 3, "summary": "...", "matched_alert_keywords": ["keyword1"]}`;
@@ -689,7 +691,7 @@ Example: {"reasoning": "...", "score": 3, "summary": "...", "matched_alert_keywo
                 matchedAlertKeywords: r.matchedAlertKeywords ?? [],
               };
             });
-            await checkAndFireAlerts({ db, redis, telegramConfig, articles: alertArticles });
+            await checkAndFireAlerts({ db, redis, telegramConfig, articles: alertArticles, apiKeys });
           } catch (alertErr) {
             // Alert failures must never interrupt the scoring pipeline
             logger.error("[llm-brain] alert check failed, continuing", alertErr);

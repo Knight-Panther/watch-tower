@@ -365,6 +365,39 @@ export const setAlertWarningThreshold = async (value: number): Promise<number> =
   return Number(data.per_hour ?? value);
 };
 
+// ─── Alert Translation Config ───────────────────────────────────────────────
+
+export type AlertTranslationConfig = {
+  provider: string;
+  model: string;
+};
+
+export const getAlertTranslationConfig = async (): Promise<AlertTranslationConfig> => {
+  const res = await fetch(`${API_BASE}/config/alert-translation`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load alert translation config");
+  }
+  return res.json();
+};
+
+export const setAlertTranslationConfig = async (
+  payload: Partial<AlertTranslationConfig>,
+): Promise<{ success: boolean }> => {
+  const res = await fetch(`${API_BASE}/config/alert-translation`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to update alert translation config");
+  }
+  return res.json();
+};
+
 // ─── Alert Quiet Hours ──────────────────────────────────────────────────────
 
 export type AlertQuietHours = {

@@ -8,6 +8,7 @@ export type AlertTemplateConfig = {
   showSummary?: boolean;
   showScore?: boolean;
   showSector?: boolean;
+  showKeyword?: boolean;
   alertEmoji?: string;
 };
 
@@ -23,6 +24,7 @@ export type AlertRule = {
   sector_id: string | null;
   template: AlertTemplateConfig | null;
   mute_until: string | null;
+  language: "en" | "ka";
   total_deliveries: number;
   sent_count: number;
   last_triggered_at: string | null;
@@ -82,6 +84,7 @@ export const createAlertRule = async (payload: {
   active?: boolean;
   sector_id?: string | null;
   template?: AlertTemplateConfig | null;
+  language?: "en" | "ka";
 }): Promise<AlertRule> => {
   const res = await fetch(`${API_BASE}/alerts`, {
     method: "POST",
@@ -105,6 +108,7 @@ export const updateAlertRule = async (
     active?: boolean;
     sector_id?: string | null;
     template?: AlertTemplateConfig | null;
+    language?: "en" | "ka";
   },
 ): Promise<AlertRule> => {
   const res = await fetch(`${API_BASE}/alerts/${id}`, {
@@ -135,7 +139,7 @@ export const deleteAlertRule = async (id: string): Promise<void> => {
 export const testAlertRule = async (id: string): Promise<{ sent: boolean }> => {
   const res = await fetch(`${API_BASE}/alerts/${id}/test`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders },
+    headers: authHeaders,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -160,7 +164,7 @@ export const muteAlertRule = async (id: string, hours: number): Promise<AlertRul
 export const unmuteAlertRule = async (id: string): Promise<AlertRule> => {
   const res = await fetch(`${API_BASE}/alerts/${id}/unmute`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders },
+    headers: authHeaders,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

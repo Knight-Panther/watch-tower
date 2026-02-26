@@ -25,6 +25,10 @@ import {
   type AlertWeeklyStats,
   type Sector,
 } from "../api";
+import {
+  getAlertTranslationConfig,
+  setAlertTranslationConfig as saveAlertTranslation,
+} from "../api/config";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -43,6 +47,17 @@ const MUTE_OPTIONS = [
   { label: "24 hours", hours: 24 },
   { label: "48 hours", hours: 48 },
 ];
+
+const TRANSLATION_MODELS: Record<string, { value: string; label: string }[]> = {
+  gemini: [
+    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+    { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+  ],
+  openai: [
+    { value: "gpt-4o-mini", label: "GPT-4o Mini" },
+    { value: "gpt-4o", label: "GPT-4o" },
+  ],
+};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -133,6 +148,51 @@ function SectorSelect({
   );
 }
 
+// ─── Language Toggle (shared) ───────────────────────────────────────────────
+
+function LanguageToggle({
+  value,
+  onChange,
+}: {
+  value: "en" | "ka";
+  onChange: (v: "en" | "ka") => void;
+}) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs font-medium text-slate-400">Language</label>
+      <div className="flex">
+        <button
+          type="button"
+          onClick={() => onChange("en")}
+          className={[
+            "rounded-l-xl border px-3 py-2 text-sm transition-colors",
+            value === "en"
+              ? "border-cyan-500 bg-cyan-600/20 text-cyan-200"
+              : "border-slate-700 bg-slate-950 text-slate-400 hover:text-slate-300",
+          ].join(" ")}
+        >
+          EN
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange("ka")}
+          className={[
+            "rounded-r-xl border border-l-0 px-3 py-2 text-sm transition-colors",
+            value === "ka"
+              ? "border-cyan-500 bg-cyan-600/20 text-cyan-200"
+              : "border-slate-700 bg-slate-950 text-slate-400 hover:text-slate-300",
+          ].join(" ")}
+        >
+          KA
+        </button>
+      </div>
+      <p className="mt-1 text-xs text-slate-600">
+        {value === "ka" ? "Alerts translated to Georgian" : "Alerts sent in English"}
+      </p>
+    </div>
+  );
+}
+
 // ─── Template Toggles (shared) ──────────────────────────────────────────────
 
 function TemplateToggles({
@@ -155,10 +215,11 @@ function TemplateToggles({
   const name = ruleName || "My Alert Rule";
   const kw = keywords?.[0] || "keyword";
   const previewLines: string[] = [`<b>${emoji} Alert: ${name}</b>`];
-  const meta = [`Keyword: ${kw}`];
+  const meta: string[] = [];
+  if (template.showKeyword !== false) meta.push(`Keyword: ${kw}`);
   if (template.showScore !== false) meta.push("Score: 4/5 (High)");
   if (template.showSector !== false) meta.push("Sector: Technology");
-  previewLines.push(meta.join(" | "));
+  if (meta.length > 0) previewLines.push(meta.join(" | "));
   previewLines.push("");
   if (template.showTitle !== false) {
     previewLines.push("<b>OpenAI announces GPT-5 with real-time reasoning</b>");
@@ -180,6 +241,7 @@ function TemplateToggles({
           { key: "showSummary" as const, label: "Show Summary" },
           { key: "showScore" as const, label: "Show Score" },
           { key: "showSector" as const, label: "Show Sector" },
+          { key: "showKeyword" as const, label: "Show Keyword" },
         ] as const).map(({ key, label }) => (
           <label key={key} className="flex items-center gap-1.5 text-xs text-slate-300">
             <input
@@ -216,6 +278,7 @@ type CreateFormState = {
   telegramChatId: string;
   sectorId: string | null;
   template: AlertTemplateConfig;
+  language: "en" | "ka";
 };
 
 const INITIAL_FORM: CreateFormState = {
@@ -226,6 +289,7 @@ const INITIAL_FORM: CreateFormState = {
   telegramChatId: "",
   sectorId: null,
   template: { ...DEFAULT_TEMPLATE },
+  language: "en",
 };
 
 type CreateFormProps = {
@@ -301,6 +365,7 @@ function CreateForm({ onCreated, sectors }: CreateFormProps) {
         active: true,
         sector_id: form.sectorId,
         template: form.template,
+        language: form.language,
       });
       onCreated(rule);
       setForm(INITIAL_FORM);
@@ -334,7 +399,7 @@ function CreateForm({ onCreated, sectors }: CreateFormProps) {
           <label className="mb-1.5 block text-xs font-medium text-slate-400">
             Keywords <span className="text-slate-500">(press Enter to add)</span>
           </label>
-          <div className="min-h-10 flex flex-wrap gap-2 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 focus-within:border-slate-500">
+          <div className="min-h-10 flex flex-wrap gap-2 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 ring-0 focus-within:border-slate-500">
             {form.keywords.map((kw, i) => (
               <span
                 key={i}
@@ -354,15 +419,19 @@ function CreateForm({ onCreated, sectors }: CreateFormProps) {
             <input
               ref={keywordInputRef}
               type="text"
-              placeholder={form.keywords.length === 0 ? "Type a keyword and press Enter..." : ""}
+              placeholder={form.keywords.length === 0 ? "e.g. sanctions, IPO filing, data breach..." : ""}
               value={form.keywordInput}
               onChange={(e) => setForm((prev) => ({ ...prev, keywordInput: e.target.value }))}
               onKeyDown={handleKeywordKeyDown}
               onBlur={commitKeyword}
-              className="min-w-32 flex-1 bg-transparent text-sm text-slate-200 outline-none placeholder:text-slate-600"
+              className="min-w-32 flex-1 bg-transparent text-sm text-slate-200 outline-none ring-0 placeholder:text-slate-600"
             />
           </div>
-          <div className="mt-1.5 flex items-center gap-3">
+          <p className="mt-1.5 text-xs text-slate-500">
+            LLM-powered semantic matching — use natural phrases, not just exact words.
+            The AI understands context, so "data breach" also catches "cybersecurity incident" or "leaked records".
+          </p>
+          <div className="mt-1 flex items-center gap-3">
             <span className="text-xs text-slate-500">{form.keywords.length}/50</span>
             {hasShortKeyword && (
               <span className="text-xs text-amber-400">
@@ -376,8 +445,8 @@ function CreateForm({ onCreated, sectors }: CreateFormProps) {
           </div>
         </div>
 
-        {/* Min Score + Chat ID + Sector row */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {/* Min Score + Chat ID + Sector + Language row */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
           <div>
             <label className="mb-1.5 block text-xs font-medium text-slate-400">
               Minimum Score
@@ -416,6 +485,11 @@ function CreateForm({ onCreated, sectors }: CreateFormProps) {
             value={form.sectorId}
             onChange={(v) => setForm((prev) => ({ ...prev, sectorId: v }))}
             sectors={sectors}
+          />
+
+          <LanguageToggle
+            value={form.language}
+            onChange={(v) => setForm((prev) => ({ ...prev, language: v }))}
           />
         </div>
 
@@ -534,6 +608,7 @@ type EditFormState = {
   telegramChatId: string;
   sectorId: string | null;
   template: AlertTemplateConfig;
+  language: "en" | "ka";
 };
 
 type RuleCardProps = {
@@ -560,6 +635,7 @@ function RuleCard({ rule, sectors, onToggle, onDelete, onUpdated, isToggling }: 
     telegramChatId: "",
     sectorId: null,
     template: { ...DEFAULT_TEMPLATE },
+    language: "en",
   });
   const editKeywordInputRef = useRef<HTMLInputElement>(null);
   const muteMenuRef = useRef<HTMLDivElement>(null);
@@ -591,6 +667,7 @@ function RuleCard({ rule, sectors, onToggle, onDelete, onUpdated, isToggling }: 
       telegramChatId: rule.telegram_chat_id,
       sectorId: rule.sector_id,
       template: { ...DEFAULT_TEMPLATE, ...(rule.template ?? {}) },
+      language: rule.language ?? "en",
     });
     setIsEditing(true);
   };
@@ -661,6 +738,7 @@ function RuleCard({ rule, sectors, onToggle, onDelete, onUpdated, isToggling }: 
         telegram_chat_id: chatId,
         sector_id: editForm.sectorId,
         template: editForm.template,
+        language: editForm.language,
       });
       onUpdated(updated);
       setIsEditing(false);
@@ -734,7 +812,7 @@ function RuleCard({ rule, sectors, onToggle, onDelete, onUpdated, isToggling }: 
             <label className="mb-1.5 block text-xs font-medium text-slate-400">
               Keywords <span className="text-slate-500">(press Enter to add)</span>
             </label>
-            <div className="min-h-10 flex flex-wrap gap-2 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 focus-within:border-slate-500">
+            <div className="min-h-10 flex flex-wrap gap-2 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 ring-0 focus-within:border-slate-500">
               {editForm.keywords.map((kw, i) => (
                 <span
                   key={i}
@@ -755,7 +833,7 @@ function RuleCard({ rule, sectors, onToggle, onDelete, onUpdated, isToggling }: 
                 ref={editKeywordInputRef}
                 type="text"
                 placeholder={
-                  editForm.keywords.length === 0 ? "Type a keyword and press Enter..." : ""
+                  editForm.keywords.length === 0 ? "e.g. sanctions, IPO filing, data breach..." : ""
                 }
                 value={editForm.keywordInput}
                 onChange={(e) =>
@@ -763,10 +841,13 @@ function RuleCard({ rule, sectors, onToggle, onDelete, onUpdated, isToggling }: 
                 }
                 onKeyDown={handleEditKeywordKeyDown}
                 onBlur={commitEditKeyword}
-                className="min-w-32 flex-1 bg-transparent text-sm text-slate-200 outline-none placeholder:text-slate-600"
+                className="min-w-32 flex-1 bg-transparent text-sm text-slate-200 outline-none ring-0 placeholder:text-slate-600"
               />
             </div>
-            <div className="mt-1.5 flex items-center gap-3">
+            <p className="mt-1.5 text-xs text-slate-500">
+              LLM-powered semantic matching — use natural phrases, not just exact words.
+            </p>
+            <div className="mt-1 flex items-center gap-3">
               <span className="text-xs text-slate-500">{editForm.keywords.length}/50</span>
               {hasShortEditKeyword && (
                 <span className="text-xs text-amber-400">
@@ -776,8 +857,8 @@ function RuleCard({ rule, sectors, onToggle, onDelete, onUpdated, isToggling }: 
             </div>
           </div>
 
-          {/* Min Score + Chat ID + Sector */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          {/* Min Score + Chat ID + Sector + Language */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
             <div>
               <label className="mb-1.5 block text-xs font-medium text-slate-400">
                 Minimum Score
@@ -817,6 +898,11 @@ function RuleCard({ rule, sectors, onToggle, onDelete, onUpdated, isToggling }: 
               onChange={(v) => setEditForm((prev) => ({ ...prev, sectorId: v }))}
               sectors={sectors}
             />
+
+            <LanguageToggle
+              value={editForm.language}
+              onChange={(v) => setEditForm((prev) => ({ ...prev, language: v }))}
+            />
           </div>
 
           {/* Template */}
@@ -855,11 +941,23 @@ function RuleCard({ rule, sectors, onToggle, onDelete, onUpdated, isToggling }: 
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="text-lg font-bold leading-tight text-slate-100">{rule.name}</h3>
-          {sectorName && (
-            <span className="mt-1 inline-block rounded-full bg-violet-500/15 px-2.5 py-0.5 text-xs text-violet-300">
-              {sectorName}
+          <div className="mt-1 flex gap-1.5">
+            {sectorName && (
+              <span className="inline-block rounded-full bg-violet-500/15 px-2.5 py-0.5 text-xs text-violet-300">
+                {sectorName}
+              </span>
+            )}
+            <span
+              className={[
+                "inline-block rounded-full px-2.5 py-0.5 text-xs font-medium",
+                rule.language === "ka"
+                  ? "bg-cyan-500/15 text-cyan-300"
+                  : "bg-slate-700/50 text-slate-400",
+              ].join(" ")}
+            >
+              {rule.language === "ka" ? "KA" : "EN"}
             </span>
-          )}
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {/* Active toggle */}
@@ -1014,20 +1112,30 @@ function AlertSettings() {
   const [quietEnd, setQuietEnd] = useState("");
   const [quietTz, setQuietTz] = useState("");
   const [quietLoading, setQuietLoading] = useState(true);
+  const [transProvider, setTransProvider] = useState("gemini");
+  const [transModel, setTransModel] = useState("gemini-2.5-flash");
+  const [transLoading, setTransLoading] = useState(true);
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [t, q] = await Promise.all([getAlertWarningThreshold(), getAlertQuietHours()]);
+        const [t, q, tr] = await Promise.all([
+          getAlertWarningThreshold(),
+          getAlertQuietHours(),
+          getAlertTranslationConfig(),
+        ]);
         setThreshold(String(t));
         setQuietStart(q.start ?? "");
         setQuietEnd(q.end ?? "");
         setQuietTz(q.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
+        setTransProvider(tr.provider);
+        setTransModel(tr.model);
       } catch {
         // silent
       } finally {
         setThresholdLoading(false);
         setQuietLoading(false);
+        setTransLoading(false);
       }
     };
     load();
@@ -1071,7 +1179,16 @@ function AlertSettings() {
     }
   };
 
-  if (thresholdLoading || quietLoading) {
+  const handleSaveTranslation = async () => {
+    try {
+      await saveAlertTranslation({ provider: transProvider, model: transModel });
+      toast.success("Alert translation settings saved");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save");
+    }
+  };
+
+  if (thresholdLoading || quietLoading || transLoading) {
     return (
       <div className="flex items-center justify-center py-6">
         <Spinner />
@@ -1144,6 +1261,55 @@ function AlertSettings() {
         <p className="mt-1 text-xs text-slate-600">
           Alerts are suppressed during quiet hours. Supports overnight ranges (e.g., 23:00–07:00).
         </p>
+      </div>
+
+      {/* Alert Translation */}
+      <div className="mt-5 border-t border-slate-800/60 pt-4">
+        <label className="mb-1.5 block text-xs font-medium text-slate-400">
+          Alert Translation (Georgian)
+        </label>
+        <p className="mb-3 text-xs text-slate-600">
+          Provider and model for rules set to KA language. Only used when a rule's language is
+          Georgian.
+        </p>
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="mb-1 block text-xs text-slate-500">Provider</label>
+            <select
+              value={transProvider}
+              onChange={(e) => {
+                const provider = e.target.value;
+                const models = TRANSLATION_MODELS[provider];
+                setTransProvider(provider);
+                setTransModel(models?.[0]?.value ?? "");
+              }}
+              className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
+            >
+              <option value="gemini">Gemini (Google AI)</option>
+              <option value="openai">OpenAI</option>
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-slate-500">Model</label>
+            <select
+              value={transModel}
+              onChange={(e) => setTransModel(e.target.value)}
+              className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
+            >
+              {(TRANSLATION_MODELS[transProvider] ?? []).map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            onClick={handleSaveTranslation}
+            className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300 transition hover:border-slate-500"
+          >
+            Save
+          </button>
+        </div>
       </div>
     </div>
   );

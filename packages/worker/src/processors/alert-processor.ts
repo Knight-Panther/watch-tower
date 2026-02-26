@@ -1,8 +1,11 @@
 import type { Redis } from "ioredis";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, inArray } from "drizzle-orm";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import OpenAI from "openai";
 import { logger } from "@watch-tower/shared";
 import type { Database } from "@watch-tower/db";
-import { alertRules, alertDeliveries, appConfig } from "@watch-tower/db";
+import { alertRules, alertDeliveries, appConfig, llmTelemetry } from "@watch-tower/db";
+import { calculateTranslationCost } from "@watch-tower/translation";
 import { sendTelegramAlert, cleanForTelegram } from "../utils/telegram-alert.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -28,6 +31,7 @@ type AlertTemplateConfig = {
   showSummary: boolean;
   showScore: boolean;
   showSector: boolean;
+  showKeyword: boolean;
   alertEmoji: string;
 };
 
@@ -37,6 +41,7 @@ const DEFAULT_ALERT_TEMPLATE: AlertTemplateConfig = {
   showSummary: true,
   showScore: true,
   showSector: true,
+  showKeyword: true,
   alertEmoji: "🔔",
 };
 
@@ -121,11 +126,13 @@ export const checkAndFireAlerts = async ({
   redis,
   telegramConfig,
   articles,
+  apiKeys,
 }: {
   db: Database;
   redis: Redis;
   telegramConfig: TelegramConfig;
   articles: ScoredArticle[];
+  apiKeys?: { googleAi?: string; openai?: string };
 }): Promise<void> => {
   if (articles.length === 0) return;
 
@@ -149,6 +156,41 @@ export const checkAndFireAlerts = async ({
   // Fetch all active alert rules once per batch
   const activeRules = await db.select().from(alertRules).where(eq(alertRules.active, true));
   if (activeRules.length === 0) return;
+
+  // Read translation config once per batch (only if any rule uses Georgian)
+  const hasKaRules = activeRules.some((r) => r.language === "ka");
+  let transProvider = "gemini";
+  let transModel = "gemini-2.5-flash";
+  let transApiKey: string | undefined;
+
+  if (hasKaRules && apiKeys) {
+    const configRows = await db
+      .select({ key: appConfig.key, value: appConfig.value })
+      .from(appConfig)
+      .where(
+        inArray(appConfig.key, [
+          "alert_translation_provider",
+          "alert_translation_model",
+          "translation_provider",
+          "translation_model",
+        ]),
+      );
+    const cfg = new Map(configRows.map((r) => [r.key, r.value as string]));
+    transProvider =
+      (cfg.get("alert_translation_provider") as string) ??
+      (cfg.get("translation_provider") as string) ??
+      "gemini";
+    transModel =
+      (cfg.get("alert_translation_model") as string) ??
+      (cfg.get("translation_model") as string) ??
+      "gemini-2.5-flash";
+    transApiKey =
+      transProvider === "gemini" ? apiKeys.googleAi : transProvider === "openai" ? apiKeys.openai : undefined;
+
+    if (!transApiKey) {
+      logger.warn(`[alert] no API key for translation provider "${transProvider}", KA alerts will send English`);
+    }
+  }
 
   let alertsSent = 0;
   let alertsSkipped = 0;
@@ -188,10 +230,21 @@ export const checkAndFireAlerts = async ({
         continue;
       }
 
-      // Format with template and send
+      // Format with template
       const template = mergeTemplate(rule.template as Partial<AlertTemplateConfig> | null);
-      const message = formatAlertMessage(rule.name, matchedKeyword, article, template);
+      let message = formatAlertMessage(rule.name, matchedKeyword, article, template);
       const targetChatId = rule.telegramChatId || telegramConfig.defaultChatId;
+
+      // Translate to Georgian if rule is set to 'ka'
+      if (rule.language === "ka" && transApiKey) {
+        const tr = await translateAlertText(db, transProvider, transApiKey, transModel, message);
+        if (tr) {
+          message = tr.text;
+        } else {
+          logger.warn({ ruleId: rule.id }, "[alert] translation failed, sending English fallback");
+        }
+      }
+
       const result = await sendTelegramAlert(telegramConfig.botToken, targetChatId, message);
 
       // Set cooldown after send attempt
@@ -261,6 +314,93 @@ export const checkAndFireAlerts = async ({
   }
 };
 
+// ─── Translation ─────────────────────────────────────────────────────────────
+
+const ALERT_TRANSLATION_PROMPT =
+  "Translate the following Telegram alert message to Georgian. " +
+  "Keep ALL HTML tags (<b>, <a href>, <code>, etc.) completely unchanged. " +
+  "Keep URLs, numbers, and emoji unchanged. " +
+  "Keep proper nouns (company names, person names) in their original form. " +
+  "Only translate the human-readable text. Output the translation only.";
+
+type TranslationResult = {
+  text: string;
+  inputTokens: number;
+  outputTokens: number;
+  latencyMs: number;
+};
+
+const translateAlertText = async (
+  db: Database,
+  provider: string,
+  apiKey: string,
+  model: string,
+  htmlMessage: string,
+): Promise<TranslationResult | null> => {
+  const startTime = Date.now();
+
+  try {
+    let text: string;
+    let inputTokens = 0;
+    let outputTokens = 0;
+
+    if (provider === "gemini") {
+      const client = new GoogleGenerativeAI(apiKey);
+      const genModel = client.getGenerativeModel({
+        model,
+        systemInstruction: ALERT_TRANSLATION_PROMPT,
+        generationConfig: { maxOutputTokens: 2048 },
+      });
+      const result = await genModel.generateContent(htmlMessage);
+      const response = result.response;
+      text = response.text();
+      const usage = response.usageMetadata;
+      inputTokens = usage?.promptTokenCount ?? 0;
+      outputTokens = usage?.candidatesTokenCount ?? 0;
+    } else {
+      // OpenAI
+      const client = new OpenAI({ apiKey });
+      const response = await client.chat.completions.create({
+        model,
+        max_tokens: 2048,
+        temperature: 0.2,
+        messages: [
+          { role: "system", content: ALERT_TRANSLATION_PROMPT },
+          { role: "user", content: htmlMessage },
+        ],
+      });
+      text = response.choices[0]?.message?.content ?? htmlMessage;
+      inputTokens = response.usage?.prompt_tokens ?? 0;
+      outputTokens = response.usage?.completion_tokens ?? 0;
+    }
+
+    const latencyMs = Date.now() - startTime;
+
+    // Log telemetry
+    try {
+      const costMicro = calculateTranslationCost(model, inputTokens, outputTokens);
+      await db.insert(llmTelemetry).values({
+        operation: "alert_translation",
+        provider,
+        model,
+        inputTokens,
+        outputTokens,
+        costMicrodollars: costMicro,
+        latencyMs,
+        status: "success",
+      });
+    } catch (telErr) {
+      logger.warn("[alert] telemetry insert failed", telErr);
+    }
+
+    return { text, inputTokens, outputTokens, latencyMs };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn({ error: msg, provider }, "[alert] translation failed");
+    return null;
+  }
+};
+
 // ─── Template ────────────────────────────────────────────────────────────────
 
 const mergeTemplate = (partial: Partial<AlertTemplateConfig> | null): AlertTemplateConfig => ({
@@ -281,15 +421,20 @@ const formatAlertMessage = (
     `<b>${template.alertEmoji} Alert: ${cleanForTelegram(ruleName)}</b>`,
   ];
 
-  // Meta line: keyword + optional score + optional sector
-  const metaParts = [`Keyword: <code>${cleanForTelegram(keyword)}</code>`];
+  // Meta line: optional keyword + optional score + optional sector
+  const metaParts: string[] = [];
+  if (template.showKeyword) {
+    metaParts.push(`Keyword: <code>${cleanForTelegram(keyword)}</code>`);
+  }
   if (template.showScore) {
     metaParts.push(`Score: ${article.score}/5 (${scoreLabel})`);
   }
   if (template.showSector && article.sectorName) {
     metaParts.push(`Sector: ${cleanForTelegram(article.sectorName)}`);
   }
-  lines.push(metaParts.join(" | "));
+  if (metaParts.length > 0) {
+    lines.push(metaParts.join(" | "));
+  }
 
   lines.push(""); // blank line
   if (template.showTitle) {

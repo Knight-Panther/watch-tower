@@ -16,6 +16,7 @@ const mapRule = (r: typeof alertRules.$inferSelect) => ({
   sector_id: r.sectorId,
   template: r.template,
   mute_until: r.muteUntil,
+  language: r.language,
 });
 
 export const registerAlertsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
@@ -105,6 +106,7 @@ export const registerAlertsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       active?: boolean;
       sector_id?: string | null;
       template?: Record<string, unknown> | null;
+      language?: "en" | "ka";
     };
   }>("/alerts", { preHandler: deps.requireApiKey }, async (request, reply) => {
     const {
@@ -115,6 +117,7 @@ export const registerAlertsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       active = true,
       sector_id = null,
       template = null,
+      language = "en",
     } = request.body ?? {};
 
     if (!name || typeof name !== "string" || name.trim().length === 0) {
@@ -131,6 +134,9 @@ export const registerAlertsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     }
     if (!Number.isInteger(min_score) || min_score < 1 || min_score > 5) {
       return reply.code(400).send({ error: "min_score must be 1-5" });
+    }
+    if (language !== "en" && language !== "ka") {
+      return reply.code(400).send({ error: "language must be 'en' or 'ka'" });
     }
 
     // Validate sector_id if provided
@@ -149,6 +155,7 @@ export const registerAlertsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
         active,
         sectorId: sector_id,
         template: template,
+        language,
       })
       .returning();
 
@@ -169,6 +176,7 @@ export const registerAlertsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       active?: boolean;
       sector_id?: string | null;
       template?: Record<string, unknown> | null;
+      language?: "en" | "ka";
     };
   }>("/alerts/:id", { preHandler: deps.requireApiKey }, async (request, reply) => {
     const { id } = request.params;
@@ -207,6 +215,12 @@ export const registerAlertsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     }
     if (body.template !== undefined) {
       updates.template = body.template;
+    }
+    if (body.language !== undefined) {
+      if (body.language !== "en" && body.language !== "ka") {
+        return reply.code(400).send({ error: "language must be 'en' or 'ka'" });
+      }
+      updates.language = body.language;
     }
 
     const [updated] = await deps.db
@@ -263,12 +277,14 @@ export const registerAlertsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
         ? (await deps.db.select({ name: sectors.name }).from(sectors).where(eq(sectors.id, rule.sectorId)))?.[0]?.name ?? "Unknown"
         : "All sectors";
 
+      const langLabel = rule.language === "ka" ? "Georgian (KA)" : "English (EN)";
       const text = [
         `<b>🛎️ Test Alert: ${rule.name}</b>`,
         ``,
         `Keywords: ${rule.keywords.map((k) => `<code>${k}</code>`).join(", ")}`,
         `Min score: ${rule.minScore}/5`,
         `Sector: ${sectorName}`,
+        `Language: ${langLabel}`,
         ``,
         `<i>This is a test. If you see this, your chat ID is working.</i>`,
       ].join("\n");

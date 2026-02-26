@@ -326,6 +326,69 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
   );
 
   // ─────────────────────────────────────────────────────────────────────────────
+  // Alert Translation (provider + model for KA alerts)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  app.get("/config/alert-translation", { preHandler: deps.requireApiKey }, async () => {
+    const keys = [
+      "alert_translation_provider",
+      "alert_translation_model",
+      "translation_provider",
+      "translation_model",
+    ];
+    const rows = await deps.db
+      .select({ key: appConfig.key, value: appConfig.value })
+      .from(appConfig)
+      .where(inArray(appConfig.key, keys));
+    const m = new Map(rows.map((r) => [r.key, r.value]));
+
+    return {
+      provider:
+        (m.get("alert_translation_provider") as string) ??
+        (m.get("translation_provider") as string) ??
+        "gemini",
+      model:
+        (m.get("alert_translation_model") as string) ??
+        (m.get("translation_model") as string) ??
+        "gemini-2.5-flash",
+    };
+  });
+
+  app.patch<{ Body: { provider?: string; model?: string } }>(
+    "/config/alert-translation",
+    { preHandler: deps.requireApiKey },
+    async (request, reply) => {
+      const { provider, model } = request.body ?? {};
+
+      if (provider !== undefined && !["gemini", "openai"].includes(provider)) {
+        return reply.code(400).send({ error: "provider must be 'gemini' or 'openai'" });
+      }
+      if (model !== undefined && model.length > 100) {
+        return reply.code(400).send({ error: "model must be 100 characters or less" });
+      }
+
+      const VALID_MODELS: Record<string, string[]> = {
+        gemini: ["gemini-2.5-flash", "gemini-2.5-pro"],
+        openai: ["gpt-4o-mini", "gpt-4o"],
+      };
+      if (provider !== undefined && model !== undefined && model) {
+        const allowed = VALID_MODELS[provider];
+        if (allowed && !allowed.includes(model)) {
+          return reply.code(400).send({
+            error: `model '${model}' is not valid for provider '${provider}'`,
+          });
+        }
+      }
+
+      if (provider !== undefined) await upsertTypedConfig(deps, "alert_translation_provider", provider);
+      if (model !== undefined) await upsertTypedConfig(deps, "alert_translation_model", model);
+
+      logger.info("[config] alert translation settings updated");
+      return { success: true };
+    },
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
   // Auto-Post Settings (Per-Platform)
   // When enabled, auto-approved articles are immediately posted to that platform.
   // Each platform has its own toggle for granular control.

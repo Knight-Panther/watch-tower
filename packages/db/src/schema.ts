@@ -355,6 +355,7 @@ export const alertRules = pgTable(
     sectorId: uuid("sector_id").references(() => sectors.id, { onDelete: "cascade" }),
     template: jsonb("template"),
     muteUntil: timestamp("mute_until", { withTimezone: true }),
+    language: text("language").notNull().default("en"),
   },
   (table) => [index("idx_alert_rules_active").on(table.active)],
 );

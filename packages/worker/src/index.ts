@@ -326,6 +326,7 @@ const main = async () => {
         // Alert system — keyword alerts send Telegram notifications after scoring
         redis,
         telegramConfig,
+        apiKeys,
       })
     : null;
 
