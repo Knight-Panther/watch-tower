@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import Spinner from "../components/Spinner";
 import DatePicker from "../components/DatePicker";
 import TimePicker from "../components/TimePicker";
 import Button from "../components/ui/Button";
@@ -383,9 +382,7 @@ export default function Scheduled() {
                   }
                 }}
                 className={`w-full flex items-center justify-between px-5 py-3 text-left transition ${
-                  hasItems
-                    ? "hover:bg-slate-800/50 cursor-pointer"
-                    : "cursor-default opacity-60"
+                  hasItems ? "hover:bg-slate-800/50 cursor-pointer" : "cursor-default opacity-60"
                 }`}
               >
                 <div className="flex items-center gap-3">
@@ -496,11 +493,13 @@ export default function Scheduled() {
                             {(postingLanguage === "ka"
                               ? delivery.article_summary_ka || delivery.article_summary
                               : delivery.article_summary) && (
-                              <p className={`text-xs mt-0.5 line-clamp-1 ${
-                                postingLanguage === "ka" && !delivery.article_summary_ka
-                                  ? "text-slate-400 italic opacity-60"
-                                  : "text-slate-400"
-                              }`}>
+                              <p
+                                className={`text-xs mt-0.5 line-clamp-1 ${
+                                  postingLanguage === "ka" && !delivery.article_summary_ka
+                                    ? "text-slate-400 italic opacity-60"
+                                    : "text-slate-400"
+                                }`}
+                              >
                                 {postingLanguage === "ka" && delivery.article_summary_ka
                                   ? delivery.article_summary_ka
                                   : delivery.article_summary}
@@ -530,10 +529,18 @@ export default function Scheduled() {
                           <td className="px-4 py-2.5">
                             {delivery.status === "scheduled" && (
                               <div className="flex gap-2">
-                                <Button variant="secondary" size="xs" onClick={() => openReschedule(delivery)}>
+                                <Button
+                                  variant="secondary"
+                                  size="xs"
+                                  onClick={() => openReschedule(delivery)}
+                                >
                                   Reschedule
                                 </Button>
-                                <Button variant="danger-soft" size="xs" onClick={() => setCancelItem(delivery)}>
+                                <Button
+                                  variant="danger-soft"
+                                  size="xs"
+                                  onClick={() => setCancelItem(delivery)}
+                                >
                                   Cancel
                                 </Button>
                               </div>
@@ -654,7 +661,11 @@ export default function Scheduled() {
             </p>
 
             <div className="mt-6 flex justify-end gap-3">
-              <Button variant="secondary" onClick={() => setCancelItem(null)} disabled={isCancelling}>
+              <Button
+                variant="secondary"
+                onClick={() => setCancelItem(null)}
+                disabled={isCancelling}
+              >
                 Keep Scheduled
               </Button>
               <Button

@@ -12,6 +12,12 @@ export const extractRootDomain = (url: string): string | null => {
   try {
     const parsed = new URL(url);
     const hostname = parsed.hostname.toLowerCase();
+
+    // IP addresses (v4 and v6) should be returned as-is, not split into "root domain"
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname) || hostname.startsWith("[")) {
+      return hostname;
+    }
+
     const parts = hostname.split(".");
 
     // Common two-part TLDs that need special handling
@@ -56,10 +62,7 @@ export type DomainCheckResult = {
  * Check if URL's domain is in the whitelist.
  * Returns detailed result for proper error messaging in UI.
  */
-export const isDomainAllowed = async (
-  db: Database,
-  url: string,
-): Promise<DomainCheckResult> => {
+export const isDomainAllowed = async (db: Database, url: string): Promise<DomainCheckResult> => {
   const domain = extractRootDomain(url);
 
   if (!domain) {

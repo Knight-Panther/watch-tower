@@ -27,6 +27,13 @@ coverage/
 # Turbo
 .turbo
 
+# Test results (persistent but not committed)
+tests/results/*.json
+tests/results/*.html
+tests/results/coverage/
+!tests/results/.gitkeep
+!tests/results/README.md
+
 # Misc
 .gemini-clipboard/
 .claude/worktrees/

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>No Links Feed</title>
+    <link>https://example.com</link>
+    <description>Articles missing link and guid elements</description>
+    <item>
+      <title>Article Without Any Link</title>
+      <description>This article has no link or guid element at all.</description>
+      <pubDate>Sat, 01 Mar 2026 10:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Another Linkless Article</title>
+      <description>Missing both link and guid. Should be filtered out during ingest.</description>
+      <pubDate>Sat, 01 Mar 2026 09:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Third Orphan Article</title>
+      <description>No way to uniquely identify this article without a URL.</description>
+      <pubDate>Sat, 01 Mar 2026 08:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

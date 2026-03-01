@@ -1,5 +1,3 @@
-import { type ReactNode } from "react";
-
 interface SkeletonProps {
   className?: string;
 }
@@ -21,9 +19,7 @@ export function SkeletonRow({ columns = 5 }: { columns?: number }) {
     <tr className="border-b border-slate-800/50">
       {Array.from({ length: columns }, (_, i) => (
         <td key={i} className="px-4 py-3">
-          <div
-            className={`animate-pulse bg-slate-800 rounded h-4 ${widths[i % widths.length]}`}
-          />
+          <div className={`animate-pulse bg-slate-800 rounded h-4 ${widths[i % widths.length]}`} />
         </td>
       ))}
     </tr>

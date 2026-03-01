@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Duplicate URL Test Feed</title>
+    <link>https://example.com</link>
+    <description>Feed containing duplicate article URLs to test deduplication logic</description>
+    <language>en-us</language>
+
+    <item>
+      <title>Tesla Announces New Gigafactory in Malaysia</title>
+      <link>https://example.com/article/30</link>
+      <guid>https://example.com/article/30</guid>
+      <description>Tesla has confirmed plans to build a new Gigafactory in Penang, Malaysia, with an initial investment of $5 billion. The facility will manufacture next-generation battery packs and serve Asian markets, with production expected to begin in 2028.</description>
+      <pubDate>Mon, 01 Mar 2026 08:00:00 GMT</pubDate>
+      <category>Electric Vehicles</category>
+    </item>
+
+    <item>
+      <title>Tesla Malaysia Gigafactory: What We Know So Far</title>
+      <link>https://example.com/article/30</link>
+      <guid>https://example.com/article/30-syndicated</guid>
+      <description>Following Tesla's announcement of a new Gigafactory in Penang, Malaysia, here is a detailed breakdown of the site, investment, and production timeline. This is a syndicated version of the original story with additional analyst commentary.</description>
+      <pubDate>Mon, 01 Mar 2026 09:00:00 GMT</pubDate>
+      <category>Electric Vehicles</category>
+    </item>
+
+    <item>
+      <title>Amazon Acquires European Logistics Startup for €2.4 Billion</title>
+      <link>https://example.com/article/31</link>
+      <guid>https://example.com/article/31</guid>
+      <description>Amazon has completed its acquisition of Sendcloud, a European e-commerce logistics platform, for €2.4 billion. The deal gives Amazon access to Sendcloud's network of 80 carrier integrations and 50,000 e-commerce merchants across 15 European countries.</description>
+      <pubDate>Mon, 01 Mar 2026 10:00:00 GMT</pubDate>
+      <category>E-Commerce</category>
+    </item>
+
+    <item>
+      <title>Amazon Buys Sendcloud: Inside the €2.4B Logistics Deal</title>
+      <link>https://example.com/article/31</link>
+      <guid>https://example.com/article/31-analysis</guid>
+      <description>Amazon's acquisition of Sendcloud, announced this morning, is the latest in a string of European logistics investments. We break down why this deal matters, what it means for competitors like DHL and DPD, and how Sendcloud's merchants will be affected.</description>
+      <pubDate>Mon, 01 Mar 2026 11:30:00 GMT</pubDate>
+      <category>E-Commerce</category>
+    </item>
+
+  </channel>
+</rss>

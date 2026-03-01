@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Alert Keywords Feed</title>
+    <link>https://example.com</link>
+    <description>Articles containing alert-triggering keywords</description>
+    <item>
+      <title>FDA Grants Approval for Novel Gene Therapy Treatment</title>
+      <link>https://example.com/article/alert-1</link>
+      <guid>https://example.com/article/alert-1</guid>
+      <description>The FDA has granted full approval for a breakthrough gene therapy targeting rare genetic disorders. This marks the third FDA approval this quarter for the biotech sector.</description>
+      <pubDate>Sat, 01 Mar 2026 10:00:00 GMT</pubDate>
+      <category>Biotech</category>
+      <category>FDA</category>
+    </item>
+    <item>
+      <title>Routine Software Update Released for Popular App</title>
+      <link>https://example.com/article/alert-2</link>
+      <guid>https://example.com/article/alert-2</guid>
+      <description>Version 4.2 includes minor bug fixes and performance improvements. No new features added.</description>
+      <pubDate>Sat, 01 Mar 2026 09:00:00 GMT</pubDate>
+      <category>Software</category>
+    </item>
+    <item>
+      <title>Major Merger Announcement: TechGiant Acquires AIStartup for $12B</title>
+      <link>https://example.com/article/alert-3</link>
+      <guid>https://example.com/article/alert-3</guid>
+      <description>In a surprise merger announcement, TechGiant has agreed to acquire AIStartup in an all-cash deal valued at $12 billion. The merger is expected to close in Q3 2026.</description>
+      <pubDate>Sat, 01 Mar 2026 08:00:00 GMT</pubDate>
+      <category>M&amp;A</category>
+      <category>AI</category>
+    </item>
+    <item>
+      <title>Industry Conference Announces Speaker Lineup</title>
+      <link>https://example.com/article/alert-4</link>
+      <guid>https://example.com/article/alert-4</guid>
+      <description>The annual tech summit has announced its keynote speakers for the 2026 event. Registration opens next month.</description>
+      <pubDate>Sat, 01 Mar 2026 07:00:00 GMT</pubDate>
+      <category>Events</category>
+    </item>
+  </channel>
+</rss>

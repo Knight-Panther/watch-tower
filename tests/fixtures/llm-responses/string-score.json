@@ -1,0 +1,5 @@
+{
+  "score": "3",
+  "summary": "Moderate relevance article with score returned as string",
+  "reasoning": "This fixture tests that the Zod schema coerces string scores to numbers via z.coerce.number()."
+}

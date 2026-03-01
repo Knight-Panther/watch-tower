@@ -1,0 +1,20 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "outDir": "../dist-tests",
+    "types": ["vitest/globals"],
+    "paths": {
+      "@watch-tower/shared": ["../packages/shared/src"],
+      "@watch-tower/db": ["../packages/db/src"],
+      "@watch-tower/llm": ["../packages/llm/src"],
+      "@watch-tower/embeddings": ["../packages/embeddings/src"],
+      "@watch-tower/translation": ["../packages/translation/src"],
+      "@watch-tower/social": ["../packages/social/src"],
+      "@watch-tower/worker": ["../packages/worker/src"],
+      "@watch-tower/worker/*": ["../packages/worker/src/*"]
+    }
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

@@ -212,12 +212,21 @@ export const readDigestConfig = async (db: Database): Promise<DigestConfig> => {
     translationProvider: (m.get("digest_translation_provider") as string) ?? globalTransProvider,
     translationModel: (m.get("digest_translation_model") as string) ?? globalTransModel,
     translationPrompt: (m.get("digest_translation_prompt") as string) ?? DEFAULT_TRANSLATION_PROMPT,
-    telegramLanguage: ((m.get("digest_language") as string) ?? postingLanguage ?? "en") as "en" | "ka",
-    facebookLanguage: ((m.get("digest_language") as string) ?? postingLanguage ?? "en") as "en" | "ka",
-    linkedinLanguage: ((m.get("digest_language") as string) ?? postingLanguage ?? "en") as "en" | "ka",
-    imageTelegram: m.get("digest_image_telegram") === true || m.get("digest_image_telegram") === "true",
-    imageFacebook: m.get("digest_image_facebook") === true || m.get("digest_image_facebook") === "true",
-    imageLinkedin: m.get("digest_image_linkedin") === true || m.get("digest_image_linkedin") === "true",
+    telegramLanguage: ((m.get("digest_language") as string) ?? postingLanguage ?? "en") as
+      | "en"
+      | "ka",
+    facebookLanguage: ((m.get("digest_language") as string) ?? postingLanguage ?? "en") as
+      | "en"
+      | "ka",
+    linkedinLanguage: ((m.get("digest_language") as string) ?? postingLanguage ?? "en") as
+      | "en"
+      | "ka",
+    imageTelegram:
+      m.get("digest_image_telegram") === true || m.get("digest_image_telegram") === "true",
+    imageFacebook:
+      m.get("digest_image_facebook") === true || m.get("digest_image_facebook") === "true",
+    imageLinkedin:
+      m.get("digest_image_linkedin") === true || m.get("digest_image_linkedin") === "true",
     autoPost: true, // Legacy config always auto-posts
   };
 };
@@ -225,10 +234,7 @@ export const readDigestConfig = async (db: Database): Promise<DigestConfig> => {
 // ─── Slot config reader ─────────────────────────────────────────────────────
 
 export const readSlotConfig = async (db: Database, slotId: string): Promise<DigestConfig> => {
-  const [slot] = await db
-    .select()
-    .from(digestSlots)
-    .where(eq(digestSlots.id, slotId));
+  const [slot] = await db.select().from(digestSlots).where(eq(digestSlots.id, slotId));
 
   if (!slot) throw new Error(`[digest] slot ${slotId} not found`);
 
@@ -505,10 +511,16 @@ export const deliverDigest = async (
   if (wantImage) {
     try {
       coverBuffer = await generateDigestCover(config.language, dateStr);
-      logger.info({ size: coverBuffer.length, language: config.language }, "[digest] cover image generated");
+      logger.info(
+        { size: coverBuffer.length, language: config.language },
+        "[digest] cover image generated",
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      logger.warn({ error: msg }, "[digest] cover image generation failed, continuing without image");
+      logger.warn(
+        { error: msg },
+        "[digest] cover image generation failed, continuing without image",
+      );
     }
   }
 
@@ -550,9 +562,15 @@ export const deliverDigest = async (
     let tgOk = false;
 
     if (config.imageTelegram && coverBuffer) {
-      const photoResult = await sendTelegramPhoto(telegramConfig!.botToken, config.telegramChatId, coverBuffer);
-      if (photoResult.ok) { tgOk = true; totalMessages++; }
-      else logger.warn("[digest] telegram cover photo failed to send");
+      const photoResult = await sendTelegramPhoto(
+        telegramConfig!.botToken,
+        config.telegramChatId,
+        coverBuffer,
+      );
+      if (photoResult.ok) {
+        tgOk = true;
+        totalMessages++;
+      } else logger.warn("[digest] telegram cover photo failed to send");
       await new Promise((r) => setTimeout(r, 500));
     }
 
@@ -561,9 +579,15 @@ export const deliverDigest = async (
         { msgIndex: i, msgLen: messages[i].length, preview: messages[i].slice(0, 300) },
         "[digest] telegram message chunk",
       );
-      const msgResult = await sendTelegramAlert(telegramConfig!.botToken, config.telegramChatId, messages[i]);
-      if (msgResult.ok) { anySent = true; tgOk = true; }
-      else logger.warn({ msgIndex: i }, "[digest] telegram message failed to send");
+      const msgResult = await sendTelegramAlert(
+        telegramConfig!.botToken,
+        config.telegramChatId,
+        messages[i],
+      );
+      if (msgResult.ok) {
+        anySent = true;
+        tgOk = true;
+      } else logger.warn({ msgIndex: i }, "[digest] telegram message failed to send");
       if (messages.length > 1) await new Promise((r) => setTimeout(r, 500));
     }
     totalMessages += messages.length;
@@ -618,9 +642,10 @@ export const deliverDigest = async (
       const plainBody = formatPlainDigest(liBullets, content.allArticles, content.hasLLM);
       const header = `\u{1F4CA} ${liHeader} \u2014 ${dateStr}`;
       const maxBody = 3000 - header.length - 4;
-      const truncBody = plainBody.length > maxBody
-        ? plainBody.slice(0, plainBody.lastIndexOf("\n", maxBody)) || plainBody.slice(0, maxBody)
-        : plainBody;
+      const truncBody =
+        plainBody.length > maxBody
+          ? plainBody.slice(0, plainBody.lastIndexOf("\n", maxBody)) || plainBody.slice(0, maxBody)
+          : plainBody;
       const liText = `${header}\n\n${truncBody}`;
 
       let result;
@@ -659,7 +684,11 @@ export const deliverDigest = async (
 
     await db
       .insert(appConfig)
-      .values({ key: "last_digest_sent_at", value: new Date().toISOString(), updatedAt: new Date() })
+      .values({
+        key: "last_digest_sent_at",
+        value: new Date().toISOString(),
+        updatedAt: new Date(),
+      })
       .onConflictDoUpdate({
         target: appConfig.key,
         set: { value: new Date().toISOString(), updatedAt: new Date() },
@@ -668,7 +697,12 @@ export const deliverDigest = async (
 
   // Log telemetry
   if (content.llmResult) {
-    const cost = calculateLLMCost(config.provider, config.model, content.llmResult.inputTokens, content.llmResult.outputTokens);
+    const cost = calculateLLMCost(
+      config.provider,
+      config.model,
+      content.llmResult.inputTokens,
+      content.llmResult.outputTokens,
+    );
     await db.insert(llmTelemetry).values({
       articleId: null,
       operation: "digest_summary",
@@ -770,12 +804,22 @@ export const saveDraft = async (
       llmTokensIn: content.llmResult?.inputTokens ?? null,
       llmTokensOut: content.llmResult?.outputTokens ?? null,
       llmCostMicrodollars: content.llmResult
-        ? calculateLLMCost(config.provider, config.model, content.llmResult.inputTokens, content.llmResult.outputTokens)
+        ? calculateLLMCost(
+            config.provider,
+            config.model,
+            content.llmResult.inputTokens,
+            content.llmResult.outputTokens,
+          )
         : null,
       translationProvider: content.translationResult ? config.translationProvider : null,
       translationModel: content.translationResult ? config.translationModel : null,
       translationCostMicrodollars: content.translationResult
-        ? calculateLLMCost(config.translationProvider, config.translationModel, content.translationResult.inputTokens, content.translationResult.outputTokens)
+        ? calculateLLMCost(
+            config.translationProvider,
+            config.translationModel,
+            content.translationResult.inputTokens,
+            content.translationResult.outputTokens,
+          )
         : null,
       statsScanned: content.stats.totalIngested,
       statsScored: content.stats.passedFilters,
@@ -793,27 +837,18 @@ export const saveDraft = async (
 
 // ─── D. Deliver an existing draft (for manual approval) ─────────────────────
 
-export const deliverDraft = async (
-  deps: DigestDeps,
-  draftId: string,
-): Promise<DigestResult> => {
+export const deliverDraft = async (deps: DigestDeps, draftId: string): Promise<DigestResult> => {
   const { db } = deps;
 
   // 1. Load draft
-  const [draft] = await db
-    .select()
-    .from(digestDrafts)
-    .where(eq(digestDrafts.id, draftId));
+  const [draft] = await db.select().from(digestDrafts).where(eq(digestDrafts.id, draftId));
 
   if (!draft) throw new Error(`[digest] draft ${draftId} not found`);
   if (!["draft", "approved"].includes(draft.status)) {
     throw new Error(`[digest] draft ${draftId} has status '${draft.status}', cannot deliver`);
   }
   if (draft.expiresAt < new Date()) {
-    await db
-      .update(digestDrafts)
-      .set({ status: "expired" })
-      .where(eq(digestDrafts.id, draftId));
+    await db.update(digestDrafts).set({ status: "expired" }).where(eq(digestDrafts.id, draftId));
     throw new Error(`[digest] draft ${draftId} has expired`);
   }
 
@@ -821,27 +856,26 @@ export const deliverDraft = async (
   const config = await readSlotConfig(db, draft.slotId);
 
   // 3. Reconstruct content from draft (for delivery)
-  // Use edited text if user modified it, else original
-  const bulletText = draft.translatedText ?? draft.generatedText;
   const articleIds = draft.articleIds as string[];
 
   // Load articles for ref mapping
-  const draftArticles = articleIds.length > 0
-    ? await db
-        .select({
-          id: articles.id,
-          title: articles.title,
-          llmSummary: articles.llmSummary,
-          importanceScore: articles.importanceScore,
-          url: articles.url,
-          sectorName: sectors.name,
-          translationStatus: articles.translationStatus,
-        })
-        .from(articles)
-        .leftJoin(sectors, eq(articles.sectorId, sectors.id))
-        .where(inArray(articles.id, articleIds))
-        .orderBy(desc(articles.importanceScore))
-    : [];
+  const draftArticles =
+    articleIds.length > 0
+      ? await db
+          .select({
+            id: articles.id,
+            title: articles.title,
+            llmSummary: articles.llmSummary,
+            importanceScore: articles.importanceScore,
+            url: articles.url,
+            sectorName: sectors.name,
+            translationStatus: articles.translationStatus,
+          })
+          .from(articles)
+          .leftJoin(sectors, eq(articles.sectorId, sectors.id))
+          .where(inArray(articles.id, articleIds))
+          .orderBy(desc(articles.importanceScore))
+      : [];
 
   const articleMap = new Map<number, DigestArticle>();
   draftArticles.forEach((a, i) => articleMap.set(i + 1, a as DigestArticle));
@@ -873,7 +907,6 @@ export const deliverDraft = async (
     });
 
     // 5. Update draft status
-    const channelResults: Record<string, string> = {};
     const sentChannels: string[] = [];
     if (config.telegramEnabled) sentChannels.push("telegram");
     if (config.facebookEnabled) sentChannels.push("facebook");
@@ -930,7 +963,12 @@ export const compileAndSendDigest = async (
 
     // Still log telemetry for the generation
     if (content.llmResult) {
-      const cost = calculateLLMCost(config.provider, config.model, content.llmResult.inputTokens, content.llmResult.outputTokens);
+      const cost = calculateLLMCost(
+        config.provider,
+        config.model,
+        content.llmResult.inputTokens,
+        content.llmResult.outputTokens,
+      );
       await db.insert(llmTelemetry).values({
         articleId: null,
         operation: "digest_summary",
@@ -967,7 +1005,10 @@ export const compileAndSendDigest = async (
       });
     }
 
-    logger.info({ draftId, slotId, articles: content.allArticles.length }, "[digest] saved as draft (manual approval)");
+    logger.info(
+      { draftId, slotId, articles: content.allArticles.length },
+      "[digest] saved as draft (manual approval)",
+    );
     return { sent: false, articleCount: content.allArticles.length, messageCount: 0, draftId };
   }
 
@@ -1264,7 +1305,11 @@ type PipelineStats = {
   minScore: number;
 };
 
-const queryPipelineStats = async (db: Database, lookback: Date, minScore: number): Promise<PipelineStats> => {
+const queryPipelineStats = async (
+  db: Database,
+  lookback: Date,
+  minScore: number,
+): Promise<PipelineStats> => {
   const [totalRow] = await db
     .select({ cnt: count() })
     .from(articles)
@@ -1290,8 +1335,7 @@ const queryPipelineStats = async (db: Database, lookback: Date, minScore: number
 
 // ─── Telegram formatting helpers ──────────────────────────────────────────────
 
-const escapeUrl = (url: string): string =>
-  url.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+const escapeUrl = (url: string): string => url.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 
 const formatDate = (date: Date, timezone: string): string => {
   try {
@@ -1361,16 +1405,25 @@ async function postFacebookPhoto(
 
   try {
     const form = new FormData();
-    form.append("source", new Blob([new Uint8Array(imageBuffer)], { type: "image/webp" }), "digest-cover.webp");
+    form.append(
+      "source",
+      new Blob([new Uint8Array(imageBuffer)], { type: "image/webp" }),
+      "digest-cover.webp",
+    );
     form.append("caption", caption);
     form.append("access_token", config.accessToken);
 
-    const resp = await fetch(
-      `https://graph.facebook.com/v18.0/${config.pageId}/photos`,
-      { method: "POST", body: form, signal: controller.signal },
-    );
+    const resp = await fetch(`https://graph.facebook.com/v18.0/${config.pageId}/photos`, {
+      method: "POST",
+      body: form,
+      signal: controller.signal,
+    });
 
-    const data = (await resp.json()) as { id?: string; post_id?: string; error?: { message: string } };
+    const data = (await resp.json()) as {
+      id?: string;
+      post_id?: string;
+      error?: { message: string };
+    };
     if (!resp.ok || data.error) {
       return { success: false, postId: "", error: data.error?.message || `HTTP ${resp.status}` };
     }
@@ -1394,26 +1447,27 @@ async function postLinkedInPhoto(
 
   try {
     // Step 1: Register upload
-    const registerResp = await fetch(
-      "https://api.linkedin.com/v2/assets?action=registerUpload",
-      {
-        method: "POST",
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          registerUploadRequest: {
-            recipes: ["urn:li:digitalmediaRecipe:feedshare-image"],
-            owner: authorUrn,
-            serviceRelationships: [
-              { relationshipType: "OWNER", identifier: "urn:li:userGeneratedContent" },
-            ],
-          },
-        }),
-      },
-    );
+    const registerResp = await fetch("https://api.linkedin.com/v2/assets?action=registerUpload", {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        registerUploadRequest: {
+          recipes: ["urn:li:digitalmediaRecipe:feedshare-image"],
+          owner: authorUrn,
+          serviceRelationships: [
+            { relationshipType: "OWNER", identifier: "urn:li:userGeneratedContent" },
+          ],
+        },
+      }),
+    });
 
     if (!registerResp.ok) {
       const err = (await registerResp.json().catch(() => ({}))) as { message?: string };
-      return { success: false, postId: "", error: err.message || `Register failed: HTTP ${registerResp.status}` };
+      return {
+        success: false,
+        postId: "",
+        error: err.message || `Register failed: HTTP ${registerResp.status}`,
+      };
     }
 
     const registerData = (await registerResp.json()) as {
@@ -1466,7 +1520,11 @@ async function postLinkedInPhoto(
 
     if (!postResp.ok) {
       const err = (await postResp.json().catch(() => ({}))) as { message?: string };
-      return { success: false, postId: "", error: err.message || `Post failed: HTTP ${postResp.status}` };
+      return {
+        success: false,
+        postId: "",
+        error: err.message || `Post failed: HTTP ${postResp.status}`,
+      };
     }
 
     return { success: true, postId: postResp.headers.get("x-restli-id") || "" };

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import Spinner from "../components/Spinner";
 import ScheduleModal from "../components/ScheduleModal";
 import ConfirmModal from "../components/ConfirmModal";
 import { SkeletonTable } from "../components/ui/Skeleton";
@@ -66,10 +65,15 @@ export default function Articles() {
 
   // Batch selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [pendingBatchAction, setPendingBatchAction] = useState<"approve" | "reject" | "translate" | null>(null);
+  const [pendingBatchAction, setPendingBatchAction] = useState<
+    "approve" | "reject" | "translate" | null
+  >(null);
 
   // Single-article confirmation
-  const [pendingAction, setPendingAction] = useState<{ type: "reject" | "translate"; article: Article } | null>(null);
+  const [pendingAction, setPendingAction] = useState<{
+    type: "reject" | "translate";
+    article: Article;
+  } | null>(null);
 
   // Filter state with localStorage persistence (no URL sync to avoid tab conflicts)
   const [filters, setFilter, setFilters] = useLocalStorageFilters<ArticleFilters>(
@@ -134,7 +138,14 @@ export default function Articles() {
 
   useEffect(() => {
     const unsubscribe = subscribe(
-      ["article:scored", "article:approved", "article:rejected", "article:posted", "article:translated", "source:fetched"],
+      [
+        "article:scored",
+        "article:approved",
+        "article:rejected",
+        "article:posted",
+        "article:translated",
+        "source:fetched",
+      ],
       debouncedRefresh,
     );
     return unsubscribe;
@@ -237,7 +248,11 @@ export default function Articles() {
       const message = err instanceof Error ? err.message : "Failed to reject";
       toast.error(message);
     } finally {
-      setBusyIds((prev) => { const next = new Set(prev); next.delete(article.id); return next; });
+      setBusyIds((prev) => {
+        const next = new Set(prev);
+        next.delete(article.id);
+        return next;
+      });
     }
   };
 
@@ -251,7 +266,11 @@ export default function Articles() {
       const message = err instanceof Error ? err.message : "Failed to queue translation";
       toast.error(message);
     } finally {
-      setBusyIds((prev) => { const next = new Set(prev); next.delete(article.id); return next; });
+      setBusyIds((prev) => {
+        const next = new Set(prev);
+        next.delete(article.id);
+        return next;
+      });
     }
   };
 
@@ -272,7 +291,9 @@ export default function Articles() {
         toast.success(`${selectedIds.size} article(s) rejected`);
       } else if (pendingBatchAction === "translate") {
         const result = await batchTranslateArticles([...selectedIds]);
-        toast.success(`${result.queued} article(s) queued for translation${result.skipped ? ` (${result.skipped} skipped)` : ""}`);
+        toast.success(
+          `${result.queued} article(s) queued for translation${result.skipped ? ` (${result.skipped} skipped)` : ""}`,
+        );
       } else {
         await batchApproveArticles([...selectedIds]);
         toast.success(`${selectedIds.size} article(s) approved`);
@@ -573,9 +594,7 @@ export default function Articles() {
             </span>
           )}
           {filters.status && (
-            <span className="rounded-full bg-slate-800 px-2.5 py-1">
-              Stage: {filters.status}
-            </span>
+            <span className="rounded-full bg-slate-800 px-2.5 py-1">Stage: {filters.status}</span>
           )}
           {filters.min_score !== undefined && (
             <span className="rounded-full bg-slate-800 px-2.5 py-1">
@@ -593,14 +612,10 @@ export default function Articles() {
             </span>
           )}
           {filters.date_from && (
-            <span className="rounded-full bg-slate-800 px-2.5 py-1">
-              From: {filters.date_from}
-            </span>
+            <span className="rounded-full bg-slate-800 px-2.5 py-1">From: {filters.date_from}</span>
           )}
           {filters.date_to && (
-            <span className="rounded-full bg-slate-800 px-2.5 py-1">
-              To: {filters.date_to}
-            </span>
+            <span className="rounded-full bg-slate-800 px-2.5 py-1">To: {filters.date_to}</span>
           )}
           {filters.rejection_type && (
             <span className="rounded-full bg-slate-800 px-2.5 py-1">
@@ -620,9 +635,7 @@ export default function Articles() {
       {/* Batch Action Bar */}
       {selectedIds.size > 0 && (
         <section className="flex items-center gap-3 rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-3">
-          <span className="text-sm text-slate-300 font-medium">
-            {selectedIds.size} selected
-          </span>
+          <span className="text-sm text-slate-300 font-medium">{selectedIds.size} selected</span>
           <Button variant="primary" size="sm" onClick={() => setPendingBatchAction("approve")}>
             Approve Selected
           </Button>
@@ -630,7 +643,11 @@ export default function Articles() {
             Reject Selected
           </Button>
           {postingLanguage === "ka" && (
-            <Button variant="secondary" size="sm" onClick={() => setPendingBatchAction("translate")}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setPendingBatchAction("translate")}
+            >
               Translate Selected
             </Button>
           )}
@@ -648,14 +665,14 @@ export default function Articles() {
         <div className="overflow-hidden">
           <table className="w-full text-sm table-fixed">
             <colgroup>
-              <col className="w-10" />          {/* checkbox */}
-              <col className="w-[86px]" />      {/* ingested */}
-              <col className="w-[86px]" />      {/* publish */}
-              <col className="w-[110px]" />     {/* source */}
-              <col />                            {/* title/summary — takes remaining space */}
-              <col className="w-[76px]" />       {/* status */}
-              <col className="w-[56px]" />       {/* score */}
-              <col className="w-[94px]" />       {/* actions */}
+              <col className="w-10" /> {/* checkbox */}
+              <col className="w-[86px]" /> {/* ingested */}
+              <col className="w-[86px]" /> {/* publish */}
+              <col className="w-[110px]" /> {/* source */}
+              <col /> {/* title/summary — takes remaining space */}
+              <col className="w-[76px]" /> {/* status */}
+              <col className="w-[56px]" /> {/* score */}
+              <col className="w-[94px]" /> {/* actions */}
             </colgroup>
             <thead className="bg-slate-800/50">
               <tr>
@@ -682,9 +699,7 @@ export default function Articles() {
                   {filters.sort_by === "published_at" && (filters.sort_dir === "desc" ? "↓" : "↑")}
                 </th>
                 <th className="px-2 py-3 text-left font-medium text-slate-300">Source</th>
-                <th className="px-2 py-3 text-left font-medium text-slate-300">
-                  Title / Summary
-                </th>
+                <th className="px-2 py-3 text-left font-medium text-slate-300">Title / Summary</th>
                 <th className="px-2 py-3 text-left font-medium text-slate-300">Status</th>
                 <th
                   onClick={() => handleSort("importance_score")}
@@ -700,7 +715,10 @@ export default function Articles() {
             <tbody className="divide-y divide-slate-800">
               {isLoading && articles.length === 0 && <SkeletonTable rows={8} columns={8} />}
               {articles.map((article) => (
-                <tr key={article.id} className={`hover:bg-slate-800/30 ${selectedIds.has(article.id) ? "bg-slate-800/20" : ""}`}>
+                <tr
+                  key={article.id}
+                  className={`hover:bg-slate-800/30 ${selectedIds.has(article.id) ? "bg-slate-800/20" : ""}`}
+                >
                   <td className="px-2 py-3">
                     <input
                       type="checkbox"
@@ -717,19 +735,34 @@ export default function Articles() {
                   </td>
                   <td className="px-2 py-3">
                     <div className="overflow-hidden">
-                      <p className="text-slate-200 text-sm truncate">{article.source_name || "Unknown"}</p>
+                      <p className="text-slate-200 text-sm truncate">
+                        {article.source_name || "Unknown"}
+                      </p>
                       <div className="flex items-center gap-1 mt-0.5">
                         <span className="px-1.5 py-0.5 bg-slate-700/50 rounded text-xs text-slate-500">
                           {article.sector_name || "-"}
                         </span>
                         {article.url && (
                           <button
-                            onClick={() => { navigator.clipboard.writeText(article.url); toast.success("URL copied"); }}
+                            onClick={() => {
+                              navigator.clipboard.writeText(article.url);
+                              toast.success("URL copied");
+                            }}
                             className="p-0.5 text-slate-500 hover:text-slate-300 transition-colors"
                             title="Copy article URL"
                           >
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                            <svg
+                              className="w-3 h-3"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                              />
                             </svg>
                           </button>
                         )}
@@ -745,12 +778,17 @@ export default function Articles() {
                             onChange={(e) => setEditTitle(e.target.value)}
                             onKeyDown={(e) => {
                               if (e.key === "Escape") cancelEditing();
-                              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); saveEditing(article.id); }
+                              if (e.key === "Enter" && !e.shiftKey) {
+                                e.preventDefault();
+                                saveEditing(article.id);
+                              }
                             }}
                             className="w-full rounded border border-slate-600 bg-slate-800 px-2 py-1 text-sm text-slate-200 outline-none focus:border-slate-400"
                             placeholder="Title"
                           />
-                          <p className={`mt-0.5 text-[10px] ${editTitle.length > 200 ? "text-amber-400" : "text-slate-500"}`}>
+                          <p
+                            className={`mt-0.5 text-[10px] ${editTitle.length > 200 ? "text-amber-400" : "text-slate-500"}`}
+                          >
                             {editTitle.length}/200
                           </p>
                         </div>
@@ -765,7 +803,9 @@ export default function Articles() {
                             className="w-full rounded border border-slate-600 bg-slate-800 px-2 py-1 text-xs text-slate-300 outline-none focus:border-slate-400 resize-y"
                             placeholder="Summary"
                           />
-                          <p className={`text-[10px] ${editSummary.length > 500 ? "text-amber-400" : "text-slate-500"}`}>
+                          <p
+                            className={`text-[10px] ${editSummary.length > 500 ? "text-amber-400" : "text-slate-500"}`}
+                          >
                             {editSummary.length}/500
                           </p>
                         </div>
@@ -809,51 +849,83 @@ export default function Articles() {
                               </a>
                             )}
                             {/* Summary text (Georgian if translated, English fallback) */}
-                            {article.translation_status === "translated" && article.llm_summary_ka ? (
+                            {article.translation_status === "translated" &&
+                            article.llm_summary_ka ? (
                               <p className="text-xs text-slate-500 mt-1">
                                 {article.llm_summary_ka}
                               </p>
                             ) : article.llm_summary ? (
-                              <p className="text-xs text-slate-500 mt-1">
-                                {article.llm_summary}
-                              </p>
+                              <p className="text-xs text-slate-500 mt-1">{article.llm_summary}</p>
                             ) : null}
                             {/* Translation status badge (non-translated states) */}
-                            {article.translation_status && article.translation_status !== "translated" && (
-                              <span
-                                className={`inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                                  article.translation_status === "queued"
-                                    ? "bg-cyan-500/15 text-cyan-400"
-                                    : article.translation_status === "translating"
-                                      ? "bg-amber-500/15 text-amber-400"
-                                      : article.translation_status === "failed"
-                                        ? "bg-red-500/15 text-red-400"
-                                        : article.translation_status === "exhausted"
-                                          ? "bg-red-500/15 text-red-500"
-                                          : "bg-slate-700/40 text-slate-400"
-                                }`}
-                                title={
-                                  article.translation_status === "failed" || article.translation_status === "exhausted"
-                                    ? article.translation_error || undefined
-                                    : undefined
-                                }
-                              >
-                                {article.translation_status === "queued" && (
-                                  <>
-                                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                    Translation queued
-                                  </>
-                                )}
-                                {article.translation_status === "translating" && (
-                                  <>
-                                    <svg className="w-2.5 h-2.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-                                    Translating
-                                  </>
-                                )}
-                                {article.translation_status === "failed" && "Translation failed"}
-                                {article.translation_status === "exhausted" && "Translation exhausted"}
-                              </span>
-                            )}
+                            {article.translation_status &&
+                              article.translation_status !== "translated" && (
+                                <span
+                                  className={`inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                    article.translation_status === "queued"
+                                      ? "bg-cyan-500/15 text-cyan-400"
+                                      : article.translation_status === "translating"
+                                        ? "bg-amber-500/15 text-amber-400"
+                                        : article.translation_status === "failed"
+                                          ? "bg-red-500/15 text-red-400"
+                                          : article.translation_status === "exhausted"
+                                            ? "bg-red-500/15 text-red-500"
+                                            : "bg-slate-700/40 text-slate-400"
+                                  }`}
+                                  title={
+                                    article.translation_status === "failed" ||
+                                    article.translation_status === "exhausted"
+                                      ? article.translation_error || undefined
+                                      : undefined
+                                  }
+                                >
+                                  {article.translation_status === "queued" && (
+                                    <>
+                                      <svg
+                                        className="w-2.5 h-2.5"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        viewBox="0 0 24 24"
+                                      >
+                                        <path
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                          strokeWidth={2}
+                                          d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                                        />
+                                      </svg>
+                                      Translation queued
+                                    </>
+                                  )}
+                                  {article.translation_status === "translating" && (
+                                    <>
+                                      <svg
+                                        className="w-2.5 h-2.5 animate-spin"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                      >
+                                        <circle
+                                          className="opacity-25"
+                                          cx="12"
+                                          cy="12"
+                                          r="10"
+                                          stroke="currentColor"
+                                          strokeWidth="4"
+                                        />
+                                        <path
+                                          className="opacity-75"
+                                          fill="currentColor"
+                                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                                        />
+                                      </svg>
+                                      Translating
+                                    </>
+                                  )}
+                                  {article.translation_status === "failed" && "Translation failed"}
+                                  {article.translation_status === "exhausted" &&
+                                    "Translation exhausted"}
+                                </span>
+                              )}
                           </>
                         ) : (
                           <>
@@ -866,9 +938,7 @@ export default function Articles() {
                               {article.title}
                             </a>
                             {article.llm_summary && (
-                              <p className="text-xs text-slate-500 mt-1">
-                                {article.llm_summary}
-                              </p>
+                              <p className="text-xs text-slate-500 mt-1">{article.llm_summary}</p>
                             )}
                           </>
                         )}
@@ -908,7 +978,10 @@ export default function Articles() {
                       {article.pipeline_stage}
                     </span>
                     {article.pipeline_stage === "rejected" && article.rejection_reason && (
-                      <p className="mt-1 text-[10px] text-red-400/70 truncate" title={article.rejection_reason}>
+                      <p
+                        className="mt-1 text-[10px] text-red-400/70 truncate"
+                        title={article.rejection_reason}
+                      >
                         {article.rejection_reason}
                       </p>
                     )}
@@ -931,17 +1004,16 @@ export default function Articles() {
                   <td className="px-2 py-3">
                     <div className="flex flex-col gap-1.5 items-center">
                       {/* Schedule button (scored articles) */}
-                      {article.pipeline_stage === "scored" &&
-                        article.importance_score !== null && (
-                          <Button
-                            variant="primary"
-                            size="xs"
-                            fullWidth
-                            onClick={() => openScheduleModal(article)}
-                          >
-                            Schedule
-                          </Button>
-                        )}
+                      {article.pipeline_stage === "scored" && article.importance_score !== null && (
+                        <Button
+                          variant="primary"
+                          size="xs"
+                          fullWidth
+                          onClick={() => openScheduleModal(article)}
+                        >
+                          Schedule
+                        </Button>
+                      )}
                       {/* Repost button (posted articles) */}
                       {article.pipeline_stage === "posted" && (
                         <Button
@@ -969,20 +1041,19 @@ export default function Articles() {
                           </button>
                         )}
                       {/* Reject button at bottom (scored articles) */}
-                      {article.pipeline_stage === "scored" &&
-                        article.importance_score !== null && (
-                          <Button
-                            variant="danger-soft"
-                            size="xs"
-                            fullWidth
-                            onClick={() => setPendingAction({ type: "reject", article })}
-                            disabled={busyIds.has(article.id)}
-                            loading={busyIds.has(article.id)}
-                            loadingText="Rejecting..."
-                          >
-                            Reject
-                          </Button>
-                        )}
+                      {article.pipeline_stage === "scored" && article.importance_score !== null && (
+                        <Button
+                          variant="danger-soft"
+                          size="xs"
+                          fullWidth
+                          onClick={() => setPendingAction({ type: "reject", article })}
+                          disabled={busyIds.has(article.id)}
+                          loading={busyIds.has(article.id)}
+                          loadingText="Rejecting..."
+                        >
+                          Reject
+                        </Button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -992,7 +1063,11 @@ export default function Articles() {
                   <td colSpan={7} className="px-4 py-8">
                     <EmptyState
                       title="No articles found"
-                      description={hasActiveFilters ? "Try adjusting your filters to see more results." : "Articles will appear here once the pipeline processes RSS feeds."}
+                      description={
+                        hasActiveFilters
+                          ? "Try adjusting your filters to see more results."
+                          : "Articles will appear here once the pipeline processes RSS feeds."
+                      }
                     />
                   </td>
                 </tr>

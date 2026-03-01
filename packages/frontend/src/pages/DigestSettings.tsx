@@ -196,23 +196,6 @@ function daysLabel(days: number[]): string {
   return days.map((d) => DAYS.find((dd) => dd.value === d)?.label ?? "?").join(", ");
 }
 
-function draftStatusBadge(status: string) {
-  const map: Record<string, { cls: string; label: string }> = {
-    draft: { cls: "bg-amber-500/20 text-amber-300", label: "Awaiting Review" },
-    approved: { cls: "bg-blue-500/20 text-blue-300", label: "Scheduled" },
-    sent: { cls: "bg-emerald-500/20 text-emerald-300", label: "Sent" },
-    expired: { cls: "bg-slate-700 text-slate-400", label: "Expired" },
-    discarded: { cls: "bg-slate-700 text-slate-400", label: "Discarded" },
-    send_failed: { cls: "bg-red-500/20 text-red-300", label: "Failed" },
-  };
-  const s = map[status] ?? { cls: "bg-slate-700 text-slate-400", label: status };
-  return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${s.cls}`}>
-      {s.label}
-    </span>
-  );
-}
-
 type SlotFormData = {
   name: string;
   enabled: boolean;
@@ -305,7 +288,10 @@ function ConfirmDialog({
   useEscapeKey(open, onCancel);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onCancel}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      onClick={onCancel}
+    >
       <div
         className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
@@ -342,7 +328,9 @@ function SlotFormModal({
   onClose: () => void;
   defaults: DigestSlotDefaultsResponse | null;
 }) {
-  const [form, setForm] = useState<SlotFormData>(() => slotToForm(editingSlot ?? undefined, defaults));
+  const [form, setForm] = useState<SlotFormData>(() =>
+    slotToForm(editingSlot ?? undefined, defaults),
+  );
   const [saving, setSaving] = useState(false);
   const isEdit = !!editingSlot;
 
@@ -357,7 +345,9 @@ function SlotFormModal({
     setForm((f) => ({ ...f, [key]: value }));
 
   const toggleDay = (day: number) => {
-    const days = form.days.includes(day) ? form.days.filter((d) => d !== day) : [...form.days, day].sort();
+    const days = form.days.includes(day)
+      ? form.days.filter((d) => d !== day)
+      : [...form.days, day].sort();
     update("days", days);
   };
 
@@ -412,7 +402,10 @@ function SlotFormModal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/60 p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/60 p-4"
+      onClick={onClose}
+    >
       <div
         className="w-full max-w-2xl rounded-2xl border border-slate-700 bg-slate-900 shadow-xl"
         onClick={(e) => e.stopPropagation()}
@@ -423,7 +416,13 @@ function SlotFormModal({
             {isEdit ? "Edit Digest Slot" : "Create Digest Slot"}
           </h2>
           <button onClick={onClose} className="text-slate-500 hover:text-slate-300">
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg
+              className="h-5 w-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
@@ -470,7 +469,9 @@ function SlotFormModal({
                   className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
                 >
                   {TIMEZONES.map((tz) => (
-                    <option key={tz} value={tz}>{tz}</option>
+                    <option key={tz} value={tz}>
+                      {tz}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -508,10 +509,23 @@ function SlotFormModal({
                   className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
                 >
                   {[1, 2, 3, 4, 5].map((s) => (
-                    <option key={s} value={s}>{s} {s === 1 ? "\u2014 All" : s === 2 ? "\u2014 Low+" : s === 3 ? "\u2014 Medium+" : s === 4 ? "\u2014 High+" : "\u2014 Critical"}</option>
+                    <option key={s} value={s}>
+                      {s}{" "}
+                      {s === 1
+                        ? "\u2014 All"
+                        : s === 2
+                          ? "\u2014 Low+"
+                          : s === 3
+                            ? "\u2014 Medium+"
+                            : s === 4
+                              ? "\u2014 High+"
+                              : "\u2014 Critical"}
+                    </option>
                   ))}
                 </select>
-                <p className="mt-1 text-xs text-slate-500">Only articles scoring at or above this</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Only articles scoring at or above this
+                </p>
               </div>
               <div>
                 <label className="block text-xs text-slate-400">Max Articles</label>
@@ -520,10 +534,14 @@ function SlotFormModal({
                   min={1}
                   max={100}
                   value={form.max_articles}
-                  onChange={(e) => update("max_articles", Math.min(100, Math.max(1, Number(e.target.value) || 50)))}
+                  onChange={(e) =>
+                    update("max_articles", Math.min(100, Math.max(1, Number(e.target.value) || 50)))
+                  }
                   className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
                 />
-                <p className="mt-1 text-xs text-slate-500">Cap fed to AI. Top by score prioritized.</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Cap fed to AI. Top by score prioritized.
+                </p>
               </div>
             </div>
             <div>
@@ -549,7 +567,10 @@ function SlotFormModal({
                         type="button"
                         onClick={() => {
                           const ids = form.sector_ids ?? [];
-                          update("sector_ids", selected ? ids.filter((id) => id !== sec.id) : [...ids, sec.id]);
+                          update(
+                            "sector_ids",
+                            selected ? ids.filter((id) => id !== sec.id) : [...ids, sec.id],
+                          );
                         }}
                         className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
                           selected
@@ -587,7 +608,8 @@ function SlotFormModal({
               </div>
               {form.language === "ka" && (
                 <p className="mt-1.5 text-xs text-cyan-400/70">
-                  Both English and Georgian versions are generated. Each channel below can receive either language at no extra cost.
+                  Both English and Georgian versions are generated. Each channel below can receive
+                  either language at no extra cost.
                 </p>
               )}
             </div>
@@ -605,7 +627,9 @@ function SlotFormModal({
                   className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
                 >
                   {Object.keys(DIGEST_MODELS).map((p) => (
-                    <option key={p} value={p}>{PROVIDER_LABELS[p] ?? p}</option>
+                    <option key={p} value={p}>
+                      {PROVIDER_LABELS[p] ?? p}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -617,17 +641,25 @@ function SlotFormModal({
                   className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
                 >
                   {(DIGEST_MODELS[form.provider] ?? []).map((m) => (
-                    <option key={m.value} value={m.value}>{m.label}</option>
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
                   ))}
                 </select>
               </div>
             </div>
             <details className="group">
               <summary className="flex cursor-pointer items-center justify-between">
-                <span className="text-xs text-slate-400">System Prompt <span className="text-slate-600 group-open:hidden">(click to expand)</span></span>
+                <span className="text-xs text-slate-400">
+                  System Prompt{" "}
+                  <span className="text-slate-600 group-open:hidden">(click to expand)</span>
+                </span>
                 <button
                   type="button"
-                  onClick={(e) => { e.preventDefault(); update("system_prompt", null); }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    update("system_prompt", null);
+                  }}
                   className="text-xs text-slate-500 hover:text-slate-300"
                 >
                   Reset Default
@@ -658,7 +690,9 @@ function SlotFormModal({
                     className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
                   >
                     {Object.keys(TRANSLATION_MODELS).map((p) => (
-                      <option key={p} value={p}>{PROVIDER_LABELS[p] ?? p}</option>
+                      <option key={p} value={p}>
+                        {PROVIDER_LABELS[p] ?? p}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -670,17 +704,25 @@ function SlotFormModal({
                     className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
                   >
                     {(TRANSLATION_MODELS[form.translation_provider] ?? []).map((m) => (
-                      <option key={m.value} value={m.value}>{m.label}</option>
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
                     ))}
                   </select>
                 </div>
               </div>
               <details className="group">
                 <summary className="flex cursor-pointer items-center justify-between">
-                  <span className="text-xs text-slate-400">Translation Prompt <span className="text-slate-600 group-open:hidden">(click to expand)</span></span>
+                  <span className="text-xs text-slate-400">
+                    Translation Prompt{" "}
+                    <span className="text-slate-600 group-open:hidden">(click to expand)</span>
+                  </span>
                   <button
                     type="button"
-                    onClick={(e) => { e.preventDefault(); update("translation_prompt", null); }}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      update("translation_prompt", null);
+                    }}
                     className="text-xs text-slate-500 hover:text-slate-300"
                   >
                     Reset Default
@@ -747,9 +789,14 @@ function SlotFormModal({
                   {form.language === "ka" && (
                     <div className="flex gap-1">
                       {(["en", "ka"] as const).map((l) => (
-                        <button key={l} type="button" onClick={() => update("telegram_language", l)}
+                        <button
+                          key={l}
+                          type="button"
+                          onClick={() => update("telegram_language", l)}
                           className={`rounded px-2 py-0.5 text-[10px] font-semibold uppercase transition ${form.telegram_language === l ? "bg-cyan-600/30 text-cyan-300" : "bg-slate-800 text-slate-500 hover:text-slate-300"}`}
-                        >{l}</button>
+                        >
+                          {l}
+                        </button>
                       ))}
                     </div>
                   )}
@@ -768,9 +815,14 @@ function SlotFormModal({
                 {form.facebook_enabled && form.language === "ka" && (
                   <div className="flex gap-1">
                     {(["en", "ka"] as const).map((l) => (
-                      <button key={l} type="button" onClick={() => update("facebook_language", l)}
+                      <button
+                        key={l}
+                        type="button"
+                        onClick={() => update("facebook_language", l)}
                         className={`rounded px-2 py-0.5 text-[10px] font-semibold uppercase transition ${form.facebook_language === l ? "bg-cyan-600/30 text-cyan-300" : "bg-slate-800 text-slate-500 hover:text-slate-300"}`}
-                      >{l}</button>
+                      >
+                        {l}
+                      </button>
                     ))}
                   </div>
                 )}
@@ -788,9 +840,14 @@ function SlotFormModal({
                 {form.linkedin_enabled && form.language === "ka" && (
                   <div className="flex gap-1">
                     {(["en", "ka"] as const).map((l) => (
-                      <button key={l} type="button" onClick={() => update("linkedin_language", l)}
+                      <button
+                        key={l}
+                        type="button"
+                        onClick={() => update("linkedin_language", l)}
                         className={`rounded px-2 py-0.5 text-[10px] font-semibold uppercase transition ${form.linkedin_language === l ? "bg-cyan-600/30 text-cyan-300" : "bg-slate-800 text-slate-500 hover:text-slate-300"}`}
-                      >{l}</button>
+                      >
+                        {l}
+                      </button>
                     ))}
                   </div>
                 )}
@@ -821,7 +878,9 @@ function SlotFormModal({
 
         {/* Footer */}
         <div className="flex justify-end gap-3 border-t border-slate-800 p-6">
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
           <Button variant="primary" onClick={handleSubmit} loading={saving}>
             {isEdit ? "Save Changes" : "Create Slot"}
           </Button>
@@ -855,7 +914,10 @@ function DraftPreviewModal({
   const isDraft = draft.status === "draft";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/60 p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/60 p-4"
+      onClick={onClose}
+    >
       <div
         className="w-full max-w-3xl rounded-2xl border border-slate-700 bg-slate-900 shadow-xl"
         onClick={(e) => e.stopPropagation()}
@@ -866,12 +928,18 @@ function DraftPreviewModal({
               Draft Preview {draft.slot_name && `\u2014 ${draft.slot_name}`}
             </h2>
             <p className="mt-0.5 text-xs text-slate-500">
-              Generated {relativeTime(draft.generated_at)} {"\u00B7"} {draft.article_count} articles {"\u00B7"}{" "}
-              {shortModelName(draft.model)}
+              Generated {relativeTime(draft.generated_at)} {"\u00B7"} {draft.article_count} articles{" "}
+              {"\u00B7"} {shortModelName(draft.model)}
             </p>
           </div>
           <button onClick={onClose} className="text-slate-500 hover:text-slate-300">
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg
+              className="h-5 w-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
@@ -886,7 +954,9 @@ function DraftPreviewModal({
 
           <div className="mt-4 space-y-2 rounded-xl border border-slate-800 bg-slate-900/60 p-3 text-xs text-slate-400">
             <div className="flex flex-wrap gap-4">
-              <span>Articles: {draft.article_count} of {draft.stats_above_threshold} qualifying</span>
+              <span>
+                Articles: {draft.article_count} of {draft.stats_above_threshold} qualifying
+              </span>
               <span>LLM: {shortModelName(draft.model)}</span>
               {draft.llm_cost_microdollars != null && (
                 <span>${(draft.llm_cost_microdollars / 1_000_000).toFixed(4)}</span>
@@ -900,22 +970,43 @@ function DraftPreviewModal({
                   )}
                 </>
               )}
-              {(draft.llm_cost_microdollars != null || draft.translation_cost_microdollars != null) && (
+              {(draft.llm_cost_microdollars != null ||
+                draft.translation_cost_microdollars != null) && (
                 <>
                   <span className="text-slate-600">|</span>
                   <span className="font-medium text-slate-300">
-                    Total: ${(((draft.llm_cost_microdollars ?? 0) + (draft.translation_cost_microdollars ?? 0)) / 1_000_000).toFixed(4)}
+                    Total: $
+                    {(
+                      ((draft.llm_cost_microdollars ?? 0) +
+                        (draft.translation_cost_microdollars ?? 0)) /
+                      1_000_000
+                    ).toFixed(4)}
                   </span>
                 </>
               )}
             </div>
             <div className="flex flex-wrap gap-4">
-              <span className={expiry.urgency === "red" ? "text-red-400" : expiry.urgency === "amber" ? "text-amber-400" : ""}>
+              <span
+                className={
+                  expiry.urgency === "red"
+                    ? "text-red-400"
+                    : expiry.urgency === "amber"
+                      ? "text-amber-400"
+                      : ""
+                }
+              >
                 {expiry.text}
               </span>
               {slot && (slot.image_telegram || slot.image_facebook || slot.image_linkedin) && (
                 <span className="text-emerald-400/70">
-                  Images: {[slot.image_telegram && "TG", slot.image_facebook && "FB", slot.image_linkedin && "LI"].filter(Boolean).join(", ")}
+                  Images:{" "}
+                  {[
+                    slot.image_telegram && "TG",
+                    slot.image_facebook && "FB",
+                    slot.image_linkedin && "LI",
+                  ]
+                    .filter(Boolean)
+                    .join(", ")}
                 </span>
               )}
               {slot && !slot.image_telegram && !slot.image_facebook && !slot.image_linkedin && (
@@ -927,11 +1018,19 @@ function DraftPreviewModal({
 
         {isDraft && (
           <div className="flex justify-between border-t border-slate-800 p-6">
-            <Button variant="danger" size="sm" onClick={onDiscard}>Discard</Button>
+            <Button variant="danger" size="sm" onClick={onDiscard}>
+              Discard
+            </Button>
             <div className="flex gap-2">
-              <Button variant="secondary" size="sm" onClick={onEdit}>Edit</Button>
-              <Button variant="secondary" size="sm" onClick={onSchedule}>Schedule</Button>
-              <Button variant="primary" size="sm" onClick={onApprove}>Post Now</Button>
+              <Button variant="secondary" size="sm" onClick={onEdit}>
+                Edit
+              </Button>
+              <Button variant="secondary" size="sm" onClick={onSchedule}>
+                Schedule
+              </Button>
+              <Button variant="primary" size="sm" onClick={onApprove}>
+                Post Now
+              </Button>
             </div>
           </div>
         )}
@@ -974,7 +1073,10 @@ function DraftEditModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/60 p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/60 p-4"
+      onClick={onClose}
+    >
       <div
         className="w-full max-w-3xl rounded-2xl border border-slate-700 bg-slate-900 shadow-xl"
         onClick={(e) => e.stopPropagation()}
@@ -1000,7 +1102,9 @@ function DraftEditModal({
           </div>
           {draft.translated_text !== null && (
             <div>
-              <label className="block text-sm font-medium text-slate-300">Georgian Translation</label>
+              <label className="block text-sm font-medium text-slate-300">
+                Georgian Translation
+              </label>
               <textarea
                 value={translated}
                 onChange={(e) => setTranslated(e.target.value)}
@@ -1012,8 +1116,12 @@ function DraftEditModal({
         </div>
 
         <div className="flex justify-end gap-3 border-t border-slate-800 p-6">
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={handleSave} loading={saving}>Save Changes</Button>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={handleSave} loading={saving}>
+            Save Changes
+          </Button>
         </div>
       </div>
     </div>
@@ -1065,7 +1173,10 @@ function ScheduleModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      onClick={onClose}
+    >
       <div
         className="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
@@ -1095,8 +1206,12 @@ function ScheduleModal({
           </div>
         </div>
         <div className="mt-6 flex justify-end gap-3">
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={handleSchedule} loading={saving}>Schedule</Button>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={handleSchedule} loading={saving}>
+            Schedule
+          </Button>
         </div>
       </div>
     </div>
@@ -1130,7 +1245,14 @@ export default function DigestSettings() {
     confirmLabel: string;
     confirmVariant: "danger" | "primary";
     onConfirm: () => void;
-  }>({ open: false, title: "", message: "", confirmLabel: "", confirmVariant: "danger", onConfirm: () => {} });
+  }>({
+    open: false,
+    title: "",
+    message: "",
+    confirmLabel: "",
+    confirmVariant: "danger",
+    onConfirm: () => {},
+  });
 
   // Test polling
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1162,34 +1284,43 @@ export default function DigestSettings() {
     }
   }, []);
 
-  const loadHistory = useCallback(async (slotId?: string) => {
-    setHistoryLoading(true);
-    try {
-      if (slotId) {
-        const data = await getDigestSlotHistory(slotId, 30);
-        setHistory(data.runs);
-      } else if (slots.length > 0) {
-        // Load from all slots, merge & sort by sent_at desc
-        const results = await Promise.all(slots.map((s) => getDigestSlotHistory(s.id, 30)));
-        const merged = results.flatMap((r) => r.runs);
-        merged.sort((a, b) => new Date(b.sent_at).getTime() - new Date(a.sent_at).getTime());
-        setHistory(merged);
+  const loadHistory = useCallback(
+    async (slotId?: string) => {
+      setHistoryLoading(true);
+      try {
+        if (slotId) {
+          const data = await getDigestSlotHistory(slotId, 30);
+          setHistory(data.runs);
+        } else if (slots.length > 0) {
+          // Load from all slots, merge & sort by sent_at desc
+          const results = await Promise.all(slots.map((s) => getDigestSlotHistory(s.id, 30)));
+          const merged = results.flatMap((r) => r.runs);
+          merged.sort((a, b) => new Date(b.sent_at).getTime() - new Date(a.sent_at).getTime());
+          setHistory(merged);
+        }
+      } catch {
+        /* silent */
+      } finally {
+        setHistoryLoading(false);
       }
-    } catch { /* silent */ } finally {
-      setHistoryLoading(false);
-    }
-  }, [slots]);
+    },
+    [slots],
+  );
 
   // SSE: auto-refresh when a new draft is ready
   useServerEvents({
     onEvent: (event) => {
       if (event.type === "digest:draft-ready") {
-        toast.info(`New digest draft: ${event.data.slotName} (${event.data.articleCount} articles)`);
+        toast.info(
+          `New digest draft: ${event.data.slotName} (${event.data.articleCount} articles)`,
+        );
         loadAll();
       }
       if (event.type === "digest:sent") {
         const label = event.data.isTest ? "Test digest" : "Digest";
-        toast.success(`${label} sent: ${event.data.slotName} (${event.data.articleCount} articles)`);
+        toast.success(
+          `${label} sent: ${event.data.slotName} (${event.data.articleCount} articles)`,
+        );
         loadAll();
         if (slots.length > 0) loadHistory();
       }
@@ -1283,7 +1414,9 @@ export default function DigestSettings() {
             await loadAll();
             await loadHistory();
           }
-        } catch { /* keep polling */ }
+        } catch {
+          /* keep polling */
+        }
       }, 5_000);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to queue test");
@@ -1293,7 +1426,6 @@ export default function DigestSettings() {
 
   // ── Draft actions ──
   const handleApproveDraft = (draft: DigestDraft) => {
-    const platforms = [];
     // We don't have per-draft platform info easily, so show generic message
     setConfirmState({
       open: true,
@@ -1386,18 +1518,35 @@ export default function DigestSettings() {
       <details className="group rounded-2xl border border-slate-800 bg-slate-900/40">
         <summary className="cursor-pointer select-none px-5 py-3 text-sm font-medium text-slate-400 hover:text-slate-200">
           How digests work
-          <span className="ml-1.5 text-xs text-slate-600 group-open:hidden">{"(click to expand)"}</span>
+          <span className="ml-1.5 text-xs text-slate-600 group-open:hidden">
+            {"(click to expand)"}
+          </span>
         </summary>
         <div className="border-t border-slate-800 px-5 pb-4 pt-3 text-xs leading-relaxed text-slate-400">
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <p className="mb-1.5 font-semibold text-slate-300">Article Selection</p>
               <ul className="list-inside list-disc space-y-1">
-                <li><b className="text-slate-300">Lookback window</b> — picks articles scored since the last successful run for this slot, capped at 24 h.</li>
-                <li><b className="text-slate-300">Min Score filter</b> — only articles at or above the slot{"'"}s threshold are included.</li>
-                <li><b className="text-slate-300">Priority order</b> — highest scores first (5 {"\u2192"} 4 {"\u2192"} 3), newest first within ties.</li>
-                <li><b className="text-slate-300">Max Articles cap</b> — hard limit fed to the AI. Lower scores get truncated first.</li>
-                <li><b className="text-slate-300">Sector filter</b> — optional. Leave blank for all sectors.</li>
+                <li>
+                  <b className="text-slate-300">Lookback window</b> — picks articles scored since
+                  the last successful run for this slot, capped at 24 h.
+                </li>
+                <li>
+                  <b className="text-slate-300">Min Score filter</b> — only articles at or above the
+                  slot{"'"}s threshold are included.
+                </li>
+                <li>
+                  <b className="text-slate-300">Priority order</b> — highest scores first (5{" "}
+                  {"\u2192"} 4 {"\u2192"} 3), newest first within ties.
+                </li>
+                <li>
+                  <b className="text-slate-300">Max Articles cap</b> — hard limit fed to the AI.
+                  Lower scores get truncated first.
+                </li>
+                <li>
+                  <b className="text-slate-300">Sector filter</b> — optional. Leave blank for all
+                  sectors.
+                </li>
               </ul>
             </div>
             <div>
@@ -1405,13 +1554,27 @@ export default function DigestSettings() {
               <ol className="list-inside list-decimal space-y-1">
                 <li>Scheduler fires at the configured time {"\u0026"} timezone.</li>
                 <li>AI reads selected articles and writes a curated briefing (7-12 bullets).</li>
-                <li>If language is Georgian, the briefing is translated automatically (English AI {"\u2192"} Georgian translation).</li>
-                <li><b className="text-slate-300">Per-channel language</b> — when set to Georgian, each channel (Telegram, Facebook, LinkedIn) can independently receive English or Georgian at no extra cost, since both versions already exist.</li>
-                <li><b className="text-slate-300">Auto-post</b> — sends immediately to enabled channels.</li>
-                <li><b className="text-slate-300">Manual</b> — saves a draft (expires in 24 h). Preview, edit, then post or schedule.</li>
+                <li>
+                  If language is Georgian, the briefing is translated automatically (English AI{" "}
+                  {"\u2192"} Georgian translation).
+                </li>
+                <li>
+                  <b className="text-slate-300">Per-channel language</b> — when set to Georgian,
+                  each channel (Telegram, Facebook, LinkedIn) can independently receive English or
+                  Georgian at no extra cost, since both versions already exist.
+                </li>
+                <li>
+                  <b className="text-slate-300">Auto-post</b> — sends immediately to enabled
+                  channels.
+                </li>
+                <li>
+                  <b className="text-slate-300">Manual</b> — saves a draft (expires in 24 h).
+                  Preview, edit, then post or schedule.
+                </li>
               </ol>
               <p className="mt-2 text-slate-500">
-                Tip: use <b className="text-slate-400">Test</b> on a slot to preview output without affecting the schedule.
+                Tip: use <b className="text-slate-400">Test</b> on a slot to preview output without
+                affecting the schedule.
               </p>
             </div>
           </div>
@@ -1447,7 +1610,11 @@ export default function DigestSettings() {
                     </div>
                     <span
                       className={`shrink-0 text-xs ${
-                        expiry.urgency === "red" ? "text-red-400" : expiry.urgency === "amber" ? "text-amber-400" : "text-slate-500"
+                        expiry.urgency === "red"
+                          ? "text-red-400"
+                          : expiry.urgency === "amber"
+                            ? "text-amber-400"
+                            : "text-slate-500"
                       }`}
                     >
                       {expiry.text}
@@ -1457,11 +1624,7 @@ export default function DigestSettings() {
                     <Button size="xs" variant="secondary" onClick={() => setPreviewDraft(d)}>
                       Preview
                     </Button>
-                    <Button
-                      size="xs"
-                      variant="primary"
-                      onClick={() => handleApproveDraft(d)}
-                    >
+                    <Button size="xs" variant="primary" onClick={() => handleApproveDraft(d)}>
                       Post Now
                     </Button>
                   </div>
@@ -1477,8 +1640,9 @@ export default function DigestSettings() {
         <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-12 text-center">
           <p className="text-lg font-medium text-slate-300">No digest slots yet</p>
           <p className="mt-2 text-sm text-slate-500">
-            Create your first digest slot to start sending AI-curated intelligence briefings.
-            Each slot is an independent schedule with its own timing, content rules, and delivery channels.
+            Create your first digest slot to start sending AI-curated intelligence briefings. Each
+            slot is an independent schedule with its own timing, content rules, and delivery
+            channels.
           </p>
           <div className="mt-6">
             <Button
@@ -1494,15 +1658,25 @@ export default function DigestSettings() {
         </section>
       ) : (
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-slate-400">
-            Digest Slots ({slots.length})
-          </h2>
+          <h2 className="text-sm font-semibold text-slate-400">Digest Slots ({slots.length})</h2>
           {slots.map((slot) => {
             const days = Array.isArray(slot.days) ? (slot.days as number[]) : [];
             const platforms: { label: string; lang?: "en" | "ka" }[] = [];
-            if (slot.telegram_enabled) platforms.push({ label: "TG", lang: slot.language === "ka" ? slot.telegram_language : undefined });
-            if (slot.facebook_enabled) platforms.push({ label: "FB", lang: slot.language === "ka" ? slot.facebook_language : undefined });
-            if (slot.linkedin_enabled) platforms.push({ label: "LI", lang: slot.language === "ka" ? slot.linkedin_language : undefined });
+            if (slot.telegram_enabled)
+              platforms.push({
+                label: "TG",
+                lang: slot.language === "ka" ? slot.telegram_language : undefined,
+              });
+            if (slot.facebook_enabled)
+              platforms.push({
+                label: "FB",
+                lang: slot.language === "ka" ? slot.facebook_language : undefined,
+              });
+            if (slot.linkedin_enabled)
+              platforms.push({
+                label: "LI",
+                lang: slot.language === "ka" ? slot.linkedin_language : undefined,
+              });
             const sectorNames =
               slot.sector_ids && Array.isArray(slot.sector_ids)
                 ? (slot.sector_ids as string[])
@@ -1539,16 +1713,32 @@ export default function DigestSettings() {
                     </div>
                     <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                       {platforms.map((p) => (
-                        <span key={p.label} className="rounded-full bg-slate-800 px-2 py-0.5 text-xs text-slate-400">
-                          {p.label}{p.lang ? <span className={p.lang === "ka" ? " text-violet-300" : " text-slate-500"}>{" "}{p.lang.toUpperCase()}</span> : null}
+                        <span
+                          key={p.label}
+                          className="rounded-full bg-slate-800 px-2 py-0.5 text-xs text-slate-400"
+                        >
+                          {p.label}
+                          {p.lang ? (
+                            <span
+                              className={p.lang === "ka" ? " text-violet-300" : " text-slate-500"}
+                            >
+                              {" "}
+                              {p.lang.toUpperCase()}
+                            </span>
+                          ) : null}
                         </span>
                       ))}
                       {slot.language === "ka" && (
-                        <span className="rounded-full bg-violet-500/15 px-2 py-0.5 text-xs text-violet-300">KA</span>
+                        <span className="rounded-full bg-violet-500/15 px-2 py-0.5 text-xs text-violet-300">
+                          KA
+                        </span>
                       )}
                       {sectorNames ? (
                         sectorNames.map((name) => (
-                          <span key={name} className="rounded-full bg-violet-500/10 px-2 py-0.5 text-xs text-violet-300/80">
+                          <span
+                            key={name}
+                            className="rounded-full bg-violet-500/10 px-2 py-0.5 text-xs text-violet-300/80"
+                          >
                             {name}
                           </span>
                         ))
@@ -1587,11 +1777,7 @@ export default function DigestSettings() {
                       >
                         Edit
                       </Button>
-                      <Button
-                        size="xs"
-                        variant="danger"
-                        onClick={() => handleDeleteSlot(slot)}
-                      >
+                      <Button size="xs" variant="danger" onClick={() => handleDeleteSlot(slot)}>
                         Delete
                       </Button>
                     </div>
@@ -1614,7 +1800,12 @@ export default function DigestSettings() {
                   Clear
                 </Button>
               )}
-              <Button size="xs" variant="ghost" onClick={() => loadHistory()} loading={historyLoading}>
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => loadHistory()}
+                loading={historyLoading}
+              >
                 Refresh
               </Button>
             </div>
@@ -1650,11 +1841,15 @@ export default function DigestSettings() {
                             minute: "2-digit",
                           })}
                         </td>
-                        <td className="px-4 py-2">{slot?.name ?? <span className="italic text-slate-500">deleted</span>}</td>
+                        <td className="px-4 py-2">
+                          {slot?.name ?? <span className="italic text-slate-500">deleted</span>}
+                        </td>
                         <td className="px-4 py-2">
                           <span
                             className={`rounded-full px-1.5 py-0.5 text-xs ${
-                              r.is_test ? "bg-amber-500/20 text-amber-300" : "bg-emerald-500/20 text-emerald-300"
+                              r.is_test
+                                ? "bg-amber-500/20 text-amber-300"
+                                : "bg-emerald-500/20 text-emerald-300"
                             }`}
                           >
                             {r.is_test ? "Test" : "Live"}
@@ -1663,23 +1858,57 @@ export default function DigestSettings() {
                         <td className="px-4 py-2 uppercase">{r.language}</td>
                         <td className="px-4 py-2">
                           <div className="flex items-center gap-1 whitespace-nowrap text-xs">
-                            <span className="text-slate-500" title="Total articles in lookback window">{r.stats_scanned} <span className="text-[10px]">scanned</span></span>
+                            <span
+                              className="text-slate-500"
+                              title="Total articles in lookback window"
+                            >
+                              {r.stats_scanned} <span className="text-[10px]">scanned</span>
+                            </span>
                             <span className="text-slate-600">{"\u2192"}</span>
-                            <span className="text-slate-400" title="Articles with score >= min_score">{r.stats_above_threshold} <span className="text-[10px]">qualified</span></span>
+                            <span
+                              className="text-slate-400"
+                              title="Articles with score >= min_score"
+                            >
+                              {r.stats_above_threshold}{" "}
+                              <span className="text-[10px]">qualified</span>
+                            </span>
                             <span className="text-slate-600">{"\u2192"}</span>
-                            <span className="font-medium text-slate-200" title="Articles fed to the AI">{r.article_count} <span className="text-[10px] font-normal">used</span></span>
+                            <span
+                              className="font-medium text-slate-200"
+                              title="Articles fed to the AI"
+                            >
+                              {r.article_count}{" "}
+                              <span className="text-[10px] font-normal">used</span>
+                            </span>
                             {r.max_articles != null && r.article_count >= r.max_articles && (
-                              <span className="ml-1 rounded bg-amber-500/15 px-1 py-0.5 text-[10px] text-amber-300" title={`${r.stats_above_threshold} qualified but limited to ${r.max_articles} max`}>cap:{r.max_articles}</span>
+                              <span
+                                className="ml-1 rounded bg-amber-500/15 px-1 py-0.5 text-[10px] text-amber-300"
+                                title={`${r.stats_above_threshold} qualified but limited to ${r.max_articles} max`}
+                              >
+                                cap:{r.max_articles}
+                              </span>
                             )}
                           </div>
                           {r.score_distribution && Object.keys(r.score_distribution).length > 0 && (
                             <div className="mt-0.5 flex gap-1.5 text-[10px]">
                               {[5, 4, 3, 2, 1].map((score) => {
-                                const cnt = (r.score_distribution as Record<string, number>)?.[String(score)];
+                                const cnt = (r.score_distribution as Record<string, number>)?.[
+                                  String(score)
+                                ];
                                 if (!cnt) return null;
                                 return (
-                                  <span key={score} className={score >= 4 ? "text-emerald-400/70" : score === 3 ? "text-amber-400/70" : "text-slate-500"}>
-                                    {"\u2605"}{score}:{cnt}
+                                  <span
+                                    key={score}
+                                    className={
+                                      score >= 4
+                                        ? "text-emerald-400/70"
+                                        : score === 3
+                                          ? "text-amber-400/70"
+                                          : "text-slate-500"
+                                    }
+                                  >
+                                    {"\u2605"}
+                                    {score}:{cnt}
                                   </span>
                                 );
                               })}

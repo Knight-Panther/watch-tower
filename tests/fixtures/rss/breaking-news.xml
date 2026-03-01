@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Breaking News Feed</title>
+    <link>https://example.com</link>
+    <description>High-importance articles that should score 5</description>
+    <item>
+      <title>Central Bank Announces Emergency Rate Cut of 100 Basis Points</title>
+      <link>https://example.com/article/breaking-1</link>
+      <guid>https://example.com/article/breaking-1</guid>
+      <description>In an unprecedented move, the central bank has cut interest rates by a full percentage point in an emergency session. Markets are reacting with significant volatility. This is the largest single rate cut in over a decade, signaling deep concerns about economic stability.</description>
+      <pubDate>Sat, 01 Mar 2026 12:00:00 GMT</pubDate>
+      <category>Finance</category>
+      <category>Markets</category>
+    </item>
+    <item>
+      <title>Major Regulatory Change: New AI Safety Requirements Take Effect Immediately</title>
+      <link>https://example.com/article/breaking-2</link>
+      <guid>https://example.com/article/breaking-2</guid>
+      <description>Regulators have imposed immediate mandatory compliance requirements for all AI systems deployed in critical infrastructure. Companies have 90 days to comply or face significant penalties. This affects every major tech company globally and will reshape the AI industry.</description>
+      <pubDate>Sat, 01 Mar 2026 11:00:00 GMT</pubDate>
+      <category>AI</category>
+      <category>Regulation</category>
+    </item>
+    <item>
+      <title>Fortune 500 Company Files for Bankruptcy Protection</title>
+      <link>https://example.com/article/breaking-3</link>
+      <guid>https://example.com/article/breaking-3</guid>
+      <description>A Fortune 500 company with over 50,000 employees has filed for Chapter 11 bankruptcy protection, citing unsustainable debt levels. The filing sent shockwaves through financial markets, with the company stock dropping 85% in pre-market trading. Creditors and employees face uncertain outcomes.</description>
+      <pubDate>Sat, 01 Mar 2026 10:00:00 GMT</pubDate>
+      <category>Finance</category>
+      <category>Corporate</category>
+    </item>
+  </channel>
+</rss>

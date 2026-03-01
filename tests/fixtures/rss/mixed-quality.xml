@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Mixed Quality Feed</title>
+    <link>https://example.com</link>
+    <description>Articles ranging from noise (score 1) to critical (score 5)</description>
+    <item>
+      <title>Company Redesigns Logo for Third Time This Year</title>
+      <link>https://example.com/article/mixed-1</link>
+      <guid>https://example.com/article/mixed-1</guid>
+      <description>TechCorp unveils a slightly modified version of their corporate logo. The new design features a subtle gradient change.</description>
+      <pubDate>Sat, 01 Mar 2026 12:00:00 GMT</pubDate>
+      <category>Corporate</category>
+    </item>
+    <item>
+      <title>Office Relocation: Startup Moves to New Floor</title>
+      <link>https://example.com/article/mixed-2</link>
+      <guid>https://example.com/article/mixed-2</guid>
+      <description>A 20-person startup has relocated from the 3rd floor to the 5th floor of the same building.</description>
+      <pubDate>Sat, 01 Mar 2026 11:00:00 GMT</pubDate>
+      <category>Corporate</category>
+    </item>
+    <item>
+      <title>Minor Bug Fix Released for Internal Tool</title>
+      <link>https://example.com/article/mixed-3</link>
+      <guid>https://example.com/article/mixed-3</guid>
+      <description>Version 2.0.1 fixes a typo in the settings page. No user-facing changes.</description>
+      <pubDate>Sat, 01 Mar 2026 10:00:00 GMT</pubDate>
+      <category>Software</category>
+    </item>
+    <item>
+      <title>Industry Report: Cloud Computing Market Grows 18% YoY</title>
+      <link>https://example.com/article/mixed-4</link>
+      <guid>https://example.com/article/mixed-4</guid>
+      <description>Annual report shows steady growth in cloud infrastructure spending. AWS, Azure, and GCP continue to dominate. No surprises in the data.</description>
+      <pubDate>Sat, 01 Mar 2026 09:30:00 GMT</pubDate>
+      <category>Cloud</category>
+      <category>Market Research</category>
+    </item>
+    <item>
+      <title>New Partnership Between AI Companies for Research Collaboration</title>
+      <link>https://example.com/article/mixed-5</link>
+      <guid>https://example.com/article/mixed-5</guid>
+      <description>Two mid-size AI companies announce a research partnership to explore novel architectures. Could lead to interesting developments in 12-18 months.</description>
+      <pubDate>Sat, 01 Mar 2026 09:00:00 GMT</pubDate>
+      <category>AI</category>
+      <category>Partnerships</category>
+    </item>
+    <item>
+      <title>Significant Funding Round: AI Startup Raises $500M Series D</title>
+      <link>https://example.com/article/mixed-6</link>
+      <guid>https://example.com/article/mixed-6</guid>
+      <description>A prominent AI startup has raised $500 million in Series D funding at a $10 billion valuation, making it one of the largest AI funding rounds this year.</description>
+      <pubDate>Sat, 01 Mar 2026 08:30:00 GMT</pubDate>
+      <category>AI</category>
+      <category>Funding</category>
+    </item>
+    <item>
+      <title>New Regulation Proposed for Fintech Companies</title>
+      <link>https://example.com/article/mixed-7</link>
+      <guid>https://example.com/article/mixed-7</guid>
+      <description>Regulators have proposed new compliance requirements for fintech companies handling consumer data. Comment period open for 60 days.</description>
+      <pubDate>Sat, 01 Mar 2026 08:00:00 GMT</pubDate>
+      <category>Fintech</category>
+      <category>Regulation</category>
+    </item>
+    <item>
+      <title>CEO of Major Tech Company Resigns Effective Immediately</title>
+      <link>https://example.com/article/mixed-8</link>
+      <guid>https://example.com/article/mixed-8</guid>
+      <description>The CEO of a Fortune 100 tech company has unexpectedly resigned, citing personal reasons. The board has appointed the CFO as interim CEO. Stock dropped 12% after-hours.</description>
+      <pubDate>Sat, 01 Mar 2026 07:30:00 GMT</pubDate>
+      <category>Corporate</category>
+      <category>Leadership</category>
+    </item>
+    <item>
+      <title>Critical Infrastructure Incident Affects Millions of Users</title>
+      <link>https://example.com/article/mixed-9</link>
+      <guid>https://example.com/article/mixed-9</guid>
+      <description>A major cloud provider experienced a significant outage affecting millions of users across multiple regions. The incident lasted over 6 hours and impacted financial services, healthcare, and government systems. Root cause analysis is ongoing.</description>
+      <pubDate>Sat, 01 Mar 2026 07:00:00 GMT</pubDate>
+      <category>Cloud</category>
+      <category>Infrastructure</category>
+    </item>
+    <item>
+      <title>Groundbreaking Research: Room Temperature Superconductor Confirmed</title>
+      <link>https://example.com/article/mixed-10</link>
+      <guid>https://example.com/article/mixed-10</guid>
+      <description>Independent labs have confirmed the discovery of a room-temperature superconductor material. This breakthrough could revolutionize energy transmission, computing, and transportation. Multiple peer-reviewed papers published simultaneously in Nature and Science.</description>
+      <pubDate>Sat, 01 Mar 2026 06:00:00 GMT</pubDate>
+      <category>Science</category>
+      <category>Materials</category>
+    </item>
+  </channel>
+</rss>

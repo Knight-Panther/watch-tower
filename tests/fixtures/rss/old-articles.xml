@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Old Articles Feed</title>
+    <link>https://example.com</link>
+    <description>All articles dated far in the past</description>
+    <item>
+      <title>Ancient Tech Announcement</title>
+      <link>https://example.com/article/old-1</link>
+      <guid>https://example.com/article/old-1</guid>
+      <description>This article is from 2020 and should be filtered by maxAgeDays.</description>
+      <pubDate>Wed, 15 Jan 2020 10:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Outdated Market Report</title>
+      <link>https://example.com/article/old-2</link>
+      <guid>https://example.com/article/old-2</guid>
+      <description>Market analysis from years ago. No longer relevant.</description>
+      <pubDate>Thu, 20 Feb 2020 14:30:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Legacy Product Launch</title>
+      <link>https://example.com/article/old-3</link>
+      <guid>https://example.com/article/old-3</guid>
+      <description>Product launched in 2020, well beyond any reasonable age filter.</description>
+      <pubDate>Mon, 10 Mar 2020 09:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

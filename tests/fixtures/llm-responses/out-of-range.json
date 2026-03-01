@@ -1,0 +1,5 @@
+{
+  "score": 7,
+  "summary": "Article with out-of-range score that should fail schema validation",
+  "reasoning": "This fixture tests that scores above 5 are rejected by the ScoringResponseSchema min/max constraint."
+}

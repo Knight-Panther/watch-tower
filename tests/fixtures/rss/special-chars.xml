@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Special Characters Feed</title>
+    <link>https://example.com</link>
+    <description>Articles with unicode, entities, and emoji</description>
+    <item>
+      <title>Tech Giants Report Q4 Results &amp; Future Plans</title>
+      <link>https://example.com/article/special-1</link>
+      <guid>https://example.com/article/special-1</guid>
+      <description>Results show &lt;strong&gt;growth&lt;/strong&gt; across all sectors. Revenue was $5.2B &amp; profit margins improved by 15%. The caf&#233; division also performed well.</description>
+      <pubDate>Sat, 01 Mar 2026 10:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Nouvelles technologies en France et au Japon</title>
+      <link>https://example.com/article/special-2</link>
+      <guid>https://example.com/article/special-2</guid>
+      <description>Les entreprises fran&#231;aises collaborent avec des partenaires japonais. &#26085;&#26412;&#12398;&#25216;&#34899; (Japanese tech) leads innovation. Pr&#252;fung der Ergebnisse zeigt positive Trends.</description>
+      <pubDate>Sat, 01 Mar 2026 09:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Market Update: Stocks Rise Amid Optimism</title>
+      <link>https://example.com/article/special-3</link>
+      <guid>https://example.com/article/special-3</guid>
+      <description>The S&amp;P 500 rose 2.3% today. Investors are optimistic about Q1 earnings. The &#8220;bull market&#8221; continues with strong momentum &#8212; analysts predict further gains through 2026.</description>
+      <pubDate>Sat, 01 Mar 2026 08:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

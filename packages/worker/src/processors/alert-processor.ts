@@ -4,7 +4,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import OpenAI from "openai";
 import { logger } from "@watch-tower/shared";
 import type { Database } from "@watch-tower/db";
-import { alertRules, alertDeliveries, appConfig, llmTelemetry } from "@watch-tower/db";
+import { alertRules, appConfig, llmTelemetry } from "@watch-tower/db";
 import { calculateTranslationCost } from "@watch-tower/translation";
 import { sendTelegramAlert, cleanForTelegram } from "../utils/telegram-alert.js";
 
@@ -88,9 +88,10 @@ const isQuietHours = async (db: Database): Promise<boolean> => {
   const end = await getConfigString(db, "alert_quiet_end");
   if (!start || !end) return false;
 
-  const tz = (await getConfigString(db, "alert_quiet_timezone"))
-    ?? (await getConfigString(db, "digest_timezone"))
-    ?? "UTC";
+  const tz =
+    (await getConfigString(db, "alert_quiet_timezone")) ??
+    (await getConfigString(db, "digest_timezone")) ??
+    "UTC";
 
   // Get current time in configured timezone
   const nowStr = new Intl.DateTimeFormat("en-GB", {
@@ -196,10 +197,16 @@ export const checkAndFireAlerts = async ({
       (cfg.get("translation_model") as string) ??
       "gemini-2.5-flash";
     transApiKey =
-      transProvider === "gemini" ? apiKeys.googleAi : transProvider === "openai" ? apiKeys.openai : undefined;
+      transProvider === "gemini"
+        ? apiKeys.googleAi
+        : transProvider === "openai"
+          ? apiKeys.openai
+          : undefined;
 
     if (!transApiKey) {
-      logger.warn(`[alert] no API key for translation provider "${transProvider}", KA alerts will send English`);
+      logger.warn(
+        `[alert] no API key for translation provider "${transProvider}", KA alerts will send English`,
+      );
     }
   }
 
@@ -221,9 +228,7 @@ export const checkAndFireAlerts = async ({
 
       // Find first keyword that both: LLM flagged AND rule contains
       const matchedKeyword = rule.keywords.find((kw) =>
-        article.matchedAlertKeywords.some(
-          (mk) => mk.toLowerCase() === kw.toLowerCase(),
-        ),
+        article.matchedAlertKeywords.some((mk) => mk.toLowerCase() === kw.toLowerCase()),
       );
       if (!matchedKeyword) continue;
 
@@ -249,8 +254,16 @@ export const checkAndFireAlerts = async ({
       let translatedTitle = article.title;
       let translatedSummary = article.llmSummary;
       if (lang === "ka" && transApiKey) {
-        const contentToTranslate = [article.title, article.llmSummary].filter(Boolean).join("\n---\n");
-        const tr = await translateAlertText(db, transProvider, transApiKey, transModel, contentToTranslate);
+        const contentToTranslate = [article.title, article.llmSummary]
+          .filter(Boolean)
+          .join("\n---\n");
+        const tr = await translateAlertText(
+          db,
+          transProvider,
+          transApiKey,
+          transModel,
+          contentToTranslate,
+        );
         if (tr) {
           const parts = tr.text.split(/\n---\n|\n-{3,}\n/);
           translatedTitle = parts[0]?.trim() || article.title;
@@ -260,8 +273,18 @@ export const checkAndFireAlerts = async ({
         }
       }
 
-      const translatedArticle = { ...article, title: translatedTitle, llmSummary: translatedSummary };
-      let message = formatAlertMessage(rule.name, matchedKeyword, translatedArticle, template, lang);
+      const translatedArticle = {
+        ...article,
+        title: translatedTitle,
+        llmSummary: translatedSummary,
+      };
+      const message = formatAlertMessage(
+        rule.name,
+        matchedKeyword,
+        translatedArticle,
+        template,
+        lang,
+      );
       const targetChatId = rule.telegramChatId || telegramConfig.defaultChatId;
 
       const result = await sendTelegramAlert(telegramConfig.botToken, targetChatId, message);
@@ -278,7 +301,7 @@ export const checkAndFireAlerts = async ({
           ${article.articleId}::uuid,
           ${matchedKeyword},
           ${status},
-          ${result.ok ? null : result.error ?? "Unknown error"}
+          ${result.ok ? null : (result.error ?? "Unknown error")}
         )
         ON CONFLICT (rule_id, article_id) DO NOTHING
       `);
@@ -319,7 +342,10 @@ export const checkAndFireAlerts = async ({
               `Consider using more specific keywords to reduce noise.`;
             await sendTelegramAlert(telegramConfig.botToken, chatId, warnMsg);
             await redis.set(warnedKey, "1", "EX", 3600);
-            logger.warn({ chatId, count: totalCount, threshold }, "[alert] high volume warning sent");
+            logger.warn(
+              { chatId, count: totalCount, threshold },
+              "[alert] high volume warning sent",
+            );
           }
         }
       }
@@ -422,18 +448,32 @@ const translateAlertText = async (
 
 // ─── Template ────────────────────────────────────────────────────────────────
 
-const mergeTemplate = (partial: Partial<AlertTemplateConfig> | null): AlertTemplateConfig => ({
+export const mergeTemplate = (
+  partial: Partial<AlertTemplateConfig> | null,
+): AlertTemplateConfig => ({
   ...DEFAULT_ALERT_TEMPLATE,
   ...(partial ?? {}),
 });
 
 // Label translations for alert structural frame (not sent through LLM)
 const alertLabels = {
-  en: { alert: "Alert", keyword: "Keyword", score: "Score", sector: "Sector", readMore: "Read more →" },
-  ka: { alert: "შეტყობინება", keyword: "საკვანძო სიტყვა", score: "ქულა", sector: "სექტორი", readMore: "წაიკითხეთ მეტი →" },
+  en: {
+    alert: "Alert",
+    keyword: "Keyword",
+    score: "Score",
+    sector: "Sector",
+    readMore: "Read more →",
+  },
+  ka: {
+    alert: "შეტყობინება",
+    keyword: "საკვანძო სიტყვა",
+    score: "ქულა",
+    sector: "სექტორი",
+    readMore: "წაიკითხეთ მეტი →",
+  },
 };
 
-const formatAlertMessage = (
+export const formatAlertMessage = (
   ruleName: string,
   keyword: string,
   article: ScoredArticle,

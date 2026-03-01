@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Multi-Sector News</title>
+    <link>https://example.com</link>
+    <description>News across AI, Biotech, Crypto, and Finance sectors</description>
+    <language>en-us</language>
+
+    <item>
+      <title>DeepMind AlphaFold 3 Predicts Protein-Drug Binding With 94% Accuracy</title>
+      <link>https://example.com/article/20</link>
+      <guid>https://example.com/article/20</guid>
+      <description>Google DeepMind's latest AlphaFold iteration can now predict how small-molecule drugs bind to protein targets, a capability that could cut early-stage drug discovery timelines from years to weeks. Pharma partners including Pfizer and AstraZeneca are already integrating the API.</description>
+      <pubDate>Mon, 01 Mar 2026 08:00:00 GMT</pubDate>
+      <category>AI</category>
+      <category>Biotech</category>
+      <category>Drug Discovery</category>
+    </item>
+
+    <item>
+      <title>Bitcoin ETF Inflows Hit Record $3.2B in Single Week as Institutional Demand Surges</title>
+      <link>https://example.com/article/21</link>
+      <guid>https://example.com/article/21</guid>
+      <description>Spot Bitcoin ETFs recorded their largest weekly inflow since launch, with BlackRock's iShares Bitcoin Trust alone attracting $1.8B. Analysts attribute the surge to pension funds rebalancing into digital assets following updated fiduciary guidance from the Department of Labor.</description>
+      <pubDate>Mon, 01 Mar 2026 09:30:00 GMT</pubDate>
+      <category>Crypto</category>
+      <category>Finance</category>
+      <category>ETF</category>
+    </item>
+
+    <item>
+      <title>CRISPR Trial Shows 89% Remission Rate in Aggressive Leukemia Patients</title>
+      <link>https://example.com/article/22</link>
+      <guid>https://example.com/article/22</guid>
+      <description>A Phase II clinical trial from Beam Therapeutics using base-editing CRISPR technology demonstrated an 89% complete remission rate in patients with relapsed or refractory acute lymphoblastic leukemia. The FDA granted Breakthrough Therapy designation, accelerating the path to approval.</description>
+      <pubDate>Mon, 01 Mar 2026 11:00:00 GMT</pubDate>
+      <category>Biotech</category>
+      <category>Healthcare</category>
+    </item>
+
+    <item>
+      <title>Ethereum Layer-2 Networks Process More Transactions Than Base Chain for First Time</title>
+      <link>https://example.com/article/23</link>
+      <guid>https://example.com/article/23</guid>
+      <description>Layer-2 scaling solutions including Arbitrum, Optimism, and Base collectively processed 58% of all Ethereum ecosystem transactions in February 2026, surpassing the mainnet for the first time. Average transaction costs on L2s fell below $0.002, enabling micropayment use cases previously uneconomical.</description>
+      <pubDate>Mon, 01 Mar 2026 13:00:00 GMT</pubDate>
+      <category>Crypto</category>
+      <category>Blockchain</category>
+      <category>Ethereum</category>
+    </item>
+
+  </channel>
+</rss>

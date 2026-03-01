@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Tech News Daily</title>
+    <link>https://example.com</link>
+    <description>Latest technology news and analysis</description>
+    <language>en-us</language>
+
+    <item>
+      <title>OpenAI Releases GPT-5 With Unprecedented Reasoning Capabilities</title>
+      <link>https://example.com/article/1</link>
+      <guid>https://example.com/article/1</guid>
+      <description>OpenAI today announced GPT-5, its most capable language model to date, boasting a 40% improvement in complex reasoning benchmarks over GPT-4o. The model is now available via API to all paid users and introduces a new multimodal architecture.</description>
+      <pubDate>Mon, 01 Mar 2026 08:00:00 GMT</pubDate>
+      <category>AI</category>
+    </item>
+
+    <item>
+      <title>Apple Unveils M4 Ultra Chip Doubling AI Performance</title>
+      <link>https://example.com/article/2</link>
+      <guid>https://example.com/article/2</guid>
+      <description>Apple's new M4 Ultra chip, revealed at a special event in Cupertino, delivers up to 2x the AI inference throughput of its predecessor. The chip will power the next generation of Mac Pro workstations targeting machine learning developers.</description>
+      <pubDate>Mon, 01 Mar 2026 09:15:00 GMT</pubDate>
+      <category>Hardware</category>
+    </item>
+
+    <item>
+      <title>Microsoft Azure Expands Quantum Computing Access to Enterprise Clients</title>
+      <link>https://example.com/article/3</link>
+      <guid>https://example.com/article/3</guid>
+      <description>Microsoft has opened its Azure Quantum platform to enterprise customers in 12 new regions, reducing latency for quantum workloads by co-locating quantum hardware within existing Azure data centers. Early partners include Goldman Sachs and BASF.</description>
+      <pubDate>Mon, 01 Mar 2026 10:30:00 GMT</pubDate>
+      <category>Cloud Computing</category>
+    </item>
+
+    <item>
+      <title>Nvidia GPU Shortage Eases as TSMC Ramps 3nm Production</title>
+      <link>https://example.com/article/4</link>
+      <guid>https://example.com/article/4</guid>
+      <description>TSMC confirmed it has reached full production capacity on its 3nm process node, which supplies Nvidia's H200 and upcoming B100 data center GPUs. Industry analysts expect lead times to drop from 52 weeks to under 16 weeks by Q3 2026.</description>
+      <pubDate>Mon, 01 Mar 2026 11:45:00 GMT</pubDate>
+      <category>Semiconductors</category>
+    </item>
+
+    <item>
+      <title>GitHub Copilot Adds Real-Time Code Review and Bug Detection</title>
+      <link>https://example.com/article/5</link>
+      <guid>https://example.com/article/5</guid>
+      <description>GitHub's AI assistant Copilot now offers inline code review suggestions and proactive bug detection as developers type. The feature, powered by a fine-tuned version of GPT-5, is rolling out to Copilot Enterprise subscribers this week.</description>
+      <pubDate>Mon, 01 Mar 2026 13:00:00 GMT</pubDate>
+      <category>Developer Tools</category>
+    </item>
+
+  </channel>
+</rss>

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Reject Keywords Feed</title>
+    <link>https://example.com</link>
+    <description>Articles containing reject keywords for pre-filter testing</description>
+    <item>
+      <title>Sponsored Content: Best Cloud Providers of 2026</title>
+      <link>https://example.com/article/reject-1</link>
+      <guid>https://example.com/article/reject-1</guid>
+      <description>This is a paid promotion by CloudCorp highlighting their services.</description>
+      <pubDate>Sat, 01 Mar 2026 10:00:00 GMT</pubDate>
+      <category>Sponsored</category>
+    </item>
+    <item>
+      <title>Genuine Research Breakthrough in Quantum Computing</title>
+      <link>https://example.com/article/reject-2</link>
+      <guid>https://example.com/article/reject-2</guid>
+      <description>Researchers achieve stable qubits at room temperature for the first time.</description>
+      <pubDate>Sat, 01 Mar 2026 09:00:00 GMT</pubDate>
+      <category>Technology</category>
+    </item>
+    <item>
+      <title>Press Release: TechCorp Announces New Partnership</title>
+      <link>https://example.com/article/reject-3</link>
+      <guid>https://example.com/article/reject-3</guid>
+      <description>TechCorp and DataInc form strategic press release partnership to expand market reach.</description>
+      <pubDate>Sat, 01 Mar 2026 08:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Advertisement: Save 50% on Enterprise Software</title>
+      <link>https://example.com/article/reject-4</link>
+      <guid>https://example.com/article/reject-4</guid>
+      <description>Limited time offer on our premium enterprise suite. Advertisement paid for by SoftwareCo.</description>
+      <pubDate>Sat, 01 Mar 2026 07:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Legitimate Industry Analysis Report</title>
+      <link>https://example.com/article/reject-5</link>
+      <guid>https://example.com/article/reject-5</guid>
+      <description>In-depth analysis of the semiconductor supply chain and future outlook for 2026-2027.</description>
+      <pubDate>Sat, 01 Mar 2026 06:00:00 GMT</pubDate>
+      <category>Analysis</category>
+    </item>
+  </channel>
+</rss>

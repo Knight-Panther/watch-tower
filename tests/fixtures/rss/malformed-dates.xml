@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Malformed Dates Test Feed</title>
+    <link>https://example.com</link>
+    <description>Feed testing various date format edge cases</description>
+    <language>en-us</language>
+
+    <item>
+      <title>Article With ISO 8601 Date</title>
+      <link>https://example.com/article/40</link>
+      <guid>https://example.com/article/40</guid>
+      <description>This article uses an ISO 8601 formatted date instead of RFC 822. The ingest pipeline should parse this gracefully.</description>
+      <pubDate>2026-03-01T08:00:00Z</pubDate>
+      <category>Tech</category>
+    </item>
+
+    <item>
+      <title>Article With Proper RFC 822 Date</title>
+      <link>https://example.com/article/41</link>
+      <guid>https://example.com/article/41</guid>
+      <description>This article uses a properly formatted RFC 822 date, which is the standard for RSS 2.0 feeds. Should parse without issues.</description>
+      <pubDate>Mon, 01 Mar 2026 09:00:00 GMT</pubDate>
+      <category>Tech</category>
+    </item>
+
+    <item>
+      <title>Article With Empty pubDate</title>
+      <link>https://example.com/article/42</link>
+      <guid>https://example.com/article/42</guid>
+      <description>This article has an empty pubDate element. The ingest pipeline should fall back to the current time or handle gracefully without crashing.</description>
+      <pubDate></pubDate>
+      <category>Tech</category>
+    </item>
+
+    <item>
+      <title>Article With Null String pubDate</title>
+      <link>https://example.com/article/43</link>
+      <guid>https://example.com/article/43</guid>
+      <description>This article has the literal string "null" as its pubDate value. Edge case testing for type coercion issues in date parsing.</description>
+      <pubDate>null</pubDate>
+      <category>Tech</category>
+    </item>
+
+    <item>
+      <title>Article With Far Future Date (2030)</title>
+      <link>https://example.com/article/44</link>
+      <guid>https://example.com/article/44</guid>
+      <description>This article is dated in the far future — January 2030. The pipeline should handle this without error, though it may be filtered if maxAgeDays logic also enforces a future-date ceiling.</description>
+      <pubDate>Wed, 01 Jan 2030 00:00:00 GMT</pubDate>
+      <category>Tech</category>
+    </item>
+
+  </channel>
+</rss>

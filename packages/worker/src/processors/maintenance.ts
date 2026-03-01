@@ -87,25 +87,13 @@ const getConfigNumber = async (db: Database, key: string, fallback: number) => {
   return Number.isNaN(num) ? fallback : num;
 };
 
-const getConfigString = async (db: Database, key: string, fallback: string) => {
-  const [row] = await db
-    .select({ value: appConfig.value })
-    .from(appConfig)
-    .where(eq(appConfig.key, key));
-  if (!row) return fallback;
-  return String(row.value) || fallback;
-};
-
 /**
  * Check which digest slots are due to fire right now.
  * Returns array of slot IDs that should trigger a digest.
  * Uses Intl.DateTimeFormat for timezone handling (supports DST automatically).
  */
 const checkDigestSlotsDue = async (db: Database): Promise<string[]> => {
-  const slots = await db
-    .select()
-    .from(digestSlots)
-    .where(eq(digestSlots.enabled, true));
+  const slots = await db.select().from(digestSlots).where(eq(digestSlots.enabled, true));
 
   if (slots.length === 0) return [];
 
@@ -115,7 +103,9 @@ const checkDigestSlotsDue = async (db: Database): Promise<string[]> => {
 
   for (const slot of slots) {
     const timezone = slot.timezone || "UTC";
-    const days: number[] = Array.isArray(slot.days) ? (slot.days as number[]) : [1, 2, 3, 4, 5, 6, 7];
+    const days: number[] = Array.isArray(slot.days)
+      ? (slot.days as number[])
+      : [1, 2, 3, 4, 5, 6, 7];
 
     // Get current time in slot's timezone
     let currentTime: string;
@@ -137,7 +127,10 @@ const checkDigestSlotsDue = async (db: Database): Promise<string[]> => {
     }
 
     // Get day-of-week in slot's timezone (ISO: 1=Mon...7=Sun)
-    const dayStr = new Intl.DateTimeFormat("en-US", { timeZone: timezone, weekday: "short" }).format(now);
+    const dayStr = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      weekday: "short",
+    }).format(now);
     const isoDay = dayMap[dayStr] ?? 0;
     if (!days.includes(isoDay)) continue;
 
@@ -238,7 +231,10 @@ const runScheduledIngests = async (db: Database, ingestQueue: Queue, force = fal
 
     if (!isDue) continue;
 
-    const maxAgeDays = Math.min(15, Math.max(1, source.maxAgeDays ?? source.sectorDefaultMaxAge ?? 5));
+    const maxAgeDays = Math.min(
+      15,
+      Math.max(1, source.maxAgeDays ?? source.sectorDefaultMaxAge ?? 5),
+    );
 
     // Time bucket prevents duplicate jobs within same interval window.
     // Force runs use timestamp-based ID to bypass dedup.
@@ -323,9 +319,7 @@ const resetZombieTranslations = async (db: Database) => {
     RETURNING id
   `);
   if (translatingResult.rows.length > 0) {
-    logger.warn(
-      `[maintenance] reset ${translatingResult.rows.length} zombie translating articles`,
-    );
+    logger.warn(`[maintenance] reset ${translatingResult.rows.length} zombie translating articles`);
   }
 
   // Reset 'failed' → NULL after 10 minutes (allows retry)
@@ -341,9 +335,7 @@ const resetZombieTranslations = async (db: Database) => {
     RETURNING id
   `);
   if (failedResult.rows.length > 0) {
-    logger.warn(
-      `[maintenance] reset ${failedResult.rows.length} failed translations for retry`,
-    );
+    logger.warn(`[maintenance] reset ${failedResult.rows.length} failed translations for retry`);
   }
 };
 
@@ -361,7 +353,9 @@ const resetZombiePostingArticles = async (db: Database) => {
     RETURNING id
   `);
   if (resetResult.rows.length > 0) {
-    logger.warn(`[maintenance] reset ${resetResult.rows.length} zombie posting articles back to approved`);
+    logger.warn(
+      `[maintenance] reset ${resetResult.rows.length} zombie posting articles back to approved`,
+    );
   }
   return resetResult.rows.length;
 };
@@ -541,10 +535,7 @@ type ClaimedDelivery = {
 
 // Helper: Get template for platform from social_accounts
 // Merges saved template with defaults so new fields (e.g. showImage) are never undefined.
-async function getTemplateForPlatform(
-  db: Database,
-  platform: string,
-): Promise<PostTemplateConfig> {
+async function getTemplateForPlatform(db: Database, platform: string): Promise<PostTemplateConfig> {
   const result = await db.execute(sql`
     SELECT post_template as "postTemplate"
     FROM social_accounts
@@ -730,7 +721,8 @@ const processScheduledPosts = async (
           .update(postDeliveries)
           .set({
             status: "cancelled",
-            errorMessage: "Cancelled: Georgian translation required. Will auto-post after translation.",
+            errorMessage:
+              "Cancelled: Georgian translation required. Will auto-post after translation.",
           })
           .where(eq(postDeliveries.id, delivery.id));
         continue;
@@ -975,10 +967,7 @@ export const createMaintenanceWorker = ({
 
             if (r2Keys.length > 0) {
               await r2Storage.deleteImages(r2Keys);
-              logger.info(
-                { count: r2Keys.length },
-                "[maintenance] deleted R2 image objects",
-              );
+              logger.info({ count: r2Keys.length }, "[maintenance] deleted R2 image objects");
             }
           }
 
@@ -1022,17 +1011,9 @@ export const createMaintenanceWorker = ({
 
         // Alert deliveries cleanup
         try {
-          const alertDeliveriesTtlDays = await getConfigNumber(
-            db,
-            "alert_deliveries_ttl_days",
-            30,
-          );
-          const alertDeliveriesCutoff = new Date(
-            Date.now() - alertDeliveriesTtlDays * 86_400_000,
-          );
-          await db
-            .delete(alertDeliveries)
-            .where(lt(alertDeliveries.sentAt, alertDeliveriesCutoff));
+          const alertDeliveriesTtlDays = await getConfigNumber(db, "alert_deliveries_ttl_days", 30);
+          const alertDeliveriesCutoff = new Date(Date.now() - alertDeliveriesTtlDays * 86_400_000);
+          await db.delete(alertDeliveries).where(lt(alertDeliveries.sentAt, alertDeliveriesCutoff));
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           logger.error(`[maintenance] alert_deliveries cleanup failed: ${msg}`);
@@ -1088,10 +1069,7 @@ export const createMaintenanceWorker = ({
             .select({ id: digestDrafts.id, slotId: digestDrafts.slotId })
             .from(digestDrafts)
             .where(
-              and(
-                eq(digestDrafts.status, "approved"),
-                lt(digestDrafts.scheduledAt, new Date()),
-              ),
+              and(eq(digestDrafts.status, "approved"), lt(digestDrafts.scheduledAt, new Date())),
             );
           for (const draft of dueDrafts) {
             await maintenanceQueue.add(
@@ -1099,7 +1077,10 @@ export const createMaintenanceWorker = ({
               { draftId: draft.id, slotId: draft.slotId },
               { jobId: `digest-draft-${draft.id}` },
             );
-            logger.info({ draftId: draft.id, slotId: draft.slotId }, "[scheduler] queued scheduled draft delivery");
+            logger.info(
+              { draftId: draft.id, slotId: draft.slotId },
+              "[scheduler] queued scheduled draft delivery",
+            );
           }
         } catch (err) {
           logger.error("[scheduler] scheduled draft delivery check failed", err);
@@ -1127,7 +1108,10 @@ export const createMaintenanceWorker = ({
         const isTest = job.data?.isTest === true;
         const slotId = job.data?.slotId as string | undefined;
         const draftId = job.data?.draftId as string | undefined;
-        logger.info({ isTest, slotId, draftId }, `[digest] starting ${draftId ? "draft delivery" : isTest ? "test" : "scheduled"} digest`);
+        logger.info(
+          { isTest, slotId, draftId },
+          `[digest] starting ${draftId ? "draft delivery" : isTest ? "test" : "scheduled"} digest`,
+        );
         const result = await compileAndSendDigest(
           { db, telegramConfig, facebookConfig, linkedinConfig, apiKeys },
           { isTest, slotId, draftId },
@@ -1140,7 +1124,12 @@ export const createMaintenanceWorker = ({
           // Notify frontend via SSE
           if (slotId && eventPublisher) {
             const [slot] = await db
-              .select({ name: digestSlots.name, telegramEnabled: digestSlots.telegramEnabled, facebookEnabled: digestSlots.facebookEnabled, linkedinEnabled: digestSlots.linkedinEnabled })
+              .select({
+                name: digestSlots.name,
+                telegramEnabled: digestSlots.telegramEnabled,
+                facebookEnabled: digestSlots.facebookEnabled,
+                linkedinEnabled: digestSlots.linkedinEnabled,
+              })
               .from(digestSlots)
               .where(eq(digestSlots.id, slotId))
               .limit(1);
@@ -1160,7 +1149,10 @@ export const createMaintenanceWorker = ({
             });
           }
         } else if (result.draftId) {
-          logger.info({ slotId, draftId: result.draftId }, "[digest] saved as draft for manual approval");
+          logger.info(
+            { slotId, draftId: result.draftId },
+            "[digest] saved as draft for manual approval",
+          );
           // Notify frontend via SSE
           if (slotId && eventPublisher) {
             const [slot] = await db

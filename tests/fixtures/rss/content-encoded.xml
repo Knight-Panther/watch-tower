@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>Deep Dive Tech</title>
+    <link>https://example.com</link>
+    <description>In-depth technology analysis with full article content</description>
+    <language>en-us</language>
+
+    <item>
+      <title>The State of Large Language Models in 2026: A Comprehensive Review</title>
+      <link>https://example.com/article/10</link>
+      <guid>https://example.com/article/10</guid>
+      <description>A brief overview of the LLM landscape heading into 2026.</description>
+      <pubDate>Mon, 01 Mar 2026 08:00:00 GMT</pubDate>
+      <category>AI</category>
+      <content:encoded><![CDATA[
+        <article>
+          <h1>The State of Large Language Models in 2026: A Comprehensive Review</h1>
+          <p>The artificial intelligence landscape has transformed dramatically over the past twelve months. What began as a race to scale parameters has evolved into a sophisticated competition around reasoning, efficiency, and real-world utility. In this deep-dive review, we examine the key developments that defined the LLM space in 2025 and what they mean for enterprises and developers entering 2026.</p>
+          <h2>From Scale to Efficiency</h2>
+          <p>The defining narrative of 2025 was not "bigger is better" but rather "smarter is cheaper." Leading labs shifted focus from raw parameter counts to architecture innovations like mixture-of-experts (MoE) routing, speculative decoding, and hardware-aware quantization. The result: models that cost 10x less to run while matching the quality of their bloated predecessors.</p>
+          <p>OpenAI's GPT-5, Anthropic's Claude 4, and Google's Gemini Ultra 2 all ship in compact variants that run efficiently on consumer hardware. This democratization has had a measurable impact: the number of production LLM deployments grew 340% year-over-year according to industry surveys.</p>
+          <h2>Reasoning Breakthroughs</h2>
+          <p>Perhaps the most significant leap came in structured reasoning. Chain-of-thought prompting, once a research curiosity, became a first-class feature baked directly into model training pipelines. Models can now decompose multi-step mathematical proofs, write and execute code to verify their own answers, and flag uncertainty rather than confidently hallucinating.</p>
+          <p>Benchmark results on MATH-500, MMLU, and HumanEval all saw double-digit percentage improvements across top-tier models, though critics caution that benchmark saturation may be obscuring real-world limitations in novel domains.</p>
+          <h2>Enterprise Adoption</h2>
+          <p>Fortune 500 adoption of LLMs crossed the 70% threshold in Q4 2025. Legal, finance, and healthcare verticals — traditionally cautious — accelerated rollout after regulators in the EU and US issued clearer guidance on AI-assisted decision-making liability. Private deployment (self-hosted or VPC-isolated cloud) became the dominant pattern for regulated industries.</p>
+          <blockquote>"We went from a pilot with 50 users to 8,000 employees in nine months," said the CTO of a major European bank. "The productivity gains in document review alone justified the entire investment."</blockquote>
+          <h2>What to Watch in 2026</h2>
+          <ul>
+            <li>Multimodal reasoning — video and audio natively understood, not just described</li>
+            <li>Agent frameworks maturing beyond toy demos into reliable autonomous workflows</li>
+            <li>Open-source models closing the gap with proprietary frontier models</li>
+            <li>Regulatory pressure increasing in the EU ahead of the AI Act enforcement phase</li>
+          </ul>
+          <p>The LLM space remains the fastest-moving sector in enterprise software. Organizations that built internal competency in 2024-2025 are now reaping compounding returns, while late movers face an increasingly steep learning curve. The window for low-cost experimentation is narrowing — 2026 will separate the strategists from the experimenters.</p>
+        </article>
+      ]]></content:encoded>
+    </item>
+
+    <item>
+      <title>Inside Anthropic's Constitutional AI: How Safety Baked Into Training Works</title>
+      <link>https://example.com/article/11</link>
+      <guid>https://example.com/article/11</guid>
+      <description>An inside look at how Anthropic builds safety constraints directly into model training.</description>
+      <pubDate>Mon, 01 Mar 2026 10:00:00 GMT</pubDate>
+      <category>AI Safety</category>
+      <content:encoded><![CDATA[
+        <article>
+          <h1>Inside Anthropic's Constitutional AI: How Safety Baked Into Training Works</h1>
+          <p>When Anthropic published the constitutional AI paper in 2022, it proposed something radical: instead of relying solely on human feedback to teach models what is safe, encode a set of principles directly into the training process and let the model critique its own outputs. Four years later, that idea has become the backbone of Claude's entire training pipeline — and it's worth understanding why it matters.</p>
+          <h2>The Core Idea</h2>
+          <p>Constitutional AI (CAI) works in two phases. In the supervised learning phase, the model generates responses to potentially harmful prompts, then rewrites those responses according to a set of principles — the "constitution." These revised responses become training data. In the reinforcement learning phase, an AI-generated preference model (rather than human raters alone) scores outputs for harmlessness, again guided by the constitution.</p>
+          <p>The result is a model that has internalized safety reasoning rather than simply memorized surface-level refusals. This matters in practice: a model that understands why something is harmful can generalize to novel harm scenarios it has never seen before, whereas a model trained on keyword blocks fails the moment an adversary finds a synonym.</p>
+          <h2>What the Constitution Contains</h2>
+          <p>Anthropic's published constitution includes principles drawn from multiple philosophical frameworks: utilitarianism (minimize expected harm across all affected parties), deontological constraints (certain actions are categorically off-limits regardless of claimed benefits), and virtue ethics (ask what a thoughtful, senior Anthropic employee would think of this response). The document is publicly available and has been updated several times as edge cases were discovered.</p>
+          <p>Critics have pointed out that the choice of constitution is itself a values-laden decision. Anthropic acknowledges this openly and has published detailed documentation on how the constitution was developed and what tradeoffs were considered. This level of transparency is unusual in the industry and has been cited positively by AI governance researchers.</p>
+          <h2>Limitations and Ongoing Research</h2>
+          <p>CAI is not a silver bullet. The technique performs well on the distribution of harms seen during training but can still be surprised by novel attack vectors. Jailbreaks remain a cat-and-mouse game. And constitutional principles must be carefully worded — overly broad principles cause excessive refusals that frustrate users, while overly narrow principles miss adjacent harms.</p>
+          <p>Anthropic's research team continues to iterate on the approach, with recent work focusing on scalable oversight: using more capable AI models to supervise the training of less capable ones, gradually bootstrapping toward automated alignment verification that does not require constant human input.</p>
+          <h2>Industry Influence</h2>
+          <p>Whether or not competitors have adopted CAI by name, the underlying ideas have propagated broadly. Model cards now routinely describe harm categories and mitigation strategies. RLHF pipelines increasingly include AI-generated preference labels alongside human labels. The field has moved from "does this model refuse bad things" to "does this model understand why something is bad," largely because Anthropic made that distinction legible.</p>
+        </article>
+      ]]></content:encoded>
+    </item>
+
+    <item>
+      <title>Rust's Ascent in Systems Programming: Benchmarks, Adoption, and What's Next</title>
+      <link>https://example.com/article/12</link>
+      <guid>https://example.com/article/12</guid>
+      <description>Rust continues to displace C and C++ in critical infrastructure. We examine why.</description>
+      <pubDate>Mon, 01 Mar 2026 12:00:00 GMT</pubDate>
+      <category>Programming Languages</category>
+      <content:encoded><![CDATA[
+        <article>
+          <h1>Rust's Ascent in Systems Programming: Benchmarks, Adoption, and What's Next</h1>
+          <p>For the ninth consecutive year, Rust topped Stack Overflow's "most admired language" survey. But this time, developer love is translating into something more concrete: enterprise adoption at scale. The Linux kernel now contains over 1.5 million lines of Rust. The Windows kernel team has been rewriting select components in Rust since 2023. Android's Bluetooth and networking stacks are Rust-native. Memory safety vulnerabilities in these subsystems have dropped measurably as a result.</p>
+          <h2>The Memory Safety Imperative</h2>
+          <p>The shift toward Rust is not ideological — it is driven by hard economics. The US Cybersecurity and Infrastructure Security Agency (CISA) issued guidance in late 2024 urging software vendors to adopt memory-safe languages for new development. Insurance underwriters have begun pricing memory-safety risks explicitly into cyber policies. The incentive structure has changed.</p>
+          <p>Rust's ownership model guarantees at compile time that a class of memory errors — use-after-free, buffer overflows, data races — cannot occur. C and C++ rely on programmer discipline and code review. At scale, discipline fails: Google's Project Zero found that 70% of severe Chrome vulnerabilities from 2015-2020 were memory safety issues that Rust's type system would have prevented.</p>
+          <h2>Performance Parity and Beyond</h2>
+          <p>Early criticism of Rust centered on compilation times and the steep learning curve of the borrow checker. Both concerns have softened considerably. The compiler has improved substantially; incremental compilation and parallel codegen make large Rust projects tractable. And the borrow checker, while still demanding, is now better documented, better error-messaged, and understood by a larger pool of developers.</p>
+          <p>On raw performance, Rust consistently matches or beats C++ in compute-bound benchmarks and often exceeds it in memory-bound workloads due to more predictable allocation patterns. The absence of a garbage collector means no GC pauses — critical for latency-sensitive systems like trading infrastructure, game engines, and network proxies.</p>
+          <h2>Adoption Map</h2>
+          <ul>
+            <li><strong>Operating systems:</strong> Linux kernel, Windows kernel components, Redox OS</li>
+            <li><strong>Web infrastructure:</strong> Cloudflare Workers (Rust WASM), Fastly Compute@Edge, AWS Firecracker VMM</li>
+            <li><strong>Databases:</strong> TiKV (TiDB's storage engine), InfluxDB IOx, Databend</li>
+            <li><strong>Browsers:</strong> Firefox's CSS engine (Stylo), WebRender, planned Servo revival</li>
+            <li><strong>Embedded/IoT:</strong> RTIC framework, Embassy async runtime, Hubris RTOS</li>
+          </ul>
+          <h2>What's Next</h2>
+          <p>The Rust 2027 edition is currently in planning, with major themes around async stability, improved ergonomics for embedded targets, and better interoperability with C++ via the ongoing cxx and Diplomat binding projects. The language specification work, funded partly by the Rust Foundation and industry sponsors, aims to provide a formal basis for safety-critical certification (ISO 26262, DO-178C) — a prerequisite for broader aerospace and automotive adoption.</p>
+          <p>Rust is no longer a promising experiment. It is production infrastructure for some of the most demanding software in the world, and the trajectory shows no signs of slowing.</p>
+        </article>
+      ]]></content:encoded>
+    </item>
+
+  </channel>
+</rss>

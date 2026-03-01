@@ -17,7 +17,17 @@
       "Bash(ls -la /c/Users/VM-Dev/Desktop/watch-tower/.eslintrc* /c/Users/VM-Dev/Desktop/watch-tower/.prettierrc*)",
       "Bash(wc -l /c/Users/VM-Dev/Desktop/watch-tower/packages/*/src/*.ts /c/Users/VM-Dev/Desktop/watch-tower/packages/*/src/**/*.ts)",
       "Bash(xargs grep -l \"console\\\\.log\")",
-      "Bash(xargs grep \"console\\\\.log\")"
+      "Bash(xargs grep \"console\\\\.log\")",
+      "Bash(ls -la /c/Users/VM-Dev/Desktop/watch-tower/tests/results/*.json)",
+      "Bash(timeout 10 npx tsx -e \":*)",
+      "Bash(node --import tsx/esm -e \":*)",
+      "Bash(xargs grep -l '\"\"name\"\": \"\"pg\"\"')",
+      "Bash(DATABASE_URL=postgres://invalid:invalid@127.0.0.1:1/nonexistent npx tsx tests/diagnostics/pipeline-audit.ts)",
+      "Bash(cat /c/Users/VM-Dev/Desktop/watch-tower/tests/integration/api/*.ts)",
+      "Bash(tasklist)",
+      "Bash(LOG_LEVEL=debug npx vitest run tests/integration/pipeline/ingest.test.ts)",
+      "Bash(LOG_LEVEL=debug npx vitest run tests/integration/pipeline/ingest.test.ts -t \"should insert articles from a standard RSS feed\")",
+      "Bash(LOG_LEVEL=debug npx vitest run tests/e2e/pipeline-flow.test.ts -t \"deduplicates\")"
     ],
     "additionalDirectories": [
       "C:\\Users\\VM-Dev\\Desktop\\watch-tower"

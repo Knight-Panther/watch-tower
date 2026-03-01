@@ -1,0 +1,22 @@
+{
+  "priorities": ["AI", "Machine Learning", "GPT"],
+  "ignore": ["sponsored", "press release"],
+  "rejectKeywords": ["advertisement", "promotional"],
+  "summaryMaxChars": 300,
+  "summaryTone": "urgent",
+  "summaryLanguage": "English",
+  "score1": "Complete noise, irrelevant",
+  "score5": "Breaking news, market-moving event",
+  "examples": [
+    {
+      "title": "OpenAI releases GPT-5",
+      "score": 5,
+      "reasoning": "Major AI breakthrough with broad implications"
+    },
+    {
+      "title": "Company updates office WiFi",
+      "score": 1,
+      "reasoning": "Internal operational detail, no market relevance"
+    }
+  ]
+}
