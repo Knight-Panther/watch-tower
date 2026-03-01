@@ -64,7 +64,9 @@ const SAMPLE_ARTICLE = {
 export default function PostTemplates() {
   // Data state
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
-  const [selectedAccountId, setSelectedAccountId] = useState<string>("");
+  const [selectedAccountId, setSelectedAccountId] = useState<string>(
+    () => localStorage.getItem("postTemplates_selectedAccountId") ?? "",
+  );
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -90,7 +92,12 @@ export default function PostTemplates() {
         const data = await listSocialAccounts();
         setAccounts(data);
         if (data.length > 0) {
-          setSelectedAccountId(data[0].id);
+          const saved = localStorage.getItem("postTemplates_selectedAccountId");
+          const match = saved && data.find((a) => a.id === saved);
+          if (!match) {
+            setSelectedAccountId(data[0].id);
+            localStorage.setItem("postTemplates_selectedAccountId", data[0].id);
+          }
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to load social accounts";
@@ -149,7 +156,9 @@ export default function PostTemplates() {
       // Update local state
       setAccounts((prev) =>
         prev.map((a) =>
-          a.id === selectedAccountId ? { ...a, post_template: result.template, is_template_custom: true } : a,
+          a.id === selectedAccountId
+            ? { ...a, post_template: result.template, is_template_custom: true }
+            : a,
         ),
       );
       toast.success("Template saved");
@@ -177,7 +186,9 @@ export default function PostTemplates() {
       // Update local state
       setAccounts((prev) =>
         prev.map((a) =>
-          a.id === selectedAccountId ? { ...a, post_template: result.template, is_template_custom: false } : a,
+          a.id === selectedAccountId
+            ? { ...a, post_template: result.template, is_template_custom: false }
+            : a,
         ),
       );
       setTemplate(result.template);
@@ -203,7 +214,8 @@ export default function PostTemplates() {
     return (
       <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6 text-center">
         <p className="text-slate-400">
-          No social accounts configured. Add a social account in the database to customize templates.
+          No social accounts configured. Add a social account in the database to customize
+          templates.
         </p>
       </div>
     );
@@ -224,7 +236,10 @@ export default function PostTemplates() {
             <label className="text-sm text-slate-400">Platform:</label>
             <select
               value={selectedAccountId}
-              onChange={(e) => setSelectedAccountId(e.target.value)}
+              onChange={(e) => {
+                setSelectedAccountId(e.target.value);
+                localStorage.setItem("postTemplates_selectedAccountId", e.target.value);
+              }}
               className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
             >
               {accounts.map((a) => (
@@ -252,7 +267,9 @@ export default function PostTemplates() {
           {/* Content Toggles */}
           <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
             <h2 className="text-lg font-semibold">Post Components</h2>
-            <p className="mt-1 text-sm text-slate-400">Toggle which elements appear in your posts.</p>
+            <p className="mt-1 text-sm text-slate-400">
+              Toggle which elements appear in your posts.
+            </p>
             <div className="mt-4 space-y-3">
               {/* Breaking Label */}
               <div className="flex items-center justify-between rounded-xl border border-slate-700 bg-slate-950 px-4 py-3">
@@ -412,30 +429,32 @@ export default function PostTemplates() {
               </div>
 
               {/* Auto-Comment URL (Facebook & LinkedIn — posts source link as first comment) */}
-              {template.showImage && (selectedAccount?.platform === "facebook" || selectedAccount?.platform === "linkedin") && (
-                <div className="ml-4 border-l-2 border-slate-700 pl-4">
-                  <div className="flex items-center justify-between rounded-xl border border-slate-700 bg-slate-950 px-4 py-3">
-                    <div>
-                      <p className="text-sm font-medium text-slate-200">Auto-Comment URL</p>
-                      <p className="text-xs text-slate-500">
-                        Post source link as first comment instead of in text
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => updateTemplate("autoCommentUrl", !template.autoCommentUrl)}
-                      className={`relative h-6 w-11 rounded-full transition-colors ${
-                        template.autoCommentUrl ? "bg-emerald-500" : "bg-slate-600"
-                      }`}
-                    >
-                      <span
-                        className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-                          template.autoCommentUrl ? "translate-x-5" : "translate-x-0"
+              {template.showImage &&
+                (selectedAccount?.platform === "facebook" ||
+                  selectedAccount?.platform === "linkedin") && (
+                  <div className="ml-4 border-l-2 border-slate-700 pl-4">
+                    <div className="flex items-center justify-between rounded-xl border border-slate-700 bg-slate-950 px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-slate-200">Auto-Comment URL</p>
+                        <p className="text-xs text-slate-500">
+                          Post source link as first comment instead of in text
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => updateTemplate("autoCommentUrl", !template.autoCommentUrl)}
+                        className={`relative h-6 w-11 rounded-full transition-colors ${
+                          template.autoCommentUrl ? "bg-emerald-500" : "bg-slate-600"
                         }`}
-                      />
-                    </button>
+                      >
+                        <span
+                          className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+                            template.autoCommentUrl ? "translate-x-5" : "translate-x-0"
+                          }`}
+                        />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
             </div>
           </div>
 
@@ -477,7 +496,10 @@ export default function PostTemplates() {
                       .replace(/<(?!\/?b>|\/?a[\s>])[^>]*>/gi, "")
                       .replace(/<b>/g, '<strong class="font-semibold">')
                       .replace(/<\/b>/g, "</strong>")
-                      .replace(/<a /g, '<a class="text-blue-400 underline" rel="noopener noreferrer" ')
+                      .replace(
+                        /<a /g,
+                        '<a class="text-blue-400 underline" rel="noopener noreferrer" ',
+                      )
                       .replace(/\n\n/g, "<br/><br/>"),
                   }}
                 />

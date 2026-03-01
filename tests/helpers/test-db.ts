@@ -42,27 +42,24 @@ export const cleanArticleTables = async (db: Database): Promise<void> => {
 };
 
 /**
- * Truncate all tables that tests may have written to, except app_config.
- * Useful for a full reset between test suites.
+ * Truncate tables that tests seed or write to, for a clean slate between suites.
+ * Preserves user-configured data that tests don't need to wipe:
+ *   social_accounts, alert_rules, digest_slots, allowed_domains, app_config
  */
 export const cleanAllTables = async (db: Database): Promise<void> => {
   await db.execute(sql`
     TRUNCATE TABLE
       alert_deliveries,
-      alert_rules,
       post_deliveries,
       article_images,
       llm_telemetry,
       feed_fetch_runs,
       digest_drafts,
       digest_runs,
-      digest_slots,
       articles,
       scoring_rules,
       rss_sources,
-      social_accounts,
       platform_health,
-      allowed_domains,
       sectors
     CASCADE
   `);

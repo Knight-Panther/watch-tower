@@ -29,11 +29,7 @@ const isAnyAutoPostEnabled = async (db: Database): Promise<boolean> => {
     .select({ key: appConfig.key, value: appConfig.value })
     .from(appConfig)
     .where(
-      inArray(appConfig.key, [
-        "auto_post_telegram",
-        "auto_post_facebook",
-        "auto_post_linkedin",
-      ]),
+      inArray(appConfig.key, ["auto_post_telegram", "auto_post_facebook", "auto_post_linkedin"]),
     );
 
   if (rows.length === 0) {
@@ -141,7 +137,9 @@ export const createLLMBrainWorker = ({
 
       // Collect unique sector IDs
       const sectorIds = [
-        ...new Set(claimedArticles.map((a) => a.sectorId).filter((id): id is string => id !== null)),
+        ...new Set(
+          claimedArticles.map((a) => a.sectorId).filter((id): id is string => id !== null),
+        ),
       ];
 
       // Fetch sector names in one query (avoid N+1)
@@ -218,7 +216,11 @@ export const createLLMBrainWorker = ({
         }
 
         // Priority 1: Structured config (new system) — system/user split
-        if (rules.config && typeof rules.config === "object" && Object.keys(rules.config).length > 0) {
+        if (
+          rules.config &&
+          typeof rules.config === "object" &&
+          Object.keys(rules.config).length > 0
+        ) {
           const parsed = scoringConfigSchema.safeParse(rules.config);
           if (parsed.success) {
             return { systemPrompt: buildScoringSystemPrompt(parsed.data, name) };
@@ -239,7 +241,7 @@ export const createLLMBrainWorker = ({
       // Enrich articles with sector names
       const articles: ClaimedArticle[] = claimedArticles.map((a) => ({
         ...a,
-        sectorName: a.sectorId ? sectorMap.get(a.sectorId) ?? null : null,
+        sectorName: a.sectorId ? (sectorMap.get(a.sectorId) ?? null) : null,
       }));
 
       logger.info(`[llm-brain] claimed ${articles.length} articles for scoring`);
@@ -288,9 +290,10 @@ export const createLLMBrainWorker = ({
       for (const article of articles) {
         const rules = article.sectorId ? sectorRules.get(article.sectorId) : undefined;
         const config = rules?.config;
-        const parsed = config && typeof config === "object" && Object.keys(config).length > 0
-          ? scoringConfigSchema.safeParse(config)
-          : null;
+        const parsed =
+          config && typeof config === "object" && Object.keys(config).length > 0
+            ? scoringConfigSchema.safeParse(config)
+            : null;
         const rejectKeywords = parsed?.success ? parsed.data.rejectKeywords : [];
 
         if (rejectKeywords.length === 0) {
@@ -373,9 +376,7 @@ export const createLLMBrainWorker = ({
           WHERE a.id = bulk.id
         `);
 
-        logger.info(
-          `[llm-brain] pre-filter rejected ${preFilterRejects.length} articles`,
-        );
+        logger.info(`[llm-brain] pre-filter rejected ${preFilterRejects.length} articles`);
 
         // Publish rejection events
         for (const reject of preFilterRejects) {
@@ -398,7 +399,7 @@ export const createLLMBrainWorker = ({
         keywords.length === 0
           ? ""
           : `\n\nALERT KEYWORD MATCHING:
-Check if any of these alert keywords are semantically relevant to this article: [${keywords.join(", ")}]
+Check if any of these alert keywords are explicitly discussed or directly referenced in this article: [${keywords.join(", ")}]
 Include a "matched_alert_keywords" field in your JSON response — an array of the EXACT keyword strings from the list above, copied unchanged.
 Only include keywords that are clearly relevant to the article's core topic, not just mentioned in passing.
 If no keywords match, return an empty array.
@@ -421,7 +422,9 @@ Example: {"reasoning": "...", "score": 3, "summary": "...", "matched_alert_keywo
       });
 
       // 3. Score each article with Promise.allSettled for partial failure handling
-      const settledResults = await Promise.allSettled(requests.map((req) => llmProvider.score(req)));
+      const settledResults = await Promise.allSettled(
+        requests.map((req) => llmProvider.score(req)),
+      );
 
       // 4. Separate successes and failures
       const successes: ScoringResult[] = [];
@@ -448,9 +451,7 @@ Example: {"reasoning": "...", "score": 3, "summary": "...", "matched_alert_keywo
         const thresholdRows = await db
           .select({ key: appConfig.key, value: appConfig.value })
           .from(appConfig)
-          .where(
-            inArray(appConfig.key, ["auto_approve_threshold", "auto_reject_threshold"]),
-          );
+          .where(inArray(appConfig.key, ["auto_approve_threshold", "auto_reject_threshold"]));
         for (const row of thresholdRows) {
           const num = Number(row.value);
           if (!Number.isNaN(num) && num >= 0 && num <= 5) {
@@ -691,7 +692,13 @@ Example: {"reasoning": "...", "score": 3, "summary": "...", "matched_alert_keywo
                 matchedAlertKeywords: r.matchedAlertKeywords ?? [],
               };
             });
-            await checkAndFireAlerts({ db, redis, telegramConfig, articles: alertArticles, apiKeys });
+            await checkAndFireAlerts({
+              db,
+              redis,
+              telegramConfig,
+              articles: alertArticles,
+              apiKeys,
+            });
           } catch (alertErr) {
             // Alert failures must never interrupt the scoring pipeline
             logger.error("[llm-brain] alert check failed, continuing", alertErr);

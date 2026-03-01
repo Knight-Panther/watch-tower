@@ -126,19 +126,30 @@ export const createIngestWorker = ({ connection, db, eventPublisher }: IngestDep
           const publishedMs = new Date(published).getTime();
           if (Number.isNaN(publishedMs) || publishedMs < cutoff) return null;
 
-          // Prefer content:encoded (richer) over contentSnippet (short)
+          // Prefer richest content field available.
+          // contentEncoded has full HTML body (MIT Tech Review, Ars Technica).
+          // content has raw HTML (The Verge: 1276 chars vs contentSnippet: 684).
+          // contentSnippet is rss-parser's auto-stripped/truncated text.
+          // summary is an Atom fallback used by some feeds.
           const rawContent =
-            (item as Record<string, unknown>).contentEncoded as string | undefined ??
+            ((item as Record<string, unknown>).contentEncoded as string | undefined) ??
+            item.content ??
             item.contentSnippet ??
-            item.content;
+            ((item as Record<string, unknown>).summary as string | undefined);
 
           // Capture RSS <category> tags (already parsed by rss-parser)
-          const categories = Array.isArray(item.categories) && item.categories.length > 0
-            ? item.categories.map((c: string) => c.trim()).filter(Boolean).slice(0, 20)
-            : null;
+          const categories =
+            Array.isArray(item.categories) && item.categories.length > 0
+              ? item.categories
+                  .map((c: string) => c.trim())
+                  .filter(Boolean)
+                  .slice(0, 20)
+              : null;
 
           // Capture author/creator (rss-parser exposes as creator or author)
-          const author = (item.creator ?? (item as Record<string, unknown>).author) as string | undefined;
+          const author = (item.creator ?? (item as Record<string, unknown>).author) as
+            | string
+            | undefined;
 
           return {
             sourceId,

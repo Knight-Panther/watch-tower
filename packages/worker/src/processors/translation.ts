@@ -114,8 +114,20 @@ export const createTranslationWorker = ({
       // 1. Read config
       const config = await getTranslationConfig(db);
 
-      // Only run if Georgian mode is active
-      if (config.postingLanguage !== "ka") {
+      // Check if there are manually queued articles (bypass language + score gates)
+      const manualQueuedResult = await db.execute(sql`
+        SELECT count(*)::int as count FROM articles
+        WHERE translation_status = 'queued'
+          AND llm_summary IS NOT NULL
+          AND title_ka IS NULL
+          AND scored_at IS NOT NULL
+          AND translation_attempts < ${MAX_TRANSLATION_ATTEMPTS}
+      `);
+      const hasManualQueued =
+        ((manualQueuedResult.rows[0] as Record<string, unknown>).count as number) > 0;
+
+      // Only run if Georgian mode is active OR there are manually queued articles
+      if (config.postingLanguage !== "ka" && !hasManualQueued) {
         return { skipped: true, reason: "english_mode" };
       }
 
@@ -130,7 +142,7 @@ export const createTranslationWorker = ({
       // Queries by importance_score + translation_status (NOT pipeline_stage)
       // This catches both 'scored' (3-4) and 'approved' (5) articles
       // Empty scores = translation disabled (don't fall back to all scores)
-      if (config.scores.length === 0) {
+      if (config.scores.length === 0 && !hasManualQueued) {
         return { skipped: true, reason: "no_scores_configured" };
       }
       const scoreList = config.scores;
@@ -324,8 +336,11 @@ export const createTranslationWorker = ({
               !!imageGenerationQueue;
             const imageMinScore = (imgConfigMap.get("image_generation_min_score") as number) ?? 4;
 
-            const autoPostEnabled = ["auto_post_telegram", "auto_post_facebook", "auto_post_linkedin"]
-              .some((k) => imgConfigMap.get(k) === true || imgConfigMap.get(k) === "true");
+            const autoPostEnabled = [
+              "auto_post_telegram",
+              "auto_post_facebook",
+              "auto_post_linkedin",
+            ].some((k) => imgConfigMap.get(k) === true || imgConfigMap.get(k) === "true");
 
             if (imageEnabled && article.importanceScore >= imageMinScore) {
               // Route through image generation → it will chain to distribution

@@ -79,6 +79,13 @@ export default function Scheduled() {
   const [error, setError] = useState<string | null>(null);
   const [postingLanguage, setPostingLanguage] = useState<"en" | "ka">("en");
 
+  // Tick every 60s to update retry countdowns
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
   // Filter state with localStorage persistence (no URL sync to avoid tab conflicts)
   const [filters, setFilter] = useLocalStorageFilters<ScheduledFilters>("scheduled-filters", {
     page: 1,
@@ -208,6 +215,19 @@ export default function Scheduled() {
     if (!dateStr) return "";
     const d = new Date(dateStr);
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  };
+
+  const formatRetryCountdown = (scheduledAt: string | null): string | null => {
+    if (!scheduledAt) return null;
+    const remainingMs = Date.parse(scheduledAt) - Date.now();
+    if (remainingMs <= 0) return "retrying now\u2026";
+    const mins = Math.ceil(remainingMs / 60_000);
+    if (mins >= 60) {
+      const hrs = Math.floor(mins / 60);
+      const m = mins % 60;
+      return `retrying in ${hrs}h ${m}m`;
+    }
+    return `retrying in ${mins}m`;
   };
 
   const getStatusBadgeClass = (status: string) => {
@@ -517,14 +537,21 @@ export default function Scheduled() {
                             >
                               {delivery.status}
                             </span>
-                            {delivery.error_message && (
-                              <p
-                                className="text-xs text-red-400 mt-0.5 truncate max-w-[150px]"
-                                title={delivery.error_message}
-                              >
-                                {delivery.error_message}
-                              </p>
-                            )}
+                            {delivery.error_message &&
+                              (() => {
+                                const countdown =
+                                  delivery.status === "scheduled" && delivery.scheduled_at
+                                    ? formatRetryCountdown(delivery.scheduled_at)
+                                    : null;
+                                return (
+                                  <p
+                                    className="text-xs text-red-400 mt-0.5 truncate max-w-[150px]"
+                                    title={countdown ?? delivery.error_message}
+                                  >
+                                    {countdown ?? delivery.error_message}
+                                  </p>
+                                );
+                              })()}
                           </td>
                           <td className="px-4 py-2.5">
                             {delivery.status === "scheduled" && (

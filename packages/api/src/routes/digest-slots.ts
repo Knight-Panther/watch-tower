@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, or, desc, sql, isNull } from "drizzle-orm";
 import { digestSlots, digestRuns, digestDrafts } from "@watch-tower/db";
 import { logger, JOB_DAILY_DIGEST, DIGEST_SLOT_DEFAULTS } from "@watch-tower/shared";
 import type { ApiDeps } from "../server.js";
@@ -276,7 +276,9 @@ export const registerDigestSlotsRoutes = (app: FastifyInstance, deps: ApiDeps) =
         !Array.isArray(sectorIds) ||
         sectorIds.some((s) => typeof s !== "string" || !UUID_RE.test(s))
       ) {
-        return reply.code(400).send({ error: "sector_ids must be an array of UUID strings or null" });
+        return reply
+          .code(400)
+          .send({ error: "sector_ids must be an array of UUID strings or null" });
       }
     }
 
@@ -465,7 +467,11 @@ export const registerDigestSlotsRoutes = (app: FastifyInstance, deps: ApiDeps) =
     }
 
     if (body.max_articles !== undefined) {
-      if (!Number.isInteger(body.max_articles) || body.max_articles < 1 || body.max_articles > 100) {
+      if (
+        !Number.isInteger(body.max_articles) ||
+        body.max_articles < 1 ||
+        body.max_articles > 100
+      ) {
         return reply.code(400).send({ error: "max_articles must be 1-100" });
       }
       updates.maxArticles = body.max_articles;
@@ -635,10 +641,7 @@ export const registerDigestSlotsRoutes = (app: FastifyInstance, deps: ApiDeps) =
     { preHandler: deps.requireApiKey },
     async (request, reply) => {
       const { id } = request.params;
-      const [deleted] = await deps.db
-        .delete(digestSlots)
-        .where(eq(digestSlots.id, id))
-        .returning();
+      const [deleted] = await deps.db.delete(digestSlots).where(eq(digestSlots.id, id)).returning();
 
       if (!deleted) return reply.code(404).send({ error: "Digest slot not found" });
 
@@ -722,7 +725,10 @@ export const registerDigestSlotsRoutes = (app: FastifyInstance, deps: ApiDeps) =
         .where(eq(digestRuns.slotId, id))
         .returning({ id: digestRuns.id });
 
-      logger.info({ slotId: id, slotName: slot.name, count: deleted.length }, "[digest-slots] history cleared");
+      logger.info(
+        { slotId: id, slotName: slot.name, count: deleted.length },
+        "[digest-slots] history cleared",
+      );
 
       return { cleared: deleted.length };
     },
@@ -743,7 +749,12 @@ export const registerDigestSlotsRoutes = (app: FastifyInstance, deps: ApiDeps) =
       })
       .from(digestDrafts)
       .innerJoin(digestSlots, eq(digestDrafts.slotId, digestSlots.id))
-      .where(eq(digestDrafts.status, "draft"))
+      .where(
+        or(
+          eq(digestDrafts.status, "draft"),
+          and(eq(digestDrafts.status, "approved"), isNull(digestDrafts.sentAt)),
+        ),
+      )
       .orderBy(desc(digestDrafts.generatedAt));
 
     return drafts.map((r) => ({
@@ -867,7 +878,9 @@ export const registerDigestSlotsRoutes = (app: FastifyInstance, deps: ApiDeps) =
       if (!draft) return reply.code(404).send({ error: "Draft not found" });
 
       if (draft.status !== "draft") {
-        return reply.code(400).send({ error: `Cannot approve draft with status '${draft.status}'` });
+        return reply
+          .code(400)
+          .send({ error: `Cannot approve draft with status '${draft.status}'` });
       }
       if (draft.expiresAt < new Date()) {
         return reply.code(400).send({ error: "Draft has expired" });
@@ -926,23 +939,29 @@ export const registerDigestSlotsRoutes = (app: FastifyInstance, deps: ApiDeps) =
 
       if (!draft) return reply.code(404).send({ error: "Draft not found" });
 
-      if (draft.status !== "draft") {
-        return reply.code(400).send({ error: `Cannot schedule draft with status '${draft.status}'` });
+      if (draft.status !== "draft" && draft.status !== "approved") {
+        return reply
+          .code(400)
+          .send({ error: `Cannot schedule draft with status '${draft.status}'` });
       }
       if (draft.expiresAt < new Date()) {
         return reply.code(400).send({ error: "Draft has expired" });
       }
 
+      const isReschedule = draft.status === "approved";
       await deps.db
         .update(digestDrafts)
         .set({
           status: "approved",
-          approvedAt: new Date(),
+          ...(!isReschedule && { approvedAt: new Date() }),
           scheduledAt,
         })
         .where(eq(digestDrafts.id, draftId));
 
-      logger.info({ draftId, slotId: id, scheduledAt: scheduledAt.toISOString() }, "[digest-slots] draft scheduled");
+      logger.info(
+        { draftId, slotId: id, scheduledAt: scheduledAt.toISOString(), isReschedule },
+        "[digest-slots] draft scheduled",
+      );
       return { scheduled: true, draft_id: draftId, scheduled_at: scheduledAt.toISOString() };
     },
   );

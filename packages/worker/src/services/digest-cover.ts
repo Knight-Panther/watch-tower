@@ -1,6 +1,6 @@
 /**
  * Dynamic digest cover image generator.
- * Produces a branded 1080x1350 (4:5 portrait) cover for Facebook/LinkedIn/Telegram.
+ * Produces a branded 1080x1080 (1:1 square) cover for Facebook/LinkedIn/Telegram.
  * Two variants: English ("Daily Intelligence Briefing") and Georgian ("რა მოხდა დღეს").
  */
 import { createCanvas, GlobalFonts, loadImage } from "@napi-rs/canvas";
@@ -35,7 +35,9 @@ let logoCache: Buffer | null = null;
 async function getLogoBuffer(): Promise<Buffer | null> {
   if (logoCache) return logoCache;
   try {
-    logoCache = await sharp(path.join(ASSETS_DIR, "watermark", "xtelo-logo.png")).png().toBuffer();
+    logoCache = await sharp(path.join(ASSETS_DIR, "watermark", "xtelo-logo.png"))
+      .png()
+      .toBuffer();
     return logoCache;
   } catch {
     return null;
@@ -44,8 +46,7 @@ async function getLogoBuffer(): Promise<Buffer | null> {
 
 // ─── Canvas Config ──────────────────────────────────────────────────────────
 
-const WIDTH = 1080;
-const HEIGHT = 1350; // 4:5 portrait — optimal for Facebook/Instagram feed
+const SIZE = 1080; // 1:1 square — universal format for photo posts
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
@@ -56,131 +57,117 @@ const HEIGHT = 1350; // 4:5 portrait — optimal for Facebook/Instagram feed
  * @param dateStr - formatted date string (e.g. "23.02.2026")
  * @returns WebP buffer
  */
-export async function generateDigestCover(
-  language: "en" | "ka",
-  dateStr: string,
-): Promise<Buffer> {
+export async function generateDigestCover(language: "en" | "ka", dateStr: string): Promise<Buffer> {
   ensureFonts();
 
-  const canvas = createCanvas(WIDTH, HEIGHT);
+  const canvas = createCanvas(SIZE, SIZE);
   const ctx = canvas.getContext("2d");
 
   // 1. Dark gradient background
-  const gradient = ctx.createLinearGradient(0, 0, 0, HEIGHT);
+  const gradient = ctx.createLinearGradient(0, 0, SIZE, SIZE);
   gradient.addColorStop(0, "#020617");
-  gradient.addColorStop(0.4, "#0f172a");
+  gradient.addColorStop(0.5, "#0f172a");
   gradient.addColorStop(1, "#1e293b");
   ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  ctx.fillRect(0, 0, SIZE, SIZE);
 
   // 2. Subtle dot grid for texture
   ctx.fillStyle = "rgba(100, 116, 139, 0.05)";
-  for (let x = 0; x < WIDTH; x += 36) {
-    for (let y = 0; y < HEIGHT; y += 36) {
+  for (let x = 0; x < SIZE; x += 36) {
+    for (let y = 0; y < SIZE; y += 36) {
       ctx.beginPath();
       ctx.arc(x, y, 1.2, 0, Math.PI * 2);
       ctx.fill();
     }
   }
 
-  // 3. XTelo logo (centered top)
+  const centerX = SIZE / 2;
+
+  // 3. XTelo logo (centered, top area)
   let logoBottomY = 200;
   const logoBuf = await getLogoBuffer();
   if (logoBuf) {
     try {
       const logoImage = await loadImage(logoBuf);
-      const logoWidth = 260;
+      const logoWidth = 200;
       const logoHeight = logoWidth * (logoImage.height / logoImage.width);
-      const logoX = (WIDTH - logoWidth) / 2;
       const logoY = 120;
-      logoBottomY = logoY + logoHeight + 60;
+      logoBottomY = logoY + logoHeight + 30;
 
       ctx.globalAlpha = 0.95;
-      ctx.drawImage(logoImage, logoX, logoY, logoWidth, logoHeight);
+      ctx.drawImage(logoImage, centerX - logoWidth / 2, logoY, logoWidth, logoHeight);
       ctx.globalAlpha = 1.0;
     } catch {
       // skip logo on error
     }
   }
 
-  // 4. Emerald divider
+  // 4. Emerald divider (centered)
   const dividerY = logoBottomY + 10;
-  const dividerWidth = 120;
   ctx.fillStyle = "#34d399";
-  roundRect(ctx, (WIDTH - dividerWidth) / 2, dividerY, dividerWidth, 4, 2);
+  roundRect(ctx, centerX - 40, dividerY, 80, 3, 2);
   ctx.fill();
 
-  // 5. Main title (language-dependent)
-  const titleY = dividerY + 60;
+  // 5. Main title (language-dependent, centered)
+  const titleY = dividerY + 40;
   ctx.fillStyle = "#f1f5f9";
   ctx.textBaseline = "top";
   ctx.textAlign = "center";
 
   if (language === "ka") {
-    ctx.font = 'bold 58px "Noto Sans Georgian", sans-serif';
-    ctx.fillText("რა მოხდა დღეს", WIDTH / 2, titleY);
+    ctx.font = 'bold 52px "Noto Sans Georgian", sans-serif';
+    ctx.fillText("რა მოხდა დღეს", centerX, titleY);
   } else {
-    ctx.font = 'bold 58px "Noto Sans Georgian", sans-serif';
-    ctx.fillText("Daily Intelligence", WIDTH / 2, titleY);
-    ctx.fillText("Briefing", WIDTH / 2, titleY + 75);
+    ctx.font = 'bold 52px "Noto Sans Georgian", sans-serif';
+    ctx.fillText("Daily Intelligence", centerX, titleY);
+    ctx.fillText("Briefing", centerX, titleY + 65);
   }
 
-  // 6. Subtitle
-  const subtitleY = language === "ka" ? titleY + 85 : titleY + 185;
+  // 6. Subtitle (centered)
+  const subtitleY = language === "ka" ? titleY + 80 : titleY + 155;
   ctx.fillStyle = "#94a3b8";
-  ctx.font = '30px "Noto Sans Georgian", sans-serif';
-  ctx.fillText("Media Watch Tower", WIDTH / 2, subtitleY);
+  ctx.font = '26px "Noto Sans Georgian", sans-serif';
+  ctx.fillText("Media Watch Tower", centerX, subtitleY);
 
-  // 7. Bar chart
-  const chartY = subtitleY + 100;
-  const barHeights = [80, 120, 55, 100, 70, 130, 90];
-  const barWidth = 22;
+  // 7. Bar chart (centered, below subtitle)
+  const barHeights = [60, 95, 40, 80, 55, 100, 70];
+  const barWidth = 24;
   const barGap = 14;
   const totalChartWidth = barHeights.length * (barWidth + barGap) - barGap;
-  const chartStartX = (WIDTH - totalChartWidth) / 2;
-  const maxBarH = 130;
+  const chartStartX = centerX - totalChartWidth / 2;
+  const maxBarH = 100;
+  const chartBaseY = subtitleY + 80 + maxBarH;
 
   for (let i = 0; i < barHeights.length; i++) {
     const h = barHeights[i];
     const x = chartStartX + i * (barWidth + barGap);
-    const y = chartY + maxBarH - h;
+    const y = chartBaseY - h;
     const intensity = h / maxBarH;
     ctx.globalAlpha = 0.3 + intensity * 0.5;
     ctx.fillStyle = "#34d399";
-    roundRect(ctx, x, y, barWidth, h, 5);
+    roundRect(ctx, x, y, barWidth, h, 4);
     ctx.fill();
   }
   ctx.globalAlpha = 1.0;
 
-  // 8. Date below chart
-  const dateY = chartY + maxBarH + 40;
-  ctx.fillStyle = "#94a3b8";
-  ctx.font = '26px "Noto Sans Georgian", sans-serif';
+  // 8. Date (centered, below chart)
+  ctx.fillStyle = "#64748b";
+  ctx.font = '24px "Noto Sans Georgian", sans-serif';
   ctx.textAlign = "center";
-  ctx.fillText(dateStr, WIDTH / 2, dateY);
+  ctx.fillText(dateStr, centerX, chartBaseY + 40);
 
-  // 9. Horizontal line
-  const lineY = dateY + 50;
-  ctx.strokeStyle = "rgba(100, 116, 139, 0.15)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(100, lineY);
-  ctx.lineTo(WIDTH - 100, lineY);
-  ctx.stroke();
-
-  // 10. Bottom tagline
+  // 9. Bottom tagline (centered)
   ctx.fillStyle = "#475569";
-  ctx.font = '22px "Noto Sans Georgian", sans-serif';
-  ctx.textAlign = "center";
-  ctx.fillText("Verified by XTelo", WIDTH / 2, HEIGHT - 100);
+  ctx.font = '18px "Noto Sans Georgian", sans-serif';
+  ctx.fillText("Verified by XTelo", centerX, SIZE - 40);
 
-  // 11. Border
+  // 10. Border
   ctx.strokeStyle = "rgba(100, 116, 139, 0.15)";
   ctx.lineWidth = 2;
-  roundRect(ctx, 1, 1, WIDTH - 2, HEIGHT - 2, 16);
+  roundRect(ctx, 1, 1, SIZE - 2, SIZE - 2, 12);
   ctx.stroke();
 
-  // 12. Export
+  // 11. Export
   const pngBuffer = canvas.toBuffer("image/png");
   return sharp(pngBuffer).webp({ quality: 90 }).toBuffer() as Promise<Buffer>;
 }

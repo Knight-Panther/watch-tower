@@ -1034,6 +1034,18 @@ function DraftPreviewModal({
             </div>
           </div>
         )}
+        {draft.status === "approved" && !draft.sent_at && (
+          <div className="flex items-center justify-between border-t border-slate-800 p-6">
+            <span className="text-sm text-emerald-400">
+              {draft.scheduled_at
+                ? `Posting at ${new Date(draft.scheduled_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                : "Approved"}
+            </span>
+            <Button variant="secondary" size="sm" onClick={onSchedule}>
+              Reschedule
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1585,7 +1597,7 @@ export default function DigestSettings() {
       {drafts.length > 0 && (
         <section className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-5">
           <h2 className="text-sm font-semibold text-amber-300">
-            Drafts Awaiting Review ({drafts.length})
+            Pending Digests ({drafts.length})
           </h2>
           <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {drafts.map((d) => {
@@ -1620,13 +1632,30 @@ export default function DigestSettings() {
                       {expiry.text}
                     </span>
                   </div>
-                  <div className="mt-3 flex gap-2">
+                  <div className="mt-3 flex items-center gap-2">
                     <Button size="xs" variant="secondary" onClick={() => setPreviewDraft(d)}>
                       Preview
                     </Button>
-                    <Button size="xs" variant="primary" onClick={() => handleApproveDraft(d)}>
-                      Post Now
-                    </Button>
+                    {d.status === "draft" ? (
+                      <Button size="xs" variant="primary" onClick={() => handleApproveDraft(d)}>
+                        Post Now
+                      </Button>
+                    ) : d.status === "approved" && d.scheduled_at ? (
+                      <>
+                        <span className="text-xs text-emerald-400">
+                          Posting{" "}
+                          {new Date(d.scheduled_at).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                        <Button size="xs" variant="secondary" onClick={() => setSchedulingDraft(d)}>
+                          Reschedule
+                        </Button>
+                      </>
+                    ) : d.status === "approved" ? (
+                      <span className="text-xs text-emerald-400">Approved</span>
+                    ) : null}
                   </div>
                 </div>
               );
