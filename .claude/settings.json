@@ -10,7 +10,14 @@
       "Bash(curl -s -H \"x-api-key: a8d3c6f0b0f86ee745f2df9cd7d6835f90df75a77797071f3574c01e23c35d0a\" \"http://localhost:3001/articles?limit=200&sort_by=importance_score&sort_dir=asc\" -o C:/Users/VM-Dev/Desktop/watch-tower/tmp-watch4.json)",
       "Bash(ls C:/Users/VM-Dev/Desktop/watch-tower/tmp-*.json)",
       "Bash(npx tsx -e \":*)",
-      "Bash(node -e \":*)"
+      "Bash(node -e \":*)",
+      "Bash(ls -1 packages/frontend/src/pages/*.tsx)",
+      "Bash(xargs -I {} basename {} .tsx)",
+      "Bash(grep -E '\"\"\\(knip|depcheck|ts-prune|unused|ts-unused-exports\\)\"\"' /c/Users/VM-Dev/Desktop/watch-tower/package.json /c/Users/VM-Dev/Desktop/watch-tower/packages/*/package.json)",
+      "Bash(ls -la /c/Users/VM-Dev/Desktop/watch-tower/.eslintrc* /c/Users/VM-Dev/Desktop/watch-tower/.prettierrc*)",
+      "Bash(wc -l /c/Users/VM-Dev/Desktop/watch-tower/packages/*/src/*.ts /c/Users/VM-Dev/Desktop/watch-tower/packages/*/src/**/*.ts)",
+      "Bash(xargs grep -l \"console\\\\.log\")",
+      "Bash(xargs grep \"console\\\\.log\")"
     ],
     "additionalDirectories": [
       "C:\\Users\\VM-Dev\\Desktop\\watch-tower"

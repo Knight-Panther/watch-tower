@@ -51,11 +51,11 @@ packages/
 
 **Dependency graph:**
 ```
-frontend → api (HTTP)
+frontend → shared (build), api (HTTP runtime)
 api → db, shared
 worker → db, shared, llm, embeddings, translation, social
 llm → shared
-embeddings → db
+embeddings → db, shared
 translation → shared
 social → shared
 ```
@@ -86,7 +86,8 @@ npm run lint               # ESLint
 npm run format             # Prettier
 
 # Pipeline Operations
-npm run pipeline:reset     # Flush Redis + truncate articles/deliveries/telemetry + reset fetch timestamps
+# Pipeline reset is via API: POST /reset (or Settings page in UI)
+# Flushes Redis + truncates articles/deliveries/telemetry + resets fetch timestamps
 
 # Production Deployment
 docker compose -f docker-compose.prod.yml up -d --build    # Start production stack
@@ -105,7 +106,7 @@ Core tables (PostgreSQL + pgvector):
 | `sectors` | Feed categories (Biotech, Crypto, Stocks, etc.) |
 | `rss_sources` | Feed URLs + ingest config |
 | `articles` | Core entity: title, snippet, categories, embedding, score, reasoning, pipeline_stage, translation fields |
-| `scoring_rules` | Per-sector LLM prompt templates + thresholds + reject keywords |
+| `scoring_rules` | Per-sector LLM prompt templates + thresholds (0=OFF) + scoreCriteria JSONB (priorities, ignore, rejectKeywords, score defs, examples, summary settings) |
 | `social_accounts` | Connected platform credentials + post templates + rate limits |
 | `post_deliveries` | Scheduled/immediate posting per article per platform |
 | `feed_fetch_runs` | Fetch attempt telemetry |
@@ -114,8 +115,11 @@ Core tables (PostgreSQL + pgvector):
 | `app_config` | Key-value settings (auto_post toggles, emergency_stop, digest_*, translation_*) |
 | `platform_health` | Social platform health status, token expiry tracking |
 | `allowed_domains` | RSS source domain whitelist (security) |
-| `alert_rules` | Keyword alert rules (keywords[], min_score, telegram_chat_id, active) |
+| `alert_rules` | Keyword alert rules (keywords[], min_score, telegram_chat_id, active, sector_id, language, template, mute_until) |
 | `alert_deliveries` | Alert notification audit trail (rule_id, article_id, matched_keyword, status) |
+| `digest_slots` | Multi-schedule digest configuration (name, time, timezone, days, LLM config, per-channel language, cover image toggles) |
+| `digest_drafts` | Generated digest content with lifecycle (draft → approved → sent/expired/discarded), editable text, LLM cost tracking |
+| `digest_runs` | Historical audit trail of sent digests (immutable record, channel results, article count, score distribution) |
 
 ### Articles Table Key Columns
 
@@ -129,6 +133,7 @@ Core tables (PostgreSQL + pgvector):
 | `pipeline_stage` | `text` | Current stage in pipeline |
 | `title_ka` / `llm_summary_ka` | `text` | Georgian translations |
 | `translation_status` | `text` | NULL → translating → translated / failed / exhausted |
+| `digested_at` | `timestamp` | When included in daily digest |
 
 **Pipeline stages** (on `articles.pipeline_stage`):
 `ingested` → `embedded` → `scored` → `approved`/`rejected` → `posted` (or `duplicate`)
@@ -145,7 +150,7 @@ Core tables (PostgreSQL + pgvector):
 | `pipeline-translation` | `translation-batch` | 1 | Translate approved articles to Georgian (Gemini/OpenAI) |
 | `pipeline-image-generation` | `image-generate` | 1 | Generate AI news card images (gpt-image-1-mini + R2) |
 | `pipeline-distribution` | `distribution-immediate` | 1 | Post individual articles to platforms |
-| `maintenance` | schedule/cleanup/post-scheduler/health-check/daily-digest | 1 | Recurring scheduling, TTL cleanup, post dispatch, platform health, digest |
+| `maintenance` | maintenance-schedule/maintenance-cleanup/platform-health-check/daily-digest | 1 | Recurring scheduling (30s), TTL cleanup (24h), platform health (2h), digest |
 
 **Chaining:** Each processor queries DB for unprocessed articles and queues the next stage. Database `pipeline_stage` is the source of truth (not queue state).
 
@@ -176,28 +181,51 @@ Articles matching `reject_keywords` (per-sector, configured in Scoring Rules UI)
 
 Instant Telegram notifications when scored articles match keyword rules. Bypasses the entire distribution pipeline.
 
-- **Tables**: `alert_rules` (keywords[], min_score, telegram_chat_id, active) + `alert_deliveries` (audit trail)
+- **Tables**: `alert_rules` (keywords[], min_score, telegram_chat_id, active, sector_id, language, template, mute_until) + `alert_deliveries` (audit trail)
 - **Hook point**: After LLM scoring in `llm-brain.ts` → calls `checkAndFireAlerts()` from `alert-processor.ts`
-- **Matching**: Shared `matchesKeyword()` function (word-boundary regex, same as pre-filter)
-- **Cooldown**: Redis key `alert:cooldown:{ruleId}:{keyword}` with 5-min TTL — prevents alert storms
-- **Telegram**: Direct Bot API call via `telegram-alert.ts` (not SocialProvider). Per-rule chat_id supported
-- **UI**: Standalone `/alerts` page with CRUD, tag-style keyword input, expandable delivery history
+- **LLM semantic matching**: Keywords injected into LLM scoring prompt, LLM returns `matched_alert_keywords[]`. No regex matching for alerts.
+- **Cooldown**: Redis key `alert:cooldown:{ruleId}:{articleId}` with 5-min TTL
+- **Quiet hours**: `alert_quiet_start`/`alert_quiet_end`/`alert_quiet_timezone` in app_config. Overnight wrap supported.
+- **Sector scoping**: Optional `sector_id` on alert_rules. Only injects keywords for matching sector. NULL = global.
+- **Template**: JSONB `AlertTemplateConfig` (showUrl, showSummary, showScore, showSector, alertEmoji). NULL = defaults.
+- **Mute**: `mute_until` timestamp per rule. Selectable durations: 1h/4h/12h/24h/48h.
+- **Per-rule language**: `language` column (`en`/`ka`). Georgian alerts translated via Gemini/OpenAI before sending.
+- **Translation config**: `alert_translation_provider`/`alert_translation_model` in app_config (global, not per-rule).
+- **Telegram**: Direct Bot API call via `telegram-alert.ts` (not SocialProvider). Per-rule chat_id supported.
+- **UI**: Standalone `/alerts` page with CRUD, tag-style keyword input, language toggle, mute controls, expandable delivery history, alert translation settings
 
 ## Daily Digest (P4)
 
-LLM-curated intelligence briefing delivered on schedule. The primary client-facing output.
+LLM-curated intelligence briefing delivered on schedule. The primary client-facing output. Now uses a **multi-slot architecture** with draft approval workflow.
 
+### Architecture
 - **No new queue**: `JOB_DAILY_DIGEST` runs on `QUEUE_MAINTENANCE`. Scheduler checks time/tz/day every 30s.
+- **Multi-slot**: Multiple independent digest schedules via `digest_slots` table (e.g., "Morning Brief" at 08:00, "Evening Wrap" at 18:00)
+- **Draft workflow**: Generated digest → `digest_drafts` (draft → approved → sent/expired/discarded). Auto-post or manual approval per slot.
+- **Audit trail**: Every sent digest recorded in `digest_runs` (immutable, includes channel results + score distribution)
+
+### LLM & Content
 - **LLM call**: Direct SDK instantiation in `digest.ts` (Claude, OpenAI, or DeepSeek). NOT via LLMProvider interface.
-- **Analyst role**: Configurable system prompt persona per client (VC analyst, PR monitor, market intel, etc.)
+- **Per-slot LLM config**: Each slot specifies its own provider, model, translation provider, translation model
+- **Analyst role**: Configurable system prompt persona per slot (VC analyst, PR monitor, market intel, etc.)
 - **Article selection**: `scored_at > last_digest_sent_at` AND `importance_score >= min_score`, sorted by score DESC
+- **Sector filtering**: Optional `sector_ids` per slot to scope articles
 - **Reference system**: LLM outputs `[#1, #3]` refs → Telegram gets `<a href>` links, Facebook/LinkedIn get text-only
-- **Georgian mode**: English LLM generation → Gemini/OpenAI translation to Georgian (post-processing, not dependent on article-level translation)
+
+### Translation & Language
+- **Per-channel language**: Each slot can set `telegram_language`, `facebook_language`, `linkedin_language` independently (`en`/`ka`)
+- **Georgian mode**: English LLM generation → Gemini/OpenAI translation to Georgian (post-processing)
+
+### Delivery
 - **Multi-platform**: Telegram (HTML with links), Facebook (plaintext, refs stripped), LinkedIn (plaintext, refs stripped)
-- **Idempotency**: `last_digest_sent_at` within 1 hour → skip. Prevents double-send on worker restart.
-- **Test digest**: `POST /config/digest/test` — queues with `isTest: true`, skips `last_digest_sent_at` update
-- **Config**: 15+ keys in `app_config` (digest_enabled, digest_time, digest_timezone, digest_days, digest_min_score, digest_language, digest_system_prompt, digest_translation_prompt, digest_provider, digest_model, digest_translation_provider, digest_translation_model, digest_telegram_chat_id, digest_telegram_enabled, digest_facebook_enabled, digest_linkedin_enabled)
-- **UI**: Standalone `/digest` page with schedule, content, system prompt textarea, translation prompt textarea, analyst role presets, platform toggles, test button
+- **Cover images**: Optional per-platform toggle (`image_telegram`, `image_facebook`, `image_linkedin`)
+- **Auto-post vs draft**: `auto_post` boolean per slot. When off, digest creates draft for manual approval.
+- **Idempotency**: `last_digest_sent_at` tracking within `digest_runs`. Prevents double-send on worker restart.
+- **Test digest**: `POST /digest-slots/:id/test` — queues with `isTest: true`, skips `last_digest_sent_at` update
+- **Draft management**: Edit generated/translated text, approve & post immediately, schedule for future, or discard. Drafts expire after 24h.
+
+### UI
+- Standalone `/digest` page with slot management (create/edit/delete), system prompt textarea, translation prompt textarea, analyst role presets, per-channel language toggles, cover image toggles, test button, draft approval queue, run history
 
 ## Source Quality Dashboard (P5)
 
@@ -240,39 +268,40 @@ Operator tool for identifying signal vs noise sources.
 |-------|-----------|-----------|---------|
 | `/` | Home | Home | RSS sources + signal ratio badges |
 | `/monitoring` | Monitoring | Monitoring | Pipeline health + source fetch status |
-| `/article-scheduler` | ArticleScheduler | Article Scheduler | Article list with approval/rejection/scheduling |
-| `/sectors` | SectorManagement | Sectors | Sector CRUD |
+| `/article-scheduler` | ArticleScheduler | Article Scheduler | Tabbed: Articles list + Scheduled posts |
 | `/scoring-rules` | ScoringRules | LLM Brain | Per-sector priorities, ignore, reject keywords, score definitions, examples |
-| `/media-channels` | MediaChannelControl | Media Channels | Social account management + templates |
+| `/media-channels` | MediaChannelControl | Media Channels | Tabbed: Post Formats + Platform Settings |
 | `/image-template` | ImageTemplate | Image Template | AI news card designer |
 | `/site-rules` | SiteRules | Restrictions | Domain whitelist, feed limits, CORS, emergency controls |
-| `/alerts` | Alerts | Alerts | Keyword alert rules CRUD + delivery history |
-| `/digest` | DigestSettings | Daily Digest | Digest schedule, prompts, platform toggles, test button |
+| `/alerts` | Alerts | Alerts | Keyword alert rules CRUD + delivery history + translation config |
+| `/digest` | DigestSettings | Digests | Multi-slot digest management, drafts, approval workflow, test button |
+| `/analytics` | Analytics | Analytics | Score distribution, approval rates, rejection breakdown, source ranking |
 | `/settings` | Settings | DB/Telemetry | Database tools, LLM telemetry |
 
 ## API Routes
 
-17 route modules registered in `server.ts`:
+18 route modules registered in `server.ts`:
 
 | Module | Key Endpoints |
 |--------|--------------|
-| `health` | `GET /health` |
+| `health` | `GET /health`, `GET /health/platforms`, `POST /health/platforms/refresh` |
 | `sectors` | CRUD for sectors |
-| `sources` | CRUD for RSS sources |
-| `config` | `GET/PATCH /config/digest`, `POST /config/digest/test`, app_config KV |
-| `ingest` | Trigger manual ingest |
-| `stats` | `GET /stats/source-quality`, pipeline stats |
-| `events` | SSE stream (`/events`) |
-| `telemetry` | LLM cost/token tracking |
-| `articles` | Article list/detail with filters, approval/rejection |
-| `scheduled` | Scheduled posting management |
-| `scoring-rules` | Per-sector scoring config CRUD |
-| `reset` | Pipeline reset |
-| `social-accounts` | Platform credential management |
-| `credits` | Credit/usage tracking |
-| `site-rules` | Domain whitelist, feed limits, emergency stop |
-| `provider-health` | Platform health checks |
-| `alerts` | Alert rules CRUD + delivery history |
+| `sources` | CRUD for RSS sources + batch deactivate/delete |
+| `config` | TTL management (7 TTL endpoints), auto-post toggles, emergency stop, translation, image gen, similarity threshold, alert quiet hours, alert translation, legacy digest shim |
+| `ingest` | `POST /ingest/run` — trigger manual ingest |
+| `stats` | `GET /stats/overview`, `/sources`, `/source-quality`, `/analytics` (cached 10s) |
+| `events` | SSE stream (`/api/events`) for real-time pipeline updates |
+| `telemetry` | `GET /telemetry/summary`, `/by-provider`, `/by-operation`, `/recent`, `/daily` |
+| `articles` | Article list/detail with filters, approval/rejection, batch approve/reject/translate, schedule |
+| `scheduled` | Scheduled posting management + stats |
+| `scoring-rules` | Per-sector scoring config CRUD + prompt preview |
+| `reset` | Pipeline reset (requires confirmation) |
+| `social-accounts` | Platform credentials, post templates, rate limit management, usage stats |
+| `credits` | LLM provider balance info (cached 5min) + force refresh |
+| `site-rules` | Domain whitelist CRUD + security config display |
+| `provider-health` | `POST /health/providers` — synchronous API provider health check |
+| `alerts` | Alert rules CRUD, test, mute/unmute, sector keywords, weekly stats |
+| `digest-slots` | Multi-slot digest CRUD, test, history, draft management (edit/approve/schedule/discard) |
 
 ## Environment Variables
 
@@ -333,11 +362,20 @@ VITE_API_URL=http://localhost:3001
 VITE_API_KEY=local-dev-key
 
 # Security (see Security Hardening section)
-MAX_FEED_SIZE_MB=5                    # Max RSS feed size in MB
-MAX_ARTICLES_PER_FETCH=100            # Max articles per single fetch
-MAX_ARTICLES_PER_SOURCE_DAILY=500     # Max articles per source per day
+MAX_FEED_SIZE_MB=5                    # Max RSS feed size in MB (1-50)
+MAX_ARTICLES_PER_FETCH=100            # Max articles per single fetch (10-500)
+MAX_ARTICLES_PER_SOURCE_DAILY=500     # Max articles per source per day (50-5000)
 ALLOWED_ORIGINS=http://localhost:5173 # Comma-separated allowed CORS origins
-API_RATE_LIMIT_PER_MINUTE=200         # Global API rate limit
+API_RATE_LIMIT_PER_MINUTE=200         # Global API rate limit (10-1000)
+
+# Production Only (Docker Compose)
+# POSTGRES_USER=watchtower            # PostgreSQL user (docker-compose.prod.yml)
+# POSTGRES_PASSWORD=...               # PostgreSQL password
+# POSTGRES_DB=watchtower              # Default database name
+# DOMAIN=yourdomain.com               # Production domain
+# BASIC_AUTH_USER=admin               # Nginx dashboard login
+# BASIC_AUTH_PASS=...                 # Nginx dashboard password
+# CERTBOT_EMAIL=you@email.com         # Let's Encrypt certificate notifications
 ```
 
 ## Logging
@@ -364,10 +402,10 @@ Articles store `title + content_snippet` (enriched up to 1500 chars from `conten
 
 ## Approval & Posting Workflow
 
-**Scoring outcomes:**
-- Score >= 4 → auto-approve + immediate post (per-platform toggles: `auto_post_telegram`, `auto_post_facebook`, `auto_post_linkedin`)
-- Score 1-2 → auto-reject (with `rejection_reason: "llm-score: N"`)
-- Score 3 → manual review in dashboard (reasoning visible on hover)
+**Scoring outcomes (thresholds: global via app_config + per-sector override via scoring_rules, 0=OFF):**
+- Score >= auto_approve_threshold (default 5) → auto-approve + immediate post (per-platform toggles: `auto_post_telegram`, `auto_post_facebook`, `auto_post_linkedin`)
+- Score <= auto_reject_threshold (default 2) → auto-reject (with `rejection_reason: "llm-score: N"`)
+- Scores in between → manual review in dashboard (reasoning visible on hover)
 
 **Pre-filter rejection:**
 - Articles matching `reject_keywords` → auto-reject before LLM (with `rejection_reason: "pre-filter: keyword 'X' matched in title/categories/content"`)
@@ -401,14 +439,14 @@ Articles store `title + content_snippet` (enriched up to 1500 chars from `conten
 
 ## Translation (Georgian)
 
-Articles scoring >= 4 are automatically translated to Georgian (`ka`) after approval.
+Approved articles matching `translation_scores` (default [3, 4, 5], configurable in app_config) are automatically translated to Georgian (`ka`).
 
 - **Providers**: Gemini (Google AI) primary, OpenAI fallback
 - **Fields**: `title_ka`, `llm_summary_ka` on articles table
 - **Status tracking**: `translation_status` column (`NULL` → `translating` → `translated` | `failed` | `exhausted`)
 - **Retry**: up to 3 attempts (`translation_attempts`), then marked `exhausted`
 - **Backfill guard**: `translation_enabled_since` in app_config prevents re-translating old articles
-- **Config**: `translation_provider`, `translation_model`, `posting_language` in app_config
+- **Config**: `translation_provider`, `translation_model`, `translation_scores`, `translation_instructions`, `posting_language` in app_config
 - **Queue**: `pipeline-translation`, polls every 15s for untranslated approved articles
 - **Language control**: `posting_language` in app_config (`ka` = post Georgian text, `en` = post English)
 
@@ -466,7 +504,7 @@ All deployment files are ready in the repo:
 | `docker-compose.prod.yml` | Full production stack: postgres, redis, api, worker, frontend, nginx |
 | `.env.production.template` | All env vars documented with CHANGEME placeholders |
 | `packages/api/Dockerfile` | 3-stage build (deps → build → runtime), includes shared + db |
-| `packages/worker/Dockerfile` | 3-stage build + native deps (canvas, sharp), includes all 6 workspace packages |
+| `packages/worker/Dockerfile` | 3-stage build + native deps (canvas, sharp), includes all 7 workspace packages |
 | `packages/frontend/Dockerfile` | 2-stage (Vite build → nginx static), accepts VITE_* build args |
 | `deploy/nginx/nginx.conf` | Reverse proxy, basic auth, SSE support (no buffering), rate limiting, SSL-ready |
 | `deploy/setup-client.sh` | Provision new client: clone, generate secrets, setup auth, build, migrate, seed, start |
@@ -547,26 +585,54 @@ docker compose -f docker-compose.prod.yml ps
 
 ## What's Left Before First Client
 
-### Code-Complete (nothing left to build):
+### Code-Complete (all priorities implemented):
 - [x] P1: Score reasoning in dashboard
 - [x] P2: RSS enrichment + pre-filter + prompt enrichment
-- [x] P3: Keyword alerts via Telegram
-- [x] P4: Daily digest with analyst role + multi-platform
+- [x] P3: Keyword alerts via Telegram (+ sector scoping, muting, per-rule language, LLM semantic matching)
+- [x] P4: Daily digest — multi-slot architecture with draft approval workflow
 - [x] P5: Source quality dashboard
+- [x] P6: Global dedup threshold in DB (UI slider via Site Rules page)
+- [x] P7: Analytics dashboard (score distribution, approval rates, rejection breakdown, source ranking, sector performance)
 - [x] Deployment scripts + Docker production stack
 
 ### Deployment-Day Tasks (no code changes needed):
 - [ ] **Get a VPS** — Hetzner ~$10/mo, run `setup-client.sh`
 - [ ] **Point domain + SSL** — DNS A record → VPS IP, run certbot, update nginx config
+- [ ] **Health check monitoring** — uptime robot or similar hitting `/api/health`
 - [ ] **Add RSS sources** — via dashboard, seed allowed_domains first
-- [ ] **Configure scoring rules** — per-sector priorities, ignore lists, reject keywords
-- [ ] **Set up digest** — via `/digest` page (time, timezone, analyst role, platforms)
-- [ ] **Let pipeline run overnight** — builds demo data (scored articles, signal ratios)
+- [ ] **Configure scoring rules** — per-sector priorities, ignore lists, reject keywords, score definitions
+- [ ] **Set up digest slots** — via `/digest` page (schedule, analyst role, platforms, per-channel language)
+- [ ] **Let pipeline run overnight** — builds demo data (scored articles, signal ratios, analytics)
+- [ ] **Demo instance** — running with a compelling sector (e.g., "AI & Tech" or "Fintech")
 - [ ] **Landing page** — standalone marketing site explaining the product (not part of this codebase)
 
+### Scoring Calibration Notes (operational, not code):
+- **"First in wins" dedup**: If multiple sources report the same story, the first article to arrive gets scored regardless of source quality. Mitigate by giving high-quality sources shorter `ingest_interval_minutes`.
+- **Score 5 default too extreme**: Built-in score-5 definition is very high bar ("market-moving, catastrophic"). Customize per-sector via Scoring Rules UI (`score_criteria` JSONB). No code change needed.
+- **Threshold tuning**: Start with `similarity_threshold = 0.85` (production). Too aggressive (0.65) may dedup related-but-different articles.
+
+### Technical Debt (acceptable for managed instances):
+- No proper auth system (nginx basic auth) — fine for managed, blocks SaaS
+- No onboarding flow — operator does setup manually per client
+- No per-client cost tracking — LLM telemetry exists but not grouped by instance
+
 ### Phase 3 — After First Paying Client:
-- [ ] P6: Global dedup threshold in DB (UI slider, currently env-only)
-- [ ] P7: Feedback loop analytics (approval patterns, scoring accuracy)
+- [ ] Multi-tenant SaaS (only if 5+ managed clients prove demand — requires auth, tenant_id, RBAC, billing)
+- [ ] Email digest delivery (SendGrid/Resend — currently Telegram/Facebook/LinkedIn only)
+
+### Source Type Expansion (zero code changes):
+RSS is the core, but these already work as RSS sources:
+- Reddit subreddits: `reddit.com/r/subreddit/.rss`
+- Hacker News: RSS/Algolia API feeds
+- Substack newsletters: native RSS support
+- Twitter/X: NOT supported (API too expensive, $100+/mo)
+
+### Business Context:
+- **Model**: Managed instances — separate VPS per client ($10-20/mo Hetzner)
+- **Pricing**: $500-1000 setup + $300-500/mo (infrastructure cost ~$25-45/client)
+- **Ceiling**: ~5 clients before ops overhead becomes painful
+- **Pitch**: "Monitor 500+ sources, surface what matters, scored by AI, delivered to your Telegram every morning."
+- **Buyers**: PR agencies, investment firms, corporate strategy teams, niche content agencies
 
 ## Key Architecture Decisions
 
@@ -578,7 +644,7 @@ docker compose -f docker-compose.prod.yml ps
 6. **Self-healing job registry** — repeatable BullMQ jobs auto-recover every 30s if Redis is wiped
 7. **Startup provider health checks** — validates all API keys (LLM, embedding, translation, social) at worker boot
 8. **Delivery-controlled posting** — `post_deliveries` table decouples approval from posting; article stays `approved`, delivery row tracks per-platform scheduling
-9. **Digest on maintenance queue** — no separate queue; scheduler checks time/tz/day every 30s and queues digest job when due
+9. **Digest on maintenance queue** — no separate queue; scheduler checks `digest_slots` time/tz/day every 30s and queues digest job when due. Multi-slot with draft approval workflow.
 10. **Alerts bypass distribution** — keyword alerts go directly to Telegram via Bot API, no rate limiting or scheduling (only 5-min cooldown)
 
 ## Completed Features
@@ -604,10 +670,29 @@ All core pipeline and intelligence features:
 17. RSS Enrichment (P2-A) — content:encoded (1500 chars), categories extraction
 18. Pre-Filter Hard Reject (P2-B) — keyword matching before LLM, rejection audit trail
 19. Prompt Enrichment (P2-C) — categories in LLM scoring prompt
-20. Keyword Alerts (P3) — instant Telegram notifications with Redis cooldown
-21. Daily Digest (P4) — LLM-curated briefing, configurable prompts, multi-platform, Georgian translation
+20. Keyword Alerts (P3) — instant Telegram notifications with LLM semantic matching, sector scoping, muting, per-rule language (en/ka)
+21. Daily Digest (P4) — multi-slot architecture, draft approval workflow, per-channel language, cover images, LLM-curated briefing
 22. Source Quality Dashboard (P5) — signal ratio, score distribution, color-coded badges
 23. Production Deployment Toolkit — Docker, nginx, setup/deploy/backup scripts
+24. Analytics Dashboard — score distribution, approval rates, rejection breakdown, source ranking (30-day)
+25. Batch Article Operations — batch approve/reject/translate
+26. Per-Rule Alert Translation — Georgian alert messages via Gemini/OpenAI
+27. Digest Draft Management — edit, approve, schedule, discard generated digests before posting
+28. Global Dedup Threshold (P6) — UI slider on Site Rules page, DB-backed, worker reads per-job
+29. Analytics Dashboard (P7) — score distribution, approval rates, rejection breakdown, source ranking, sector performance
+
+## Ideas Explored and Parked
+
+| Idea | Verdict | Reason |
+|------|---------|--------|
+| AI avatar news videos (HeyGen) | Parked | Cool but expensive, audience reception uncertain |
+| Facebook comment auto-responder | Killed | Low volume, spam detection risk |
+| Georgian meeting minutes (STT) | Testing | Depends on Google STT Georgian accuracy |
+| Government tender monitor | Worth exploring | tenders.ge is public structured data, construction companies check manually |
+| Airbnb dynamic pricing (Georgia) | Worth exploring | Official APIs available, thousands of hosts in Georgian FB groups |
+| Multi-tenant SaaS | Deferred | Only build if 5+ managed clients prove demand |
+| Full social listening (Twitter/X) | Deferred | API too expensive ($100+/mo), Reddit/HN covered via RSS |
+| Email digest delivery | Deferred | Telegram first, add SendGrid/Resend later if clients need it |
 
 ---
 
