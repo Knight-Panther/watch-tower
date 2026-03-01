@@ -214,7 +214,7 @@ function TemplateToggles({
   keywords?: string[];
   language?: "en" | "ka";
 }) {
-  const toggle = (key: "showTitle" | "showUrl" | "showSummary" | "showScore" | "showSector" | "showKeyword") => {
+  const toggle = (key: "showAlert" | "showTitle" | "showUrl" | "showSummary" | "showScore" | "showSector" | "showKeyword") => {
     onChange({ ...template, [key]: !template[key] });
   };
 
@@ -243,7 +243,10 @@ function TemplateToggles({
   const emoji = template.alertEmoji || "\u{1F514}";
   const name = ruleName || "My Alert Rule";
   const kw = keywords?.[0] || "keyword";
-  const previewLines: string[] = [`<b>${emoji} ${resolved.alert}: ${name}</b>`];
+  const previewLines: string[] = [];
+  if (template.showAlert !== false) {
+    previewLines.push(`<b>${emoji} ${resolved.alert}: ${name}</b>`);
+  }
   const meta: string[] = [];
   if (template.showKeyword !== false) meta.push(`${resolved.keyword}: ${kw}`);
   if (template.showScore !== false) meta.push(`${resolved.score}: 4/5 (High)`);
@@ -262,7 +265,7 @@ function TemplateToggles({
 
   // Row helper: checkbox + label name + optional text input
   const templateRow = (
-    toggleKey: "showTitle" | "showUrl" | "showSummary" | "showScore" | "showSector" | "showKeyword",
+    toggleKey: "showAlert" | "showTitle" | "showUrl" | "showSummary" | "showScore" | "showSector" | "showKeyword",
     label: string,
     labelKey?: keyof NonNullable<AlertTemplateConfig["labels"]>,
     placeholder?: string,
@@ -293,23 +296,7 @@ function TemplateToggles({
       <div className="grid grid-cols-2 gap-3">
         {/* Left: settings */}
         <div className="space-y-1">
-          {/* Alert header label (always on — decorative checkbox) */}
-          <div className="flex items-center gap-2 h-7">
-            <input
-              type="checkbox"
-              checked
-              disabled
-              className="rounded border-slate-600 bg-slate-950 text-cyan-500 opacity-40 shrink-0"
-            />
-            <span className="w-16 text-xs text-slate-400 shrink-0">Alert</span>
-            <input
-              value={template.labels?.alert || ""}
-              onChange={(e) => updateLabel("alert", e.target.value)}
-              placeholder={defaults.alert}
-              maxLength={40}
-              className="flex-1 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 outline-none focus:border-slate-500 placeholder:text-slate-600"
-            />
-          </div>
+          {templateRow("showAlert", "Alert", "alert", defaults.alert)}
           {templateRow("showKeyword", "Keyword", "keyword", defaults.keyword)}
           {templateRow("showScore", "Score", "score", defaults.score)}
           {templateRow("showSector", "Sector", "sector", defaults.sector)}

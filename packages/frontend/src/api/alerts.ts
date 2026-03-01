@@ -11,6 +11,7 @@ export type AlertTemplateLabels = {
 };
 
 export type AlertTemplateConfig = {
+  showAlert?: boolean;
   showTitle?: boolean;
   showUrl?: boolean;
   showSummary?: boolean;

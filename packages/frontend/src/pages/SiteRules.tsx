@@ -409,7 +409,7 @@ export default function SiteRules() {
     try {
       await setAutoApproveThresholdApi(newValue);
       setApproveThreshold(newValue);
-      toast.success(`Auto-approve threshold set to ${newValue}`);
+      toast.success(newValue === 0 ? "Auto-approve disabled" : `Auto-approve threshold set to ${newValue}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to update threshold";
       toast.error(message);
@@ -744,17 +744,20 @@ API_RATE_LIMIT_PER_MINUTE=200`}
                 <div>
                   <p className="font-medium text-slate-200">Auto-Approve</p>
                   <p className="mt-0.5 text-xs text-slate-500">
-                    Articles scoring &ge; this are auto-approved
+                    {approveThreshold === 0
+                      ? "Disabled — all scored articles go to manual review"
+                      : "Articles scoring \u2265 this are auto-approved"}
                   </p>
                 </div>
                 <select
                   value={approveThreshold}
                   onChange={(e) => handleApproveChange(Number(e.target.value))}
                   disabled={isApproveLoading}
-                  className={`w-16 rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-sm text-slate-200 outline-none focus:border-slate-500 ${isApproveLoading ? "opacity-50" : ""}`}
+                  className={`w-20 rounded-lg border border-slate-700 bg-slate-900 px-2 py-2 text-sm text-slate-200 outline-none focus:border-slate-500 ${isApproveLoading ? "opacity-50" : ""}`}
                 >
+                  <option value={0}>OFF</option>
                   {[2, 3, 4, 5].map((v) => (
-                    <option key={v} value={v} disabled={v <= rejectThreshold}>
+                    <option key={v} value={v} disabled={rejectThreshold !== 0 && v <= rejectThreshold}>
                       {v}
                     </option>
                   ))}

@@ -34,6 +34,7 @@ type AlertTemplateLabels = {
 };
 
 type AlertTemplateConfig = {
+  showAlert: boolean;
   showTitle: boolean;
   showUrl: boolean;
   showSummary: boolean;
@@ -45,6 +46,7 @@ type AlertTemplateConfig = {
 };
 
 const DEFAULT_ALERT_TEMPLATE: AlertTemplateConfig = {
+  showAlert: true,
   showTitle: true,
   showUrl: true,
   showSummary: true,
@@ -452,9 +454,10 @@ const formatAlertMessage = (
   const scoreLabels = ["", "Low", "Low", "Medium", "High", "Critical"];
   const scoreLabel = scoreLabels[article.score] ?? "Unknown";
 
-  const lines: string[] = [
-    `<b>${template.alertEmoji} ${l.alert}: ${cleanForTelegram(ruleName)}</b>`,
-  ];
+  const lines: string[] = [];
+  if (template.showAlert) {
+    lines.push(`<b>${template.alertEmoji} ${l.alert}: ${cleanForTelegram(ruleName)}</b>`);
+  }
 
   // Meta line: optional keyword + optional score + optional sector
   const metaParts: string[] = [];
