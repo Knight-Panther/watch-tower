@@ -148,6 +148,25 @@ export const socialAccounts = pgTable("social_accounts", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// ─── Sector Post Templates (per-sector format overrides) ─────────────────────
+
+export const sectorPostTemplates = pgTable(
+  "sector_post_templates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sectorId: uuid("sector_id")
+      .notNull()
+      .references(() => sectors.id, { onDelete: "cascade" }),
+    platform: text("platform").notNull(),
+    postTemplate: jsonb("post_template").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("sector_post_templates_sector_platform_idx").on(table.sectorId, table.platform),
+  ],
+);
+
 // ─── Post Deliveries (scheduled/immediate posting) ───────────────────────────
 
 export const postDeliveries = pgTable(
@@ -341,18 +360,34 @@ export const digestSlots = pgTable(
     // LLM config
     provider: text("provider").notNull().default(DIGEST_SLOT_DEFAULTS.provider),
     model: text("model").notNull().default(DIGEST_SLOT_DEFAULTS.model),
-    translationProvider: text("translation_provider").notNull().default(DIGEST_SLOT_DEFAULTS.translation_provider),
-    translationModel: text("translation_model").notNull().default(DIGEST_SLOT_DEFAULTS.translation_model),
+    translationProvider: text("translation_provider")
+      .notNull()
+      .default(DIGEST_SLOT_DEFAULTS.translation_provider),
+    translationModel: text("translation_model")
+      .notNull()
+      .default(DIGEST_SLOT_DEFAULTS.translation_model),
     // Delivery behavior
     autoPost: boolean("auto_post").notNull().default(DIGEST_SLOT_DEFAULTS.auto_post),
     telegramChatId: text("telegram_chat_id"),
-    telegramEnabled: boolean("telegram_enabled").notNull().default(DIGEST_SLOT_DEFAULTS.telegram_enabled),
-    facebookEnabled: boolean("facebook_enabled").notNull().default(DIGEST_SLOT_DEFAULTS.facebook_enabled),
-    linkedinEnabled: boolean("linkedin_enabled").notNull().default(DIGEST_SLOT_DEFAULTS.linkedin_enabled),
+    telegramEnabled: boolean("telegram_enabled")
+      .notNull()
+      .default(DIGEST_SLOT_DEFAULTS.telegram_enabled),
+    facebookEnabled: boolean("facebook_enabled")
+      .notNull()
+      .default(DIGEST_SLOT_DEFAULTS.facebook_enabled),
+    linkedinEnabled: boolean("linkedin_enabled")
+      .notNull()
+      .default(DIGEST_SLOT_DEFAULTS.linkedin_enabled),
     // Per-channel language
-    telegramLanguage: text("telegram_language").notNull().default(DIGEST_SLOT_DEFAULTS.telegram_language),
-    facebookLanguage: text("facebook_language").notNull().default(DIGEST_SLOT_DEFAULTS.facebook_language),
-    linkedinLanguage: text("linkedin_language").notNull().default(DIGEST_SLOT_DEFAULTS.linkedin_language),
+    telegramLanguage: text("telegram_language")
+      .notNull()
+      .default(DIGEST_SLOT_DEFAULTS.telegram_language),
+    facebookLanguage: text("facebook_language")
+      .notNull()
+      .default(DIGEST_SLOT_DEFAULTS.facebook_language),
+    linkedinLanguage: text("linkedin_language")
+      .notNull()
+      .default(DIGEST_SLOT_DEFAULTS.linkedin_language),
     // Cover image toggles
     imageTelegram: boolean("image_telegram").notNull().default(DIGEST_SLOT_DEFAULTS.image_telegram),
     imageFacebook: boolean("image_facebook").notNull().default(DIGEST_SLOT_DEFAULTS.image_facebook),

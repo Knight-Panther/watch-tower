@@ -521,6 +521,7 @@ type ArticleForPost = {
   url: string;
   llmSummary: string | null;
   importanceScore: number | null;
+  sectorId: string | null;
   sectorName: string | null;
   titleKa: string | null;
   llmSummaryKa: string | null;
@@ -533,9 +534,30 @@ type ClaimedDelivery = {
   scheduledAt: Date;
 };
 
-// Helper: Get template for platform from social_accounts
-// Merges saved template with defaults so new fields (e.g. showImage) are never undefined.
-async function getTemplateForPlatform(db: Database, platform: string): Promise<PostTemplateConfig> {
+// Helper: Get template for platform, with optional sector-specific override.
+// Resolution priority: sector+platform → platform → hardcoded defaults.
+async function getTemplateForPlatform(
+  db: Database,
+  platform: string,
+  sectorId?: string | null,
+): Promise<PostTemplateConfig> {
+  const defaults = getDefaultTemplate(platform);
+
+  // 1. Try sector-specific template first
+  if (sectorId) {
+    const sectorResult = await db.execute(sql`
+      SELECT post_template as "postTemplate"
+      FROM sector_post_templates
+      WHERE sector_id = ${sectorId}::uuid AND platform = ${platform}
+      LIMIT 1
+    `);
+    const sectorTemplate = (
+      sectorResult.rows[0] as { postTemplate: PostTemplateConfig } | undefined
+    )?.postTemplate;
+    if (sectorTemplate) return { ...defaults, ...sectorTemplate };
+  }
+
+  // 2. Fall back to platform-level template
   const result = await db.execute(sql`
     SELECT post_template as "postTemplate"
     FROM social_accounts
@@ -544,7 +566,6 @@ async function getTemplateForPlatform(db: Database, platform: string): Promise<P
   `);
   const saved = (result.rows[0] as { postTemplate: PostTemplateConfig | null } | undefined)
     ?.postTemplate;
-  const defaults = getDefaultTemplate(platform);
   return saved ? { ...defaults, ...saved } : defaults;
 }
 
@@ -686,6 +707,7 @@ const processScheduledPosts = async (
           a.importance_score as "importanceScore",
           a.title_ka as "titleKa",
           a.llm_summary_ka as "llmSummaryKa",
+          a.sector_id as "sectorId",
           s.name as "sectorName"
         FROM articles a
         LEFT JOIN sectors s ON a.sector_id = s.id
@@ -736,8 +758,8 @@ const processScheduledPosts = async (
           ? article.llmSummaryKa
           : article.llmSummary || article.title;
 
-      // Get template for this platform
-      const template = await getTemplateForPlatform(db, delivery.platform);
+      // Get template for this platform (sector-specific override if available)
+      const template = await getTemplateForPlatform(db, delivery.platform, article.sectorId);
 
       // Fetch ready image for this article (if any)
       let imageUrl: string | undefined;

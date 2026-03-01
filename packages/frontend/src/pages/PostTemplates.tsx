@@ -8,8 +8,14 @@ import {
   savePostTemplate,
   resetPostTemplate,
   previewPost,
+  listSectors,
+  listSectorTemplates,
+  getSectorTemplate,
+  saveSectorTemplate,
+  deleteSectorTemplate,
   type SocialAccount,
   type PostTemplateConfig,
+  type Sector,
 } from "../api";
 
 // Default templates per platform
@@ -70,6 +76,12 @@ export default function PostTemplates() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
+  // Sector state
+  const [sectors, setSectors] = useState<Sector[]>([]);
+  const [selectedSectorId, setSelectedSectorId] = useState<string>(""); // "" = All (Default)
+  const [sectorOverrides, setSectorOverrides] = useState<Set<string>>(new Set()); // "sectorId:platform"
+  const isSectorMode = selectedSectorId !== "";
+
   // Template state
   const [template, setTemplate] = useState<PostTemplateConfig>(DEFAULT_TEMPLATES.telegram);
   const [hasChanges, setHasChanges] = useState(false);
@@ -85,36 +97,57 @@ export default function PostTemplates() {
   // Get selected account
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
 
-  // Load accounts on mount
+  // Load accounts + sectors on mount
   useEffect(() => {
-    const loadAccounts = async () => {
+    const load = async () => {
       try {
-        const data = await listSocialAccounts();
-        setAccounts(data);
-        if (data.length > 0) {
+        const [accountsData, sectorsData, overridesData] = await Promise.all([
+          listSocialAccounts(),
+          listSectors(),
+          listSectorTemplates(),
+        ]);
+        setAccounts(accountsData);
+        setSectors(sectorsData);
+        // Build set of "sectorId:platform" keys that have overrides
+        setSectorOverrides(new Set(overridesData.map((o) => `${o.sectorId}:${o.platform}`)));
+        if (accountsData.length > 0) {
           const saved = localStorage.getItem("postTemplates_selectedAccountId");
-          const match = saved && data.find((a) => a.id === saved);
+          const match = saved && accountsData.find((a) => a.id === saved);
           if (!match) {
-            setSelectedAccountId(data[0].id);
-            localStorage.setItem("postTemplates_selectedAccountId", data[0].id);
+            setSelectedAccountId(accountsData[0].id);
+            localStorage.setItem("postTemplates_selectedAccountId", accountsData[0].id);
           }
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Failed to load social accounts";
+        const message = err instanceof Error ? err.message : "Failed to load data";
         toast.error(message);
       } finally {
         setIsLoading(false);
       }
     };
-    loadAccounts();
+    load();
   }, []);
 
-  // Load template when account changes
+  // Load template when account or sector changes
   useEffect(() => {
     if (!selectedAccount) return;
-    setTemplate(selectedAccount.post_template);
-    setHasChanges(false);
-  }, [selectedAccount]);
+
+    const loadTemplate = async () => {
+      if (isSectorMode) {
+        try {
+          const result = await getSectorTemplate(selectedSectorId, selectedAccount.platform);
+          setTemplate(result.template);
+        } catch {
+          // No override — fall back to platform default
+          setTemplate(selectedAccount.post_template);
+        }
+      } else {
+        setTemplate(selectedAccount.post_template);
+      }
+      setHasChanges(false);
+    };
+    loadTemplate();
+  }, [selectedAccount, selectedSectorId, isSectorMode]);
 
   // Update preview when template changes (debounced)
   const updatePreview = useCallback(async () => {
@@ -148,20 +181,30 @@ export default function PostTemplates() {
 
   // Save handler
   const handleSave = async () => {
-    if (!selectedAccountId) return;
+    if (!selectedAccountId || !selectedAccount) return;
 
     setIsSaving(true);
     try {
-      const result = await savePostTemplate(selectedAccountId, template);
-      // Update local state
-      setAccounts((prev) =>
-        prev.map((a) =>
-          a.id === selectedAccountId
-            ? { ...a, post_template: result.template, is_template_custom: true }
-            : a,
-        ),
-      );
-      toast.success("Template saved");
+      if (isSectorMode) {
+        await saveSectorTemplate(selectedSectorId, selectedAccount.platform, template);
+        // Track override
+        setSectorOverrides((prev) => {
+          const next = new Set(prev);
+          next.add(`${selectedSectorId}:${selectedAccount.platform}`);
+          return next;
+        });
+        toast.success("Sector template saved");
+      } else {
+        const result = await savePostTemplate(selectedAccountId, template);
+        setAccounts((prev) =>
+          prev.map((a) =>
+            a.id === selectedAccountId
+              ? { ...a, post_template: result.template, is_template_custom: true }
+              : a,
+          ),
+        );
+        toast.success("Template saved");
+      }
       setHasChanges(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to save";
@@ -182,17 +225,29 @@ export default function PostTemplates() {
 
     setIsSaving(true);
     try {
-      const result = await resetPostTemplate(selectedAccountId);
-      // Update local state
-      setAccounts((prev) =>
-        prev.map((a) =>
-          a.id === selectedAccountId
-            ? { ...a, post_template: result.template, is_template_custom: false }
-            : a,
-        ),
-      );
-      setTemplate(result.template);
-      toast.success("Template reset to defaults");
+      if (isSectorMode) {
+        await deleteSectorTemplate(selectedSectorId, selectedAccount.platform);
+        // Remove override tracking
+        setSectorOverrides((prev) => {
+          const next = new Set(prev);
+          next.delete(`${selectedSectorId}:${selectedAccount.platform}`);
+          return next;
+        });
+        // Fall back to platform default
+        setTemplate(selectedAccount.post_template);
+        toast.success("Sector override removed — using platform default");
+      } else {
+        const result = await resetPostTemplate(selectedAccountId);
+        setAccounts((prev) =>
+          prev.map((a) =>
+            a.id === selectedAccountId
+              ? { ...a, post_template: result.template, is_template_custom: false }
+              : a,
+          ),
+        );
+        setTemplate(result.template);
+        toast.success("Template reset to defaults");
+      }
       setHasChanges(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to reset";
@@ -231,8 +286,32 @@ export default function PostTemplates() {
             <p className="mt-1 text-sm text-slate-400">
               Customize how posts are formatted for each social platform.
             </p>
+            <p className="mt-1 text-xs text-slate-500">
+              <strong className="text-slate-400">All (Default)</strong> = base template for the
+              platform. Pick a sector to override it. Sectors marked with{" "}
+              <strong className="text-slate-400">*</strong> already have a custom override.
+            </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="text-sm text-slate-400">Sector:</label>
+            <select
+              value={selectedSectorId}
+              onChange={(e) => setSelectedSectorId(e.target.value)}
+              className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm text-slate-200 outline-none focus:border-slate-500"
+            >
+              <option value="">All (Default)</option>
+              {sectors.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                  {selectedAccount && sectorOverrides.has(`${s.id}:${selectedAccount.platform}`)
+                    ? " *"
+                    : ""}
+                </option>
+              ))}
+            </select>
+
+            <span className="text-slate-600">|</span>
+
             <label className="text-sm text-slate-400">Platform:</label>
             <select
               value={selectedAccountId}
@@ -251,7 +330,31 @@ export default function PostTemplates() {
           </div>
         </div>
 
-        {selectedAccount && !selectedAccount.is_template_custom && (
+        {isSectorMode &&
+          selectedAccount &&
+          sectorOverrides.has(`${selectedSectorId}:${selectedAccount.platform}`) && (
+            <div className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
+              <p className="text-sm text-emerald-200">
+                Custom override active for{" "}
+                <strong>{sectors.find((s) => s.id === selectedSectorId)?.name}</strong> on{" "}
+                {selectedAccount.platform}.
+              </p>
+            </div>
+          )}
+
+        {isSectorMode &&
+          selectedAccount &&
+          !sectorOverrides.has(`${selectedSectorId}:${selectedAccount.platform}`) && (
+            <div className="mt-4 rounded-lg border border-blue-500/30 bg-blue-500/10 px-4 py-3">
+              <p className="text-sm text-blue-200">
+                No override for{" "}
+                <strong>{sectors.find((s) => s.id === selectedSectorId)?.name}</strong> — using
+                platform default. Customize and save to create a sector-specific template.
+              </p>
+            </div>
+          )}
+
+        {!isSectorMode && selectedAccount && !selectedAccount.is_template_custom && (
           <div className="mt-4 rounded-lg border border-blue-500/30 bg-blue-500/10 px-4 py-3">
             <p className="text-sm text-blue-200">
               Using default template for {selectedAccount.platform}. Customize and save to create a
@@ -468,10 +571,10 @@ export default function PostTemplates() {
               loading={isSaving}
               loadingText="Saving..."
             >
-              Save Template
+              {isSectorMode ? "Save Sector Override" : "Save Template"}
             </Button>
             <Button variant="secondary" size="lg" onClick={handleReset} disabled={isSaving}>
-              Reset to Default
+              {isSectorMode ? "Remove Override" : "Reset to Default"}
             </Button>
           </div>
         </section>
@@ -534,9 +637,13 @@ export default function PostTemplates() {
       {/* Reset Confirmation Modal */}
       {showResetModal && (
         <ConfirmModal
-          title="Reset to Default"
-          message={`This will reset the ${selectedAccount?.platform ?? "platform"} template to its default settings. Continue?`}
-          confirmLabel="Reset"
+          title={isSectorMode ? "Remove Sector Override" : "Reset to Default"}
+          message={
+            isSectorMode
+              ? `This will remove the custom template for "${sectors.find((s) => s.id === selectedSectorId)?.name}" on ${selectedAccount?.platform ?? "platform"}. Posts will use the platform default. Continue?`
+              : `This will reset the ${selectedAccount?.platform ?? "platform"} template to its default settings. Continue?`
+          }
+          confirmLabel={isSectorMode ? "Remove" : "Reset"}
           cancelLabel="Cancel"
           variant="danger"
           onConfirm={confirmReset}

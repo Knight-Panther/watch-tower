@@ -45,6 +45,7 @@ type ArticleForDistribution = {
   url: string;
   llmSummary: string | null;
   importanceScore: number | null;
+  sectorId: string | null;
   sectorName: string | null;
   titleKa: string | null;
   llmSummaryKa: string | null;
@@ -58,12 +59,30 @@ async function isPlatformEnabled(db: Database, platform: string): Promise<boolea
   return (result.rows[0] as { value: unknown } | undefined)?.value === true;
 }
 
-// Helper: Get template for platform from social_accounts
-// Merges saved template with defaults so new fields (e.g. showImage) are never undefined.
+// Helper: Get template for platform, with optional sector-specific override.
+// Resolution priority: sector+platform → platform → hardcoded defaults.
 async function getTemplateForPlatform(
   db: Database,
   platform: string,
+  sectorId?: string | null,
 ): Promise<PostTemplateConfig> {
+  const defaults = getDefaultTemplate(platform);
+
+  // 1. Try sector-specific template first
+  if (sectorId) {
+    const sectorResult = await db.execute(sql`
+      SELECT post_template as "postTemplate"
+      FROM sector_post_templates
+      WHERE sector_id = ${sectorId}::uuid AND platform = ${platform}
+      LIMIT 1
+    `);
+    const sectorTemplate = (
+      sectorResult.rows[0] as { postTemplate: PostTemplateConfig } | undefined
+    )?.postTemplate;
+    if (sectorTemplate) return { ...defaults, ...sectorTemplate };
+  }
+
+  // 2. Fall back to platform-level template
   const result = await db.execute(sql`
     SELECT post_template as "postTemplate"
     FROM social_accounts
@@ -72,7 +91,6 @@ async function getTemplateForPlatform(
   `);
   const saved = (result.rows[0] as { postTemplate: PostTemplateConfig | null } | undefined)
     ?.postTemplate;
-  const defaults = getDefaultTemplate(platform);
   return saved ? { ...defaults, ...saved } : defaults;
 }
 
@@ -204,6 +222,7 @@ export const createDistributionWorker = ({
             importance_score as "importanceScore",
             title_ka as "titleKa",
             llm_summary_ka as "llmSummaryKa",
+            sector_id as "sectorId",
             (SELECT name FROM sectors WHERE id = articles.sector_id) as "sectorName"
         `);
 
@@ -270,10 +289,7 @@ export const createDistributionWorker = ({
         const [articleImage] = await db
           .select({ imageUrl: articleImages.imageUrl })
           .from(articleImages)
-          .where(and(
-            eq(articleImages.articleId, articleId),
-            eq(articleImages.status, "ready"),
-          ))
+          .where(and(eq(articleImages.articleId, articleId), eq(articleImages.status, "ready")))
           .limit(1);
 
         // Build list of platforms to post to
@@ -298,7 +314,10 @@ export const createDistributionWorker = ({
             // Check if platform is enabled in app_config
             const enabled = await isPlatformEnabled(db, name);
             if (!enabled) {
-              logger.debug({ articleId, platform: name }, "[distribution] platform disabled, skipping");
+              logger.debug(
+                { articleId, platform: name },
+                "[distribution] platform disabled, skipping",
+              );
               continue;
             }
 
@@ -339,7 +358,13 @@ export const createDistributionWorker = ({
               const retryAt = new Date(Date.now() + retryAfterMs);
 
               logger.warn(
-                { articleId, platform: name, current: rateCheck.current, limit: rateCheck.limit, retryAt },
+                {
+                  articleId,
+                  platform: name,
+                  current: rateCheck.current,
+                  limit: rateCheck.limit,
+                  retryAt,
+                },
                 "[distribution] rate limit reached, scheduling retry via post_deliveries",
               );
 
@@ -365,8 +390,8 @@ export const createDistributionWorker = ({
               continue;
             }
 
-            // Fetch template for this platform
-            const template = await getTemplateForPlatform(db, name);
+            // Fetch template for this platform (sector-specific override if available)
+            const template = await getTemplateForPlatform(db, name, article.sectorId);
 
             // Format post using provider (uses resolved language content)
             const text = provider!.formatPost(
@@ -465,7 +490,10 @@ export const createDistributionWorker = ({
             UPDATE articles SET pipeline_stage = 'approved'
             WHERE id = ${articleId}::uuid
           `);
-          logger.info({ articleId }, "[distribution] all platforms rate-limited/unhealthy, kept as approved");
+          logger.info(
+            { articleId },
+            "[distribution] all platforms rate-limited/unhealthy, kept as approved",
+          );
         } else if (results.length > 0) {
           // Hard failures on all platforms
           await db.execute(sql`
@@ -482,7 +510,10 @@ export const createDistributionWorker = ({
             UPDATE articles SET pipeline_stage = 'approved'
             WHERE id = ${articleId}::uuid AND pipeline_stage = 'posting'
           `);
-          logger.info({ articleId }, "[distribution] no platforms processed, rolled back to approved");
+          logger.info(
+            { articleId },
+            "[distribution] no platforms processed, rolled back to approved",
+          );
         }
 
         return { success: anySuccess, results };
