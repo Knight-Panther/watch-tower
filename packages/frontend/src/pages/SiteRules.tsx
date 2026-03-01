@@ -38,17 +38,16 @@ function SectorsTab() {
   const [constraints, setConstraints] = useState<Constraints | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [sectorForm, setSectorForm] = useState(emptySectorForm);
-  const [sectorErrors, setSectorErrors] = useState<{ name?: string; defaultMaxAgeDays?: string }>({});
+  const [sectorErrors, setSectorErrors] = useState<{ name?: string; defaultMaxAgeDays?: string }>(
+    {},
+  );
   const [sectorMaxAgeDrafts, setSectorMaxAgeDrafts] = useState<Record<string, string>>({});
   const [confirmDelete, setConfirmDelete] = useState<Sector | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const [sectorsData, constraintsData] = await Promise.all([
-          listSectors(),
-          getConstraints(),
-        ]);
+        const [sectorsData, constraintsData] = await Promise.all([listSectors(), getConstraints()]);
         setSectors(sectorsData);
         setConstraints(constraintsData);
       } catch (err) {
@@ -70,11 +69,17 @@ function SectorsTab() {
     const maMax = constraints?.maxAge.max ?? 15;
     const maxAge = Number(sectorForm.defaultMaxAgeDays);
     if (Number.isNaN(maxAge) || maxAge < maMin || maxAge > maMax) {
-      setSectorErrors((prev) => ({ ...prev, defaultMaxAgeDays: `Default max age must be ${maMin}-${maMax}` }));
+      setSectorErrors((prev) => ({
+        ...prev,
+        defaultMaxAgeDays: `Default max age must be ${maMin}-${maMax}`,
+      }));
       return;
     }
     try {
-      const created = await createSector({ name: sectorForm.name.trim(), default_max_age_days: maxAge });
+      const created = await createSector({
+        name: sectorForm.name.trim(),
+        default_max_age_days: maxAge,
+      });
       setSectors((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
       setSectorForm(emptySectorForm);
       toast.success("Sector created");
@@ -85,7 +90,10 @@ function SectorsTab() {
 
   const onSaveSectorSettings = async (sectorId: string) => {
     const sector = sectors.find((item) => item.id === sectorId);
-    if (!sector) { toast.error("Sector not found"); return; }
+    if (!sector) {
+      toast.error("Sector not found");
+      return;
+    }
     const maMin = constraints?.maxAge.min ?? 1;
     const maMax = constraints?.maxAge.max ?? 15;
     const maxAgeRaw = sectorMaxAgeDrafts[sectorId] ?? String(sector.default_max_age_days);
@@ -94,11 +102,18 @@ function SectorsTab() {
       toast.error(`Default max age must be between ${maMin} and ${maMax}`);
       return;
     }
-    if (maxAgeValue === sector.default_max_age_days) { toast("No changes to save"); return; }
+    if (maxAgeValue === sector.default_max_age_days) {
+      toast("No changes to save");
+      return;
+    }
     try {
       const updated = await updateSector(sectorId, { default_max_age_days: maxAgeValue });
       setSectors((prev) => prev.map((item) => (item.id === sectorId ? updated : item)));
-      setSectorMaxAgeDrafts((prev) => { const next = { ...prev }; delete next[sectorId]; return next; });
+      setSectorMaxAgeDrafts((prev) => {
+        const next = { ...prev };
+        delete next[sectorId];
+        return next;
+      });
       toast.success("Default max age updated");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to update sector");
@@ -119,7 +134,11 @@ function SectorsTab() {
   };
 
   if (isLoading) {
-    return <div className="flex items-center justify-center py-20"><Spinner /></div>;
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Spinner />
+      </div>
+    );
   }
 
   return (
@@ -137,7 +156,9 @@ function SectorsTab() {
           {sectorErrors.name ? <p className="text-xs text-red-400">{sectorErrors.name}</p> : null}
           <input
             value={sectorForm.defaultMaxAgeDays}
-            onChange={(event) => setSectorForm({ ...sectorForm, defaultMaxAgeDays: event.target.value })}
+            onChange={(event) =>
+              setSectorForm({ ...sectorForm, defaultMaxAgeDays: event.target.value })
+            }
             placeholder="Default max age days (1-15)"
             className="rounded-xl border border-slate-800 bg-slate-950 px-4 py-3 text-sm text-slate-200 outline-none focus:border-slate-600"
           />
@@ -145,7 +166,9 @@ function SectorsTab() {
             <p className="text-xs text-red-400">{sectorErrors.defaultMaxAgeDays}</p>
           ) : null}
           <div className="md:col-span-2">
-            <Button variant="secondary" type="submit" fullWidth>Create sector</Button>
+            <Button variant="secondary" type="submit" fullWidth>
+              Create sector
+            </Button>
           </div>
         </form>
       </section>
@@ -176,11 +199,19 @@ function SectorsTab() {
                       min={1}
                       max={15}
                       value={draft}
-                      onChange={(e) => setSectorMaxAgeDrafts((prev) => ({ ...prev, [sector.id]: e.target.value }))}
+                      onChange={(e) =>
+                        setSectorMaxAgeDrafts((prev) => ({ ...prev, [sector.id]: e.target.value }))
+                      }
                       onKeyDown={(e) => {
                         if (e.key === "Escape")
-                          setSectorMaxAgeDrafts((prev) => ({ ...prev, [sector.id]: String(sector.default_max_age_days) }));
-                        if (e.key === "Enter") { e.preventDefault(); onSaveSectorSettings(sector.id); }
+                          setSectorMaxAgeDrafts((prev) => ({
+                            ...prev,
+                            [sector.id]: String(sector.default_max_age_days),
+                          }));
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          onSaveSectorSettings(sector.id);
+                        }
                       }}
                       className="w-16 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-center text-xs text-slate-200 outline-none focus:border-slate-500"
                     />
@@ -188,11 +219,22 @@ function SectorsTab() {
                   </label>
                   {changed && (
                     <>
-                      <Button variant="primary" size="xs" onClick={() => onSaveSectorSettings(sector.id)}>Save</Button>
+                      <Button
+                        variant="primary"
+                        size="xs"
+                        onClick={() => onSaveSectorSettings(sector.id)}
+                      >
+                        Save
+                      </Button>
                       <Button
                         variant="ghost"
                         size="xs"
-                        onClick={() => setSectorMaxAgeDrafts((prev) => ({ ...prev, [sector.id]: String(sector.default_max_age_days) }))}
+                        onClick={() =>
+                          setSectorMaxAgeDrafts((prev) => ({
+                            ...prev,
+                            [sector.id]: String(sector.default_max_age_days),
+                          }))
+                        }
                       >
                         Cancel
                       </Button>
@@ -209,7 +251,10 @@ function SectorsTab() {
             );
           })}
           {sectors.length === 0 ? (
-            <EmptyState title="No sectors yet" description="Create your first sector using the form above." />
+            <EmptyState
+              title="No sectors yet"
+              description="Create your first sector using the form above."
+            />
           ) : null}
         </div>
       </section>
@@ -217,7 +262,12 @@ function SectorsTab() {
       {confirmDelete && (
         <ConfirmModal
           title="Delete sector"
-          message={<>Remove <span className="text-slate-200">{confirmDelete.name}</span>? Sources will be unassigned.</>}
+          message={
+            <>
+              Remove <span className="text-slate-200">{confirmDelete.name}</span>? Sources will be
+              unassigned.
+            </>
+          }
           confirmLabel="Delete"
           variant="danger"
           onConfirm={onConfirmDelete}
@@ -230,7 +280,13 @@ function SectorsTab() {
 
 export default function SiteRules() {
   const [activeTab, setActiveTab] = useTabState("sectors", [
-    "sectors", "domains", "limits", "api", "thresholds", "translation", "dedup",
+    "sectors",
+    "domains",
+    "limits",
+    "api",
+    "thresholds",
+    "translation",
+    "dedup",
   ]);
 
   const DOMAINS_PER_PAGE = 20;
@@ -335,9 +391,7 @@ export default function SiteRules() {
     if (!domainSearch.trim()) return domains;
     const q = domainSearch.toLowerCase();
     return domains.filter(
-      (d) =>
-        d.domain.toLowerCase().includes(q) ||
-        (d.notes && d.notes.toLowerCase().includes(q)),
+      (d) => d.domain.toLowerCase().includes(q) || (d.notes && d.notes.toLowerCase().includes(q)),
     );
   }, [domains, domainSearch]);
 
@@ -371,7 +425,7 @@ export default function SiteRules() {
       setNewDomainNotes("");
       await loadDomains();
     } catch (err) {
-      setDomainsError(err instanceof Error ? err.message : "Failed to add domain");
+      toast.error(err instanceof Error ? err.message : "Failed to add domain");
     } finally {
       setAddingDomain(false);
     }
@@ -409,7 +463,9 @@ export default function SiteRules() {
     try {
       await setAutoApproveThresholdApi(newValue);
       setApproveThreshold(newValue);
-      toast.success(newValue === 0 ? "Auto-approve disabled" : `Auto-approve threshold set to ${newValue}`);
+      toast.success(
+        newValue === 0 ? "Auto-approve disabled" : `Auto-approve threshold set to ${newValue}`,
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to update threshold";
       toast.error(message);
@@ -423,7 +479,9 @@ export default function SiteRules() {
     try {
       await setAutoRejectThresholdApi(newValue);
       setRejectThreshold(newValue);
-      toast.success(newValue === 0 ? "Auto-reject disabled" : `Auto-reject threshold set to ${newValue}`);
+      toast.success(
+        newValue === 0 ? "Auto-reject disabled" : `Auto-reject threshold set to ${newValue}`,
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to update threshold";
       toast.error(message);
@@ -492,9 +550,7 @@ export default function SiteRules() {
             </Button>
           </div>
 
-          {domainsError && (
-            <p className="mt-3 text-sm text-red-400">{domainsError}</p>
-          )}
+          {domainsError && <p className="mt-3 text-sm text-red-400">{domainsError}</p>}
 
           {/* Domain List */}
           {domainsLoading ? (
@@ -538,7 +594,9 @@ export default function SiteRules() {
                       }`}
                     >
                       <div>
-                        <p className={`font-mono text-sm ${domain.isActive ? "text-slate-200" : "text-slate-400"}`}>
+                        <p
+                          className={`font-mono text-sm ${domain.isActive ? "text-slate-200" : "text-slate-400"}`}
+                        >
                           {domain.domain}
                         </p>
                         {domain.notes && (
@@ -602,9 +660,7 @@ export default function SiteRules() {
 
               {/* Total domain count */}
               {!domainSearch && domains.length > DOMAINS_PER_PAGE && (
-                <p className="mt-1 text-xs text-slate-600">
-                  {domains.length} domains total
-                </p>
+                <p className="mt-1 text-xs text-slate-600">{domains.length} domains total</p>
               )}
             </>
           )}
@@ -639,18 +695,14 @@ export default function SiteRules() {
                 <p className="mt-2 text-2xl font-semibold text-slate-100">
                   {securityConfig.maxArticlesPerFetch}
                 </p>
-                <p className="mt-1 text-xs text-slate-500">
-                  Max articles per single RSS fetch
-                </p>
+                <p className="mt-1 text-xs text-slate-500">Max articles per single RSS fetch</p>
               </div>
               <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Daily Per Source</p>
                 <p className="mt-2 text-2xl font-semibold text-slate-100">
                   {securityConfig.maxArticlesPerSourceDaily}
                 </p>
-                <p className="mt-1 text-xs text-slate-500">
-                  Max articles per source per day
-                </p>
+                <p className="mt-1 text-xs text-slate-500">Max articles per source per day</p>
               </div>
             </div>
           ) : (
@@ -662,7 +714,7 @@ export default function SiteRules() {
               To change these limits, update the environment variables:
             </p>
             <pre className="mt-2 text-xs text-slate-500 font-mono">
-{`MAX_FEED_SIZE_MB=5
+              {`MAX_FEED_SIZE_MB=5
 MAX_ARTICLES_PER_FETCH=100
 MAX_ARTICLES_PER_SOURCE_DAILY=500`}
             </pre>
@@ -688,7 +740,8 @@ MAX_ARTICLES_PER_SOURCE_DAILY=500`}
               <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
                 <p className="text-xs uppercase tracking-wide text-slate-500">API Rate Limit</p>
                 <p className="mt-2 text-2xl font-semibold text-slate-100">
-                  {securityConfig.apiRateLimitPerMinute} <span className="text-sm font-normal text-slate-400">/ minute</span>
+                  {securityConfig.apiRateLimitPerMinute}{" "}
+                  <span className="text-sm font-normal text-slate-400">/ minute</span>
                 </p>
                 <p className="mt-1 text-xs text-slate-500">
                   Requests exceeding this limit receive 429 Too Many Requests
@@ -697,7 +750,9 @@ MAX_ARTICLES_PER_SOURCE_DAILY=500`}
 
               {/* CORS Origins */}
               <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
-                <p className="text-xs uppercase tracking-wide text-slate-500">Allowed Origins (CORS)</p>
+                <p className="text-xs uppercase tracking-wide text-slate-500">
+                  Allowed Origins (CORS)
+                </p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {securityConfig.allowedOrigins.map((origin, i) => (
                     <span
@@ -722,7 +777,7 @@ MAX_ARTICLES_PER_SOURCE_DAILY=500`}
               To change these settings, update the environment variables:
             </p>
             <pre className="mt-2 text-xs text-slate-500 font-mono">
-{`ALLOWED_ORIGINS=https://yourdomain.com
+              {`ALLOWED_ORIGINS=https://yourdomain.com
 API_RATE_LIMIT_PER_MINUTE=200`}
             </pre>
           </div>
@@ -734,7 +789,8 @@ API_RATE_LIMIT_PER_MINUTE=200`}
         <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
           <h2 className="text-lg font-semibold">Global Score Thresholds</h2>
           <p className="mt-1 text-sm text-slate-400">
-            Default thresholds for auto-approve, manual review, and auto-reject. Per-sector rules override these when configured.
+            Default thresholds for auto-approve, manual review, and auto-reject. Per-sector rules
+            override these when configured.
           </p>
 
           <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -757,7 +813,11 @@ API_RATE_LIMIT_PER_MINUTE=200`}
                 >
                   <option value={0}>OFF</option>
                   {[2, 3, 4, 5].map((v) => (
-                    <option key={v} value={v} disabled={rejectThreshold !== 0 && v <= rejectThreshold}>
+                    <option
+                      key={v}
+                      value={v}
+                      disabled={rejectThreshold !== 0 && v <= rejectThreshold}
+                    >
                       {v}
                     </option>
                   ))}
@@ -784,7 +844,11 @@ API_RATE_LIMIT_PER_MINUTE=200`}
                 >
                   <option value={0}>OFF</option>
                   {[1, 2, 3, 4].map((v) => (
-                    <option key={v} value={v} disabled={approveThreshold !== 0 && v >= approveThreshold}>
+                    <option
+                      key={v}
+                      value={v}
+                      disabled={approveThreshold !== 0 && v >= approveThreshold}
+                    >
                       {v}
                     </option>
                   ))}
@@ -794,7 +858,8 @@ API_RATE_LIMIT_PER_MINUTE=200`}
           </div>
 
           <p className="mt-4 text-xs text-slate-500">
-            Scores between thresholds go to manual review. Changes take effect on the next scoring batch.
+            Scores between thresholds go to manual review. Changes take effect on the next scoring
+            batch.
           </p>
         </section>
       )}
@@ -817,7 +882,9 @@ API_RATE_LIMIT_PER_MINUTE=200`}
                     updateTranslationConfig({ posting_language: "en" })
                       .then(() => toast.success("Switched to English"))
                       .catch(() => toast.error("Failed to update language"));
-                    setTranslationConfig((prev) => prev ? { ...prev, posting_language: "en" } : null);
+                    setTranslationConfig((prev) =>
+                      prev ? { ...prev, posting_language: "en" } : null,
+                    );
                   }}
                   className={`rounded-full px-4 py-2 text-sm font-medium transition ${
                     translationConfig?.posting_language === "en"
@@ -832,7 +899,9 @@ API_RATE_LIMIT_PER_MINUTE=200`}
                     updateTranslationConfig({ posting_language: "ka" })
                       .then(() => toast.success("Switched to Georgian"))
                       .catch(() => toast.error("Failed to update language"));
-                    setTranslationConfig((prev) => prev ? { ...prev, posting_language: "ka" } : null);
+                    setTranslationConfig((prev) =>
+                      prev ? { ...prev, posting_language: "ka" } : null,
+                    );
                   }}
                   className={`rounded-full px-4 py-2 text-sm font-medium transition ${
                     translationConfig?.posting_language === "ka"
@@ -862,7 +931,9 @@ API_RATE_LIMIT_PER_MINUTE=200`}
                       updateTranslationConfig({ scores: newScores })
                         .then(() => toast.success("Translation scores updated"))
                         .catch(() => toast.error("Failed to update scores"));
-                      setTranslationConfig((prev) => prev ? { ...prev, scores: newScores } : null);
+                      setTranslationConfig((prev) =>
+                        prev ? { ...prev, scores: newScores } : null,
+                      );
                     }}
                     className="rounded border-slate-600"
                   />
@@ -871,9 +942,10 @@ API_RATE_LIMIT_PER_MINUTE=200`}
               ))}
             </div>
             <p className="mt-3 text-xs text-slate-500">
-              Only articles ingested <span className="text-slate-300">after</span> you enable a score
-              will be auto-translated. Already-scored articles won't be picked up retroactively.
-              To translate older articles, use the translate button on individual articles.
+              Only articles ingested <span className="text-slate-300">after</span> you enable a
+              score will be auto-translated. Already-scored articles won't be picked up
+              retroactively. To translate older articles, use the translate button on individual
+              articles.
             </p>
           </div>
 
@@ -909,7 +981,9 @@ API_RATE_LIMIT_PER_MINUTE=200`}
                     updateTranslationConfig({ model: e.target.value })
                       .then(() => toast.success(`Model set to ${e.target.value}`))
                       .catch(() => toast.error("Failed to update model"));
-                    setTranslationConfig((prev) => prev ? { ...prev, model: e.target.value } : null);
+                    setTranslationConfig((prev) =>
+                      prev ? { ...prev, model: e.target.value } : null,
+                    );
                   }}
                   className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm"
                 >
@@ -925,7 +999,9 @@ API_RATE_LIMIT_PER_MINUTE=200`}
                       <option value="gemini-2.5-flash">Gemini 2.5 Flash (balanced)</option>
                       <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite (budget)</option>
                       <option value="gemini-2.5-pro">Gemini 2.5 Pro (deep reasoning)</option>
-                      <option value="gemini-3-flash-preview">Gemini 3 Flash (high performance)</option>
+                      <option value="gemini-3-flash-preview">
+                        Gemini 3 Flash (high performance)
+                      </option>
                       <option value="gemini-3-pro-preview">Gemini 3 Pro (flagship)</option>
                     </>
                   )}
@@ -1002,14 +1078,17 @@ API_RATE_LIMIT_PER_MINUTE=200`}
                 </p>
               )}
               {dedupThreshold >= 0.65 && dedupThreshold < 0.8 && (
-                <p>Moderate — good balance between catching duplicates and preserving unique content.</p>
+                <p>
+                  Moderate — good balance between catching duplicates and preserving unique content.
+                </p>
               )}
               {dedupThreshold >= 0.8 && dedupThreshold < 0.9 && (
                 <p>Recommended range — only substantially similar articles are deduped.</p>
               )}
               {dedupThreshold >= 0.9 && (
                 <p className="text-amber-400">
-                  Very strict — only near-identical articles will be deduped. Some duplicates may slip through.
+                  Very strict — only near-identical articles will be deduped. Some duplicates may
+                  slip through.
                 </p>
               )}
             </div>
@@ -1040,16 +1119,34 @@ API_RATE_LIMIT_PER_MINUTE=200`}
           </div>
 
           {dedupSavedValue != null && (
-            <div className={`mt-4 flex items-center gap-2 rounded-xl border px-4 py-3 ${dedupSource === "database" ? "border-slate-700 bg-slate-950/50" : "border-amber-800/50 bg-amber-950/20"}`}>
-              <span className={`h-2 w-2 rounded-full ${dedupSource === "database" ? "bg-emerald-500" : "bg-amber-500"}`} />
+            <div
+              className={`mt-4 flex items-center gap-2 rounded-xl border px-4 py-3 ${dedupSource === "database" ? "border-slate-700 bg-slate-950/50" : "border-amber-800/50 bg-amber-950/20"}`}
+            >
+              <span
+                className={`h-2 w-2 rounded-full ${dedupSource === "database" ? "bg-emerald-500" : "bg-amber-500"}`}
+              />
               <span className="text-xs text-slate-500">
                 {dedupSource === "database" ? (
-                  <>Worker using: <span className="font-medium text-slate-200">{Math.round(dedupSavedValue * 100)}%</span> <span className="text-slate-500">(saved in database)</span></>
+                  <>
+                    Worker using:{" "}
+                    <span className="font-medium text-slate-200">
+                      {Math.round(dedupSavedValue * 100)}%
+                    </span>{" "}
+                    <span className="text-slate-500">(saved in database)</span>
+                  </>
                 ) : (
-                  <>Worker using: <span className="font-medium text-amber-200">{Math.round(dedupSavedValue * 100)}%</span> <span className="text-amber-400">(fallback — not yet saved to database)</span></>
+                  <>
+                    Worker using:{" "}
+                    <span className="font-medium text-amber-200">
+                      {Math.round(dedupSavedValue * 100)}%
+                    </span>{" "}
+                    <span className="text-amber-400">(fallback — not yet saved to database)</span>
+                  </>
                 )}
                 {dedupThreshold !== dedupSavedValue && (
-                  <span className="ml-2 text-amber-400">(unsaved slider: {Math.round(dedupThreshold * 100)}%)</span>
+                  <span className="ml-2 text-amber-400">
+                    (unsaved slider: {Math.round(dedupThreshold * 100)}%)
+                  </span>
                 )}
               </span>
             </div>
@@ -1059,8 +1156,8 @@ API_RATE_LIMIT_PER_MINUTE=200`}
             <p className="text-sm font-medium text-amber-200">Important</p>
             <p className="mt-1 text-xs text-amber-200/70">
               Changes affect new articles only. Previously deduped articles will not be
-              re-evaluated. The new threshold takes effect on the next dedup batch without
-              requiring a worker restart.
+              re-evaluated. The new threshold takes effect on the next dedup batch without requiring
+              a worker restart.
             </p>
           </div>
         </section>

@@ -48,9 +48,10 @@ export const registerSiteRulesRoutes = (app: FastifyInstance, deps: ApiDeps) => 
         logger.info({ domain: normalized }, "[site-rules] domain added to whitelist");
         return inserted;
       } catch (err) {
-        const pgErr = err as { code?: string };
-        if (pgErr.code === "23505") {
-          return reply.code(409).send({ error: "Domain already exists" });
+        const pgCode =
+          (err as { code?: string }).code ?? (err as { cause?: { code?: string } }).cause?.code;
+        if (pgCode === "23505") {
+          return reply.code(409).send({ error: "Domain already exists in the whitelist" });
         }
         throw err;
       }

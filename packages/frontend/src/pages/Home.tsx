@@ -104,10 +104,7 @@ export default function Home() {
 
   const refreshStats = async () => {
     try {
-      const [sourcesData, qualityData] = await Promise.all([
-        getStatsSources(),
-        getSourceQuality(),
-      ]);
+      const [sourcesData, qualityData] = await Promise.all([getStatsSources(), getSourceQuality()]);
       setStatsSources(sourcesData);
       setSourceQuality(qualityData);
     } catch {
@@ -123,6 +120,7 @@ export default function Home() {
   const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSourceErrors({});
+    setError(null);
     if (!sourceForm.url) {
       setSourceErrors((prev) => ({ ...prev, url: "URL is required" }));
       setError("URL is required");
@@ -541,9 +539,7 @@ export default function Home() {
             Number.isNaN(Number(filters.maxAgeDays)) ||
             Number(filters.maxAgeDays) < 1 ||
             Number(filters.maxAgeDays) > 15 ? (
-              <p className="mt-2 text-xs text-red-400">
-                Filter max age must be between 1 and 15
-              </p>
+              <p className="mt-2 text-xs text-red-400">Filter max age must be between 1 and 15</p>
             ) : null
           ) : null}
         </section>
@@ -658,16 +654,25 @@ export default function Home() {
 
             const hasDraftChanges =
               (maxAgeDrafts[source.id] !== undefined &&
-                maxAgeDrafts[source.id] !== String(source.max_age_days ?? source.sectors?.default_max_age_days ?? 1)) ||
+                maxAgeDrafts[source.id] !==
+                  String(source.max_age_days ?? source.sectors?.default_max_age_days ?? 1)) ||
               (sectorDrafts[source.id] !== undefined &&
                 sectorDrafts[source.id] !== (source.sector_id ?? "")) ||
               (sourceIntervalDrafts[source.id] !== undefined &&
                 sourceIntervalDrafts[source.id] !== String(source.ingest_interval_minutes));
 
             const revertDrafts = () => {
-              setMaxAgeDrafts((prev) => ({ ...prev, [source.id]: String(source.max_age_days ?? source.sectors?.default_max_age_days ?? 1) }));
+              setMaxAgeDrafts((prev) => ({
+                ...prev,
+                [source.id]: String(
+                  source.max_age_days ?? source.sectors?.default_max_age_days ?? 1,
+                ),
+              }));
               setSectorDrafts((prev) => ({ ...prev, [source.id]: source.sector_id ?? "" }));
-              setSourceIntervalDrafts((prev) => ({ ...prev, [source.id]: String(source.ingest_interval_minutes) }));
+              setSourceIntervalDrafts((prev) => ({
+                ...prev,
+                [source.id]: String(source.ingest_interval_minutes),
+              }));
             };
 
             const handleEscape = (e: React.KeyboardEvent) => {
@@ -687,7 +692,9 @@ export default function Home() {
                   <input
                     type="checkbox"
                     checked={Boolean(selectedIds[source.id])}
-                    onChange={(e) => setSelectedIds((prev) => ({ ...prev, [source.id]: e.target.checked }))}
+                    onChange={(e) =>
+                      setSelectedIds((prev) => ({ ...prev, [source.id]: e.target.checked }))
+                    }
                     className="h-4 w-4 flex-shrink-0 accent-emerald-400"
                   />
                   <span
@@ -721,68 +728,86 @@ export default function Home() {
                       </button>
                     </div>
                   </div>
-                  {quality && quality.total > 0 && (() => {
-                    const barColors: Record<number, string> = {
-                      1: "bg-red-500", 2: "bg-orange-400", 3: "bg-amber-400", 4: "bg-emerald-400", 5: "bg-emerald-300",
-                    };
-                    const textColors: Record<number, string> = {
-                      1: "text-red-400", 2: "text-orange-400", 3: "text-amber-400", 4: "text-emerald-400", 5: "text-emerald-300",
-                    };
-                    const segments = [1, 2, 3, 4, 5]
-                      .map((s) => ({ score: s, count: quality.distribution[s] ?? 0 }))
-                      .filter((s) => s.count > 0);
-                    return (
-                    <div className="ml-2 flex-shrink-0 self-center">
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className={`w-8 text-right text-xs font-semibold tabular-nums ${signalColor}`}
-                          title="Signal ratio — percentage of articles that scored 4 or 5 (high-value). Green means 40%+ are high-value, amber means 15-39%, red means under 15%."
-                        >
-                          {quality.signal_ratio}%
-                        </span>
-                        <div className="w-60" title="Score distribution bar — each colored segment represents a score level (1 to 5, left to right). Wider segments mean more articles at that score. Red/orange = low scores, green = high scores.">
-                          <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-slate-800">
-                            {segments.map(({ score, count }) => (
-                              <div
-                                key={score}
-                                className={barColors[score]}
-                                style={{ width: `${(count / quality.total) * 100}%` }}
-                              />
-                            ))}
-                          </div>
-                          <div className="flex w-full mt-0.5">
-                            {segments.map(({ score, count }) => (
-                              <div
-                                key={score}
-                                className={`text-center text-[9px] leading-tight ${textColors[score]}`}
-                                style={{ width: `${(count / quality.total) * 100}%` }}
-                              >
-                                {(count / quality.total) >= 0.08 ? `${score}:${count}` : count}
+                  {quality &&
+                    quality.total > 0 &&
+                    (() => {
+                      const barColors: Record<number, string> = {
+                        1: "bg-red-500",
+                        2: "bg-orange-400",
+                        3: "bg-amber-400",
+                        4: "bg-emerald-400",
+                        5: "bg-emerald-300",
+                      };
+                      const textColors: Record<number, string> = {
+                        1: "text-red-400",
+                        2: "text-orange-400",
+                        3: "text-amber-400",
+                        4: "text-emerald-400",
+                        5: "text-emerald-300",
+                      };
+                      const segments = [1, 2, 3, 4, 5]
+                        .map((s) => ({ score: s, count: quality.distribution[s] ?? 0 }))
+                        .filter((s) => s.count > 0);
+                      return (
+                        <div className="ml-2 min-w-0 self-center">
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={`w-8 text-right text-xs font-semibold tabular-nums ${signalColor}`}
+                              title="Signal ratio — percentage of articles that scored 4 or 5 (high-value). Green means 40%+ are high-value, amber means 15-39%, red means under 15%."
+                            >
+                              {quality.signal_ratio}%
+                            </span>
+                            <div
+                              className="w-40"
+                              title="Score distribution bar — each colored segment represents a score level (1 to 5, left to right). Wider segments mean more articles at that score. Red/orange = low scores, green = high scores."
+                            >
+                              <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-slate-800">
+                                {segments.map(({ score, count }) => (
+                                  <div
+                                    key={score}
+                                    className={barColors[score]}
+                                    style={{ width: `${(count / quality.total) * 100}%` }}
+                                  />
+                                ))}
                               </div>
-                            ))}
+                              <div className="flex w-full mt-0.5">
+                                {segments.map(({ score, count }) => (
+                                  <div
+                                    key={score}
+                                    className={`text-center text-[9px] leading-tight ${textColors[score]}`}
+                                    style={{ width: `${(count / quality.total) * 100}%` }}
+                                  >
+                                    {count / quality.total >= 0.08 ? `${score}:${count}` : count}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                            <span
+                              className="w-6 text-right text-[10px] tabular-nums text-slate-500"
+                              title="Total number of articles scored from this source in the last 30 days."
+                            >
+                              {quality.total}
+                            </span>
+                            {quality.total >= 30 && quality.signal_ratio >= 40 && (
+                              <span
+                                className="rounded bg-emerald-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-400"
+                                title="This source produces 40%+ high-value articles (score 4+) over 30+ scored articles. Great signal source."
+                              >
+                                High signal
+                              </span>
+                            )}
+                            {quality.total >= 30 && quality.signal_ratio < 10 && (
+                              <span
+                                className="rounded bg-red-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-red-400"
+                                title="This source produces less than 10% high-value articles (score 4+) over 30+ scored articles. Consider disabling it or adjusting its sector."
+                              >
+                                Low signal
+                              </span>
+                            )}
                           </div>
                         </div>
-                        <span className="w-6 text-right text-[10px] tabular-nums text-slate-500" title="Total number of articles scored from this source in the last 30 days.">{quality.total}</span>
-                        {quality.total >= 30 && quality.signal_ratio >= 40 && (
-                          <span
-                            className="rounded bg-emerald-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-400"
-                            title="This source produces 40%+ high-value articles (score 4+) over 30+ scored articles. Great signal source."
-                          >
-                            High signal
-                          </span>
-                        )}
-                        {quality.total >= 30 && quality.signal_ratio < 10 && (
-                          <span
-                            className="rounded bg-red-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-red-400"
-                            title="This source produces less than 10% high-value articles (score 4+) over 30+ scored articles. Consider disabling it or adjusting its sector."
-                          >
-                            Low signal
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    );
-                  })()}
+                      );
+                    })()}
                 </div>
                 <div className="flex items-end gap-3 ml-auto flex-shrink-0">
                   <div className="flex flex-col gap-1">
@@ -791,7 +816,9 @@ export default function Home() {
                     </span>
                     <select
                       value={sectorDrafts[source.id] ?? source.sector_id ?? ""}
-                      onChange={(e) => setSectorDrafts((prev) => ({ ...prev, [source.id]: e.target.value }))}
+                      onChange={(e) =>
+                        setSectorDrafts((prev) => ({ ...prev, [source.id]: e.target.value }))
+                      }
                       onKeyDown={handleEscape}
                       className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
                     >
@@ -812,7 +839,9 @@ export default function Home() {
                         maxAgeDrafts[source.id] ??
                         String(source.max_age_days ?? source.sectors?.default_max_age_days ?? 1)
                       }
-                      onChange={(e) => setMaxAgeDrafts((prev) => ({ ...prev, [source.id]: e.target.value }))}
+                      onChange={(e) =>
+                        setMaxAgeDrafts((prev) => ({ ...prev, [source.id]: e.target.value }))
+                      }
                       onKeyDown={handleEscape}
                       className="w-20 rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
                     />
@@ -823,11 +852,13 @@ export default function Home() {
                     </span>
                     <input
                       value={
-                        sourceIntervalDrafts[source.id] ??
-                        String(source.ingest_interval_minutes)
+                        sourceIntervalDrafts[source.id] ?? String(source.ingest_interval_minutes)
                       }
                       onChange={(e) =>
-                        setSourceIntervalDrafts((prev) => ({ ...prev, [source.id]: e.target.value }))
+                        setSourceIntervalDrafts((prev) => ({
+                          ...prev,
+                          [source.id]: e.target.value,
+                        }))
                       }
                       onKeyDown={handleEscape}
                       className="w-24 rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-200"
