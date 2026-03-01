@@ -195,30 +195,59 @@ function LanguageToggle({
 
 // ─── Template Toggles (shared) ──────────────────────────────────────────────
 
+// Labels matching worker's hardcoded alertLabels
+const previewLabels = {
+  en: { alert: "Alert", keyword: "Keyword", score: "Score", sector: "Sector", readMore: "Read more \u2192" },
+  ka: { alert: "\u10E8\u10D4\u10E2\u10E7\u10DD\u10D1\u10D8\u10DC\u10D4\u10D1\u10D0", keyword: "\u10E1\u10D0\u10D9\u10D5\u10D0\u10DC\u10EB\u10DD \u10E1\u10D8\u10E2\u10E7\u10D5\u10D0", score: "\u10E5\u10E3\u10DA\u10D0", sector: "\u10E1\u10D4\u10E5\u10E2\u10DD\u10E0\u10D8", readMore: "\u10EC\u10D0\u10D8\u10D9\u10D8\u10D7\u10EE\u10D4\u10D7 \u10DB\u10D4\u10E2\u10D8 \u2192" },
+};
+
 function TemplateToggles({
   template,
   onChange,
   ruleName,
   keywords,
+  language = "en",
 }: {
   template: AlertTemplateConfig;
   onChange: (t: AlertTemplateConfig) => void;
   ruleName?: string;
   keywords?: string[];
+  language?: "en" | "ka";
 }) {
-  const toggle = (key: keyof AlertTemplateConfig) => {
+  const toggle = (key: "showTitle" | "showUrl" | "showSummary" | "showScore" | "showSector" | "showKeyword") => {
     onChange({ ...template, [key]: !template[key] });
+  };
+
+  const updateLabel = (key: keyof NonNullable<AlertTemplateConfig["labels"]>, value: string) => {
+    const labels = { ...(template.labels || {}) };
+    if (value.trim()) {
+      labels[key] = value;
+    } else {
+      delete labels[key];
+    }
+    onChange({ ...template, labels: Object.keys(labels).length > 0 ? labels : undefined });
+  };
+
+  // Resolve labels: custom → language default
+  const defaults = previewLabels[language];
+  const cl = template.labels;
+  const resolved = {
+    alert: cl?.alert || defaults.alert,
+    keyword: cl?.keyword || defaults.keyword,
+    score: cl?.score || defaults.score,
+    sector: cl?.sector || defaults.sector,
+    readMore: cl?.readMore || defaults.readMore,
   };
 
   // Build preview mirroring worker's formatAlertMessage
   const emoji = template.alertEmoji || "\u{1F514}";
   const name = ruleName || "My Alert Rule";
   const kw = keywords?.[0] || "keyword";
-  const previewLines: string[] = [`<b>${emoji} Alert: ${name}</b>`];
+  const previewLines: string[] = [`<b>${emoji} ${resolved.alert}: ${name}</b>`];
   const meta: string[] = [];
-  if (template.showKeyword !== false) meta.push(`Keyword: ${kw}`);
-  if (template.showScore !== false) meta.push("Score: 4/5 (High)");
-  if (template.showSector !== false) meta.push("Sector: Technology");
+  if (template.showKeyword !== false) meta.push(`${resolved.keyword}: ${kw}`);
+  if (template.showScore !== false) meta.push(`${resolved.score}: 4/5 (High)`);
+  if (template.showSector !== false) meta.push(`${resolved.sector}: Technology`);
   if (meta.length > 0) previewLines.push(meta.join(" | "));
   previewLines.push("");
   if (template.showTitle !== false) {
@@ -228,41 +257,79 @@ function TemplateToggles({
     previewLines.push("OpenAI unveiled GPT-5 featuring real-time chain-of-thought reasoning...");
   }
   if (template.showUrl !== false) {
-    previewLines.push('\n<a href="#">Read more \u2192</a>');
+    previewLines.push(`\n<a href="#">${resolved.readMore}</a>`);
   }
+
+  // Row helper: checkbox + label name + optional text input
+  const templateRow = (
+    toggleKey: "showTitle" | "showUrl" | "showSummary" | "showScore" | "showSector" | "showKeyword",
+    label: string,
+    labelKey?: keyof NonNullable<AlertTemplateConfig["labels"]>,
+    placeholder?: string,
+  ) => (
+    <div className="flex items-center gap-2 h-7">
+      <input
+        type="checkbox"
+        checked={template[toggleKey] !== false}
+        onChange={() => toggle(toggleKey)}
+        className="rounded border-slate-600 bg-slate-950 text-cyan-500 focus:ring-0 focus:ring-offset-0 shrink-0"
+      />
+      <span className="w-16 text-xs text-slate-400 shrink-0">{label}</span>
+      {labelKey && template[toggleKey] !== false && (
+        <input
+          value={template.labels?.[labelKey] || ""}
+          onChange={(e) => updateLabel(labelKey, e.target.value)}
+          placeholder={placeholder}
+          maxLength={40}
+          className="flex-1 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 outline-none focus:border-slate-500 placeholder:text-slate-600"
+        />
+      )}
+    </div>
+  );
 
   return (
     <div>
       <label className="mb-1.5 block text-xs font-medium text-slate-400">Message Template</label>
-      <div className="flex flex-wrap gap-3">
-        {([
-          { key: "showTitle" as const, label: "Show Title" },
-          { key: "showUrl" as const, label: "Show URL" },
-          { key: "showSummary" as const, label: "Show Summary" },
-          { key: "showScore" as const, label: "Show Score" },
-          { key: "showSector" as const, label: "Show Sector" },
-          { key: "showKeyword" as const, label: "Show Keyword" },
-        ] as const).map(({ key, label }) => (
-          <label key={key} className="flex items-center gap-1.5 text-xs text-slate-300">
+      <div className="grid grid-cols-2 gap-3">
+        {/* Left: settings */}
+        <div className="space-y-1">
+          {/* Alert header label (always on — decorative checkbox) */}
+          <div className="flex items-center gap-2 h-7">
             <input
               type="checkbox"
-              checked={template[key] !== false}
-              onChange={() => toggle(key)}
-              className="rounded border-slate-600 bg-slate-950 text-cyan-500 focus:ring-0 focus:ring-offset-0"
+              checked
+              disabled
+              className="rounded border-slate-600 bg-slate-950 text-cyan-500 opacity-40 shrink-0"
             />
-            {label}
-          </label>
-        ))}
-      </div>
-      {/* Live preview */}
-      <div className="mt-2 rounded-lg border border-slate-700/50 bg-slate-950/60 px-3 py-2 font-mono text-[10px] leading-relaxed text-slate-400">
-        {previewLines.map((line, i) => {
-          if (line === "") return <br key={i} />;
-          const html = line
-            .replace(/<b>(.*?)<\/b>/g, '<span class="font-bold text-slate-200">$1</span>')
-            .replace(/<a [^>]*>(.*?)<\/a>/g, '<span class="text-cyan-400 underline">$1</span>');
-          return <div key={i} dangerouslySetInnerHTML={{ __html: html }} />;
-        })}
+            <span className="w-16 text-xs text-slate-400 shrink-0">Alert</span>
+            <input
+              value={template.labels?.alert || ""}
+              onChange={(e) => updateLabel("alert", e.target.value)}
+              placeholder={defaults.alert}
+              maxLength={40}
+              className="flex-1 rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200 outline-none focus:border-slate-500 placeholder:text-slate-600"
+            />
+          </div>
+          {templateRow("showKeyword", "Keyword", "keyword", defaults.keyword)}
+          {templateRow("showScore", "Score", "score", defaults.score)}
+          {templateRow("showSector", "Sector", "sector", defaults.sector)}
+          {templateRow("showUrl", "URL Link", "readMore", defaults.readMore)}
+          <p className="text-[10px] text-slate-600 pt-0.5">Empty = default for language</p>
+          {templateRow("showTitle", "Title")}
+          {templateRow("showSummary", "Summary")}
+          <p className="text-[10px] text-slate-600">Title and summary show article content (not customizable)</p>
+        </div>
+
+        {/* Right: live preview */}
+        <div className="rounded-lg border border-slate-700/50 bg-slate-950/60 px-3 py-2 font-mono text-[10px] leading-relaxed text-slate-400">
+          {previewLines.map((line, i) => {
+            if (line === "") return <br key={i} />;
+            const html = line
+              .replace(/<b>(.*?)<\/b>/g, '<span class="font-bold text-slate-200">$1</span>')
+              .replace(/<a [^>]*>(.*?)<\/a>/g, '<span class="text-cyan-400 underline">$1</span>');
+            return <div key={i} dangerouslySetInnerHTML={{ __html: html }} />;
+          })}
+        </div>
       </div>
     </div>
   );
@@ -499,6 +566,7 @@ function CreateForm({ onCreated, sectors }: CreateFormProps) {
           onChange={(t) => setForm((prev) => ({ ...prev, template: t }))}
           ruleName={form.name}
           keywords={form.keywords}
+          language={form.language as "en" | "ka"}
         />
 
         <div className="flex justify-end">
@@ -621,6 +689,7 @@ type RuleCardProps = {
 };
 
 function RuleCard({ rule, sectors, onToggle, onDelete, onUpdated, isToggling }: RuleCardProps) {
+  const [collapsed, setCollapsed] = useState(true);
   const [expanded, setExpanded] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -911,6 +980,7 @@ function RuleCard({ rule, sectors, onToggle, onDelete, onUpdated, isToggling }: 
             onChange={(t) => setEditForm((prev) => ({ ...prev, template: t }))}
             ruleName={editForm.name}
             keywords={editForm.keywords}
+            language={editForm.language as "en" | "ka"}
           />
 
           {/* Save / Cancel */}
@@ -937,26 +1007,47 @@ function RuleCard({ rule, sectors, onToggle, onDelete, onUpdated, isToggling }: 
   // ── Display mode ──────────────────────────────────────────────────────────
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
-      {/* Row 1: name + badges + actions */}
+      {/* Row 1: name + badges + stats + actions */}
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="text-lg font-bold leading-tight text-slate-100">{rule.name}</h3>
-          <div className="mt-1 flex gap-1.5">
-            {sectorName && (
-              <span className="inline-block rounded-full bg-violet-500/15 px-2.5 py-0.5 text-xs text-violet-300">
-                {sectorName}
-              </span>
-            )}
-            <span
+        <div
+          className="min-w-0 cursor-pointer select-none"
+          onClick={() => setCollapsed((v) => !v)}
+        >
+          <div className="flex items-center gap-2">
+            <svg
               className={[
-                "inline-block rounded-full px-2.5 py-0.5 text-xs font-medium",
-                rule.language === "ka"
-                  ? "bg-cyan-500/15 text-cyan-300"
-                  : "bg-slate-700/50 text-slate-400",
+                "h-3.5 w-3.5 text-slate-500 transition-transform shrink-0",
+                collapsed ? "" : "rotate-90",
               ].join(" ")}
+              viewBox="0 0 16 16"
+              fill="currentColor"
             >
-              {rule.language === "ka" ? "KA" : "EN"}
-            </span>
+              <path d="M6 4l4 4-4 4V4z" />
+            </svg>
+            <h3 className="text-lg font-bold leading-tight text-slate-100">{rule.name}</h3>
+            <div className="flex gap-1.5 ml-1">
+              {sectorName && (
+                <span className="inline-block rounded-full bg-violet-500/15 px-2.5 py-0.5 text-xs text-violet-300">
+                  {sectorName}
+                </span>
+              )}
+              <span
+                className={[
+                  "inline-block rounded-full px-2.5 py-0.5 text-xs font-medium",
+                  rule.language === "ka"
+                    ? "bg-cyan-500/15 text-cyan-300"
+                    : "bg-slate-700/50 text-slate-400",
+                ].join(" ")}
+              >
+                {rule.language === "ka" ? "KA" : "EN"}
+              </span>
+              <span className={scoreBadgeClass(rule.min_score)}>{scoreLabel(rule.min_score)}</span>
+              <span className="text-xs text-slate-500 self-center">
+                {rule.sent_count === 0 && rule.total_deliveries === 0
+                  ? "never triggered"
+                  : `${rule.sent_count} sent`}
+              </span>
+            </div>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -1031,74 +1122,79 @@ function RuleCard({ rule, sectors, onToggle, onDelete, onUpdated, isToggling }: 
         </div>
       </div>
 
-      {/* Mute indicator */}
-      {muteRemaining && (
-        <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-3 py-1 text-xs text-amber-300">
-          <svg className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 12.5a5.5 5.5 0 110-11 5.5 5.5 0 010 11zM7.25 4v4.5l3.25 1.94.75-1.23-2.5-1.48V4h-1.5z" />
-          </svg>
-          Muted — {muteRemaining}
-        </div>
-      )}
+      {/* Collapsible body */}
+      {!collapsed && (
+        <>
+          {/* Mute indicator */}
+          {muteRemaining && (
+            <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-3 py-1 text-xs text-amber-300">
+              <svg className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 12.5a5.5 5.5 0 110-11 5.5 5.5 0 010 11zM7.25 4v4.5l3.25 1.94.75-1.23-2.5-1.48V4h-1.5z" />
+              </svg>
+              Muted — {muteRemaining}
+            </div>
+          )}
 
-      {/* Row 2: keywords */}
-      {rule.keywords.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {rule.keywords.map((kw, i) => (
+          {/* Row 2: keywords */}
+          {rule.keywords.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {rule.keywords.map((kw, i) => (
+                <span
+                  key={i}
+                  className="rounded-full bg-cyan-500/20 px-3 py-1 text-sm text-cyan-200"
+                >
+                  {kw}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Row 3: score + chat ID + stats */}
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <span className={scoreBadgeClass(rule.min_score)}>{scoreLabel(rule.min_score)}</span>
             <span
-              key={i}
-              className="rounded-full bg-cyan-500/20 px-3 py-1 text-sm text-cyan-200"
+              className="max-w-[180px] truncate font-mono text-xs text-slate-500"
+              title={rule.telegram_chat_id}
             >
-              {kw}
+              {rule.telegram_chat_id}
             </span>
-          ))}
-        </div>
-      )}
+            <span className="text-xs text-slate-500">
+              {rule.sent_count === 0 && rule.total_deliveries === 0
+                ? "never triggered"
+                : `${rule.sent_count} sent / ${rule.total_deliveries} total`}
+            </span>
+          </div>
 
-      {/* Row 3: score + chat ID + stats */}
-      <div className="mt-3 flex flex-wrap items-center gap-3">
-        <span className={scoreBadgeClass(rule.min_score)}>{scoreLabel(rule.min_score)}</span>
-        <span
-          className="max-w-[180px] truncate font-mono text-xs text-slate-500"
-          title={rule.telegram_chat_id}
-        >
-          {rule.telegram_chat_id}
-        </span>
-        <span className="text-xs text-slate-500">
-          {rule.sent_count === 0 && rule.total_deliveries === 0
-            ? "never triggered"
-            : `${rule.sent_count} sent / ${rule.total_deliveries} total`}
-        </span>
-      </div>
+          {/* Row 4: last triggered */}
+          {rule.last_triggered_at && (
+            <p className="mt-2 text-xs text-slate-500">
+              Last triggered: {formatRelativeTime(rule.last_triggered_at)}
+            </p>
+          )}
 
-      {/* Row 4: last triggered */}
-      {rule.last_triggered_at && (
-        <p className="mt-2 text-xs text-slate-500">
-          Last triggered: {formatRelativeTime(rule.last_triggered_at)}
-        </p>
-      )}
-
-      {/* Expand / collapse recent deliveries */}
-      <div className="mt-3 border-t border-slate-800/60 pt-3">
-        <button
-          onClick={() => setExpanded((v) => !v)}
-          aria-expanded={expanded}
-          className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-200"
-        >
-          <svg
-            className={[
-              "h-3.5 w-3.5 transition-transform",
-              expanded ? "rotate-90" : "",
-            ].join(" ")}
-            viewBox="0 0 16 16"
-            fill="currentColor"
-          >
+          {/* Expand / collapse recent deliveries */}
+          <div className="mt-3 border-t border-slate-800/60 pt-3">
+            <button
+              onClick={() => setExpanded((v) => !v)}
+              aria-expanded={expanded}
+              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-200"
+            >
+              <svg
+                className={[
+                  "h-3.5 w-3.5 transition-transform",
+                  expanded ? "rotate-90" : "",
+                ].join(" ")}
+                viewBox="0 0 16 16"
+                fill="currentColor"
+              >
             <path d="M6 4l4 4-4 4V4z" />
           </svg>
           {expanded ? "Hide" : "Show"} recent deliveries
         </button>
-        {expanded && <DeliveriesTable ruleId={rule.id} />}
-      </div>
+            {expanded && <DeliveriesTable ruleId={rule.id} />}
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -25,6 +25,14 @@ type TelegramConfig = {
   defaultChatId: string;
 };
 
+type AlertTemplateLabels = {
+  alert?: string;
+  keyword?: string;
+  score?: string;
+  sector?: string;
+  readMore?: string;
+};
+
 type AlertTemplateConfig = {
   showTitle: boolean;
   showUrl: boolean;
@@ -33,6 +41,7 @@ type AlertTemplateConfig = {
   showSector: boolean;
   showKeyword: boolean;
   alertEmoji: string;
+  labels?: AlertTemplateLabels;
 };
 
 const DEFAULT_ALERT_TEMPLATE: AlertTemplateConfig = {
@@ -230,20 +239,28 @@ export const checkAndFireAlerts = async ({
         continue;
       }
 
-      // Format with template
+      // Format with template (Georgian labels if KA rule)
       const template = mergeTemplate(rule.template as Partial<AlertTemplateConfig> | null);
-      let message = formatAlertMessage(rule.name, matchedKeyword, article, template);
-      const targetChatId = rule.telegramChatId || telegramConfig.defaultChatId;
+      const lang = rule.language === "ka" ? "ka" : "en";
 
-      // Translate to Georgian if rule is set to 'ka'
-      if (rule.language === "ka" && transApiKey) {
-        const tr = await translateAlertText(db, transProvider, transApiKey, transModel, message);
+      // Translate title + summary content before formatting (labels are pre-translated)
+      let translatedTitle = article.title;
+      let translatedSummary = article.llmSummary;
+      if (lang === "ka" && transApiKey) {
+        const contentToTranslate = [article.title, article.llmSummary].filter(Boolean).join("\n---\n");
+        const tr = await translateAlertText(db, transProvider, transApiKey, transModel, contentToTranslate);
         if (tr) {
-          message = tr.text;
+          const parts = tr.text.split(/\n---\n|\n-{3,}\n/);
+          translatedTitle = parts[0]?.trim() || article.title;
+          translatedSummary = parts[1]?.trim() || article.llmSummary;
         } else {
           logger.warn({ ruleId: rule.id }, "[alert] translation failed, sending English fallback");
         }
       }
+
+      const translatedArticle = { ...article, title: translatedTitle, llmSummary: translatedSummary };
+      let message = formatAlertMessage(rule.name, matchedKeyword, translatedArticle, template, lang);
+      const targetChatId = rule.telegramChatId || telegramConfig.defaultChatId;
 
       const result = await sendTelegramAlert(telegramConfig.botToken, targetChatId, message);
 
@@ -408,29 +425,47 @@ const mergeTemplate = (partial: Partial<AlertTemplateConfig> | null): AlertTempl
   ...(partial ?? {}),
 });
 
+// Label translations for alert structural frame (not sent through LLM)
+const alertLabels = {
+  en: { alert: "Alert", keyword: "Keyword", score: "Score", sector: "Sector", readMore: "Read more →" },
+  ka: { alert: "შეტყობინება", keyword: "საკვანძო სიტყვა", score: "ქულა", sector: "სექტორი", readMore: "წაიკითხეთ მეტი →" },
+};
+
 const formatAlertMessage = (
   ruleName: string,
   keyword: string,
   article: ScoredArticle,
   template: AlertTemplateConfig,
+  language: "en" | "ka" = "en",
 ): string => {
+  // Custom labels override hardcoded defaults per language
+  const defaults = alertLabels[language];
+  const cl = template.labels;
+  const l = {
+    alert: cl?.alert || defaults.alert,
+    keyword: cl?.keyword || defaults.keyword,
+    score: cl?.score || defaults.score,
+    sector: cl?.sector || defaults.sector,
+    readMore: cl?.readMore || defaults.readMore,
+  };
+
   const scoreLabels = ["", "Low", "Low", "Medium", "High", "Critical"];
   const scoreLabel = scoreLabels[article.score] ?? "Unknown";
 
   const lines: string[] = [
-    `<b>${template.alertEmoji} Alert: ${cleanForTelegram(ruleName)}</b>`,
+    `<b>${template.alertEmoji} ${l.alert}: ${cleanForTelegram(ruleName)}</b>`,
   ];
 
   // Meta line: optional keyword + optional score + optional sector
   const metaParts: string[] = [];
   if (template.showKeyword) {
-    metaParts.push(`Keyword: <code>${cleanForTelegram(keyword)}</code>`);
+    metaParts.push(`${l.keyword}: <code>${cleanForTelegram(keyword)}</code>`);
   }
   if (template.showScore) {
-    metaParts.push(`Score: ${article.score}/5 (${scoreLabel})`);
+    metaParts.push(`${l.score}: ${article.score}/5 (${scoreLabel})`);
   }
   if (template.showSector && article.sectorName) {
-    metaParts.push(`Sector: ${cleanForTelegram(article.sectorName)}`);
+    metaParts.push(`${l.sector}: ${cleanForTelegram(article.sectorName)}`);
   }
   if (metaParts.length > 0) {
     lines.push(metaParts.join(" | "));
@@ -446,7 +481,7 @@ const formatAlertMessage = (
   }
 
   if (template.showUrl && article.url) {
-    lines.push(`\n<a href="${article.url}">Read more →</a>`);
+    lines.push(`\n<a href="${article.url}">${l.readMore}</a>`);
   }
 
   return lines.join("\n");

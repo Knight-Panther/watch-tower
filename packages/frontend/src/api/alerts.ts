@@ -2,6 +2,14 @@ import { API_BASE, authHeaders } from "./client";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
+export type AlertTemplateLabels = {
+  alert?: string;
+  keyword?: string;
+  score?: string;
+  sector?: string;
+  readMore?: string;
+};
+
 export type AlertTemplateConfig = {
   showTitle?: boolean;
   showUrl?: boolean;
@@ -10,6 +18,7 @@ export type AlertTemplateConfig = {
   showSector?: boolean;
   showKeyword?: boolean;
   alertEmoji?: string;
+  labels?: AlertTemplateLabels;
 };
 
 export type AlertRule = {
