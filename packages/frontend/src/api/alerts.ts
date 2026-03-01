@@ -66,6 +66,23 @@ export type AlertSectorKeywords = {
   rule_count: number;
 };
 
+// ─── Defaults (DB-confirmed) ────────────────────────────────────────────────
+
+export type AlertRuleDefaultsResponse = {
+  min_score: number;
+  language: "en" | "ka";
+  active: boolean;
+  template: AlertTemplateConfig;
+};
+
+export const getAlertRuleDefaults = async (): Promise<AlertRuleDefaultsResponse> => {
+  const res = await fetch(`${API_BASE}/alerts/defaults`, { headers: authHeaders });
+  if (!res.ok) {
+    throw new Error("Failed to load alert rule defaults");
+  }
+  return res.json();
+};
+
 // ─── CRUD ───────────────────────────────────────────────────────────────────
 
 export const listAlertRules = async (): Promise<AlertRule[]> => {

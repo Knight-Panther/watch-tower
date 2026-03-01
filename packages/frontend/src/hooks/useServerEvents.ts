@@ -135,6 +135,8 @@ export const useServerEvents = (options: UseServerEventsOptions = {}): UseServer
       "article:translated",
       "source:fetched",
       "stats:updated",
+      "digest:draft-ready",
+      "digest:sent",
     ];
 
     eventTypes.forEach((eventType) => {

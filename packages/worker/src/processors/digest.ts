@@ -1,11 +1,19 @@
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { eq, gte, and, desc, inArray, count, isNotNull } from "drizzle-orm";
+import { eq, gte, and, desc, inArray, count, isNotNull, isNull, not, sql } from "drizzle-orm";
 import { logger } from "@watch-tower/shared";
 import { DEFAULT_MODELS, DEFAULT_BASE_URLS, calculateLLMCost } from "@watch-tower/llm";
 import type { Database } from "@watch-tower/db";
-import { articles, appConfig, sectors, llmTelemetry, digestRuns } from "@watch-tower/db";
+import {
+  articles,
+  appConfig,
+  sectors,
+  llmTelemetry,
+  digestRuns,
+  digestSlots,
+  digestDrafts,
+} from "@watch-tower/db";
 import { sendTelegramAlert, sendTelegramPhoto, cleanForTelegram } from "../utils/telegram-alert.js";
 import { generateDigestCover } from "../services/digest-cover.js";
 import {
@@ -43,6 +51,8 @@ export type DigestConfig = {
   timezone: string; // IANA timezone
   days: number[]; // 1=Mon...7=Sun
   minScore: number; // 1-5
+  maxArticles: number; // 1-100 (cap fed to LLM)
+  sectorIds: string[] | null; // filter to specific sectors (null = all)
   language: "en" | "ka";
   systemPrompt: string; // full LLM system prompt (editable from UI)
   telegramChatId: string;
@@ -54,9 +64,13 @@ export type DigestConfig = {
   translationProvider: string; // "gemini" | "openai"
   translationModel: string;
   translationPrompt: string; // instructions for Georgian translation LLM
+  telegramLanguage: "en" | "ka";
+  facebookLanguage: "en" | "ka";
+  linkedinLanguage: "en" | "ka";
   imageTelegram: boolean;
   imageFacebook: boolean;
   imageLinkedin: boolean;
+  autoPost: boolean; // true = deliver immediately, false = save as draft
 };
 
 type DigestArticle = {
@@ -76,10 +90,26 @@ type LLMResult = {
   latencyMs: number;
 };
 
-type DigestResult = {
+export type DigestResult = {
   sent: boolean;
   articleCount: number;
   messageCount: number;
+  draftId?: string;
+};
+
+/** Intermediate result from generateDigestContent() */
+export type GeneratedContent = {
+  rawBullets: string;
+  translatedBullets: string | null;
+  articleIds: string[];
+  articleMap: Map<number, DigestArticle>;
+  allArticles: DigestArticle[];
+  llmResult: LLMResult | null;
+  translationResult: LLMResult | null;
+  stats: PipelineStats;
+  hasLLM: boolean;
+  scoreDistribution: Record<string, number>; // { "5": 4, "4": 8, "3": 6 }
+  maxArticles: number;
 };
 
 // ─── Default system prompt ───────────────────────────────────────────────────
@@ -101,6 +131,7 @@ Rules:
 - The number of bullets must NOT scale with input size — 30 articles and 100 articles should produce roughly the same number of bullets
 - Skip anything routine, incremental, or already well-known. Only surface genuine developments.
 - Most impactful first
+- Do NOT include scores or score numbers in the output — the reader doesn't need them
 - Write in English`;
 
 export const DEFAULT_TRANSLATION_PROMPT =
@@ -160,6 +191,8 @@ export const readDigestConfig = async (db: Database): Promise<DigestConfig> => {
       ? (m.get("digest_days") as number[])
       : [1, 2, 3, 4, 5, 6, 7],
     minScore: Number(m.get("digest_min_score")) || 3,
+    maxArticles: 50,
+    sectorIds: null,
     language: ((m.get("digest_language") as string) ?? postingLanguage) as "en" | "ka",
     systemPrompt: (m.get("digest_system_prompt") as string) ?? DEFAULT_SYSTEM_PROMPT,
     telegramChatId: String(m.get("digest_telegram_chat_id") ?? ""),
@@ -179,52 +212,88 @@ export const readDigestConfig = async (db: Database): Promise<DigestConfig> => {
     translationProvider: (m.get("digest_translation_provider") as string) ?? globalTransProvider,
     translationModel: (m.get("digest_translation_model") as string) ?? globalTransModel,
     translationPrompt: (m.get("digest_translation_prompt") as string) ?? DEFAULT_TRANSLATION_PROMPT,
+    telegramLanguage: ((m.get("digest_language") as string) ?? postingLanguage ?? "en") as "en" | "ka",
+    facebookLanguage: ((m.get("digest_language") as string) ?? postingLanguage ?? "en") as "en" | "ka",
+    linkedinLanguage: ((m.get("digest_language") as string) ?? postingLanguage ?? "en") as "en" | "ka",
     imageTelegram: m.get("digest_image_telegram") === true || m.get("digest_image_telegram") === "true",
     imageFacebook: m.get("digest_image_facebook") === true || m.get("digest_image_facebook") === "true",
     imageLinkedin: m.get("digest_image_linkedin") === true || m.get("digest_image_linkedin") === "true",
+    autoPost: true, // Legacy config always auto-posts
   };
 };
 
-// ─── Core digest compiler ────────────────────────────────────────────────────
+// ─── Slot config reader ─────────────────────────────────────────────────────
 
-export const compileAndSendDigest = async (
+export const readSlotConfig = async (db: Database, slotId: string): Promise<DigestConfig> => {
+  const [slot] = await db
+    .select()
+    .from(digestSlots)
+    .where(eq(digestSlots.id, slotId));
+
+  if (!slot) throw new Error(`[digest] slot ${slotId} not found`);
+
+  return {
+    enabled: slot.enabled,
+    time: slot.time,
+    timezone: slot.timezone,
+    days: Array.isArray(slot.days) ? (slot.days as number[]) : [1, 2, 3, 4, 5, 6, 7],
+    minScore: slot.minScore,
+    maxArticles: slot.maxArticles,
+    sectorIds: Array.isArray(slot.sectorIds) ? (slot.sectorIds as string[]) : null,
+    language: slot.language as "en" | "ka",
+    systemPrompt: slot.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
+    telegramChatId: slot.telegramChatId ?? "",
+    telegramEnabled: slot.telegramEnabled,
+    facebookEnabled: slot.facebookEnabled,
+    linkedinEnabled: slot.linkedinEnabled,
+    provider: slot.provider,
+    model: slot.model,
+    translationProvider: slot.translationProvider,
+    translationModel: slot.translationModel,
+    translationPrompt: slot.translationPrompt ?? DEFAULT_TRANSLATION_PROMPT,
+    telegramLanguage: (slot.telegramLanguage ?? slot.language) as "en" | "ka",
+    facebookLanguage: (slot.facebookLanguage ?? slot.language) as "en" | "ka",
+    linkedinLanguage: (slot.linkedinLanguage ?? slot.language) as "en" | "ka",
+    imageTelegram: slot.imageTelegram,
+    imageFacebook: slot.imageFacebook,
+    imageLinkedin: slot.imageLinkedin,
+    autoPost: slot.autoPost,
+  };
+};
+
+// ─── A. Generate digest content (steps 0-9) ────────────────────────────────
+
+export const generateDigestContent = async (
   deps: DigestDeps,
-  opts: { isTest?: boolean } = {},
-): Promise<DigestResult> => {
-  const { db, telegramConfig, facebookConfig, linkedinConfig, apiKeys } = deps;
+  config: DigestConfig,
+  opts: { isTest?: boolean; slotId?: string } = {},
+): Promise<GeneratedContent | null> => {
+  const { db, apiKeys } = deps;
   const isTest = opts.isTest ?? false;
+  const slotId = opts.slotId;
 
-  // 0. Emergency brake — skip all delivery if emergency_stop is active
+  // 0. Emergency brake
   const [stopRow] = await db
     .select({ value: appConfig.value })
     .from(appConfig)
     .where(eq(appConfig.key, "emergency_stop"));
   if (stopRow?.value === true || stopRow?.value === "true") {
     logger.warn("[digest] emergency_stop active, skipping digest");
-    return { sent: false, articleCount: 0, messageCount: 0 };
+    return null;
   }
 
-  // 1. Read config
-  const config = await readDigestConfig(db);
   if (!config.enabled && !isTest) {
-    return { sent: false, articleCount: 0, messageCount: 0 };
+    return null;
   }
 
-  // 2. Validate at least one delivery channel is configured
-  //    Telegram: requires explicit digest chat ID — no fallback to default posting channel
-  const hasTelegram = config.telegramEnabled && telegramConfig?.botToken && config.telegramChatId;
-  const hasFacebook = config.facebookEnabled && facebookConfig;
-  const hasLinkedin = config.linkedinEnabled && linkedinConfig;
-
-  if (!hasTelegram && !hasFacebook && !hasLinkedin) {
-    logger.warn("[digest] no delivery channels configured, skipping");
-    return { sent: false, articleCount: 0, messageCount: 0 };
-  }
-
-  // 3. Determine lookback window — always capped at 24h
+  // 1. Determine lookback window — always capped at 24h
   const max24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
   let lookback: Date;
   if (isTest) {
+    lookback = max24h;
+  } else if (slotId) {
+    // Fixed 24h window — digestedAt column handles dedup across slots/runs,
+    // so lookback only needs to cap freshness (not prevent re-inclusion)
     lookback = max24h;
   } else {
     const [lastRow] = await db
@@ -239,13 +308,32 @@ export const compileAndSendDigest = async (
     }
   }
 
-  // 4. Query qualifying articles (capped at 100 to prevent token overflow)
-  //    Georgian mode: same article pool as English — translation is post-processing on final output
+  // 2. Query qualifying articles with dedup exclusion
   const whereConditions = [
     gte(articles.scoredAt, lookback),
     gte(articles.importanceScore, config.minScore),
     inArray(articles.pipelineStage, ["scored", "approved", "posted"]),
+    isNull(articles.digestedAt),
   ];
+
+  // Sector filtering
+  if (config.sectorIds && config.sectorIds.length > 0) {
+    whereConditions.push(inArray(articles.sectorId, config.sectorIds));
+  }
+
+  // Dedup: exclude articles in pending/approved drafts (not sent — sent articles are fair game)
+  const excludedRows = await db.execute<{ aid: string }>(sql`
+    SELECT DISTINCT jsonb_array_elements_text(article_ids)::uuid AS aid
+    FROM digest_drafts
+    WHERE status IN ('draft', 'approved')
+      AND generated_at > NOW() - INTERVAL '48 hours'
+  `);
+  const excludedIds = (excludedRows.rows ?? []).map((r) => r.aid);
+  if (excludedIds.length > 0) {
+    whereConditions.push(not(inArray(articles.id, excludedIds)));
+  }
+
+  const articleLimit = Math.min(Math.max(config.maxArticles ?? 50, 1), 100);
 
   const allArticles = await db
     .select({
@@ -261,23 +349,40 @@ export const compileAndSendDigest = async (
     .leftJoin(sectors, eq(articles.sectorId, sectors.id))
     .where(and(...whereConditions))
     .orderBy(desc(articles.importanceScore), desc(articles.publishedAt))
-    .limit(100);
+    .limit(articleLimit);
 
-  // 5. Zero articles guard
+  // Zero articles guard — record empty run to prevent triple-fire from scheduler
   if (allArticles.length === 0) {
     logger.info("[digest] no qualifying articles, skipping");
-    return { sent: false, articleCount: 0, messageCount: 0 };
+    if (slotId && !isTest) {
+      await db.insert(digestRuns).values({
+        slotId,
+        sentAt: new Date(),
+        isTest: false,
+        language: config.language,
+        articleCount: 0,
+        channels: [],
+        channelResults: {},
+        provider: config.provider,
+        model: config.model,
+        minScore: config.minScore,
+        statsScanned: 0,
+        statsScored: 0,
+        statsAboveThreshold: 0,
+      });
+    }
+    return null;
   }
   logger.info(
     { count: allArticles.length, firstTitle: allArticles[0]?.title?.slice(0, 80) },
     "[digest] articles selected",
   );
 
-  // 6. Build article index for [#ID]→URL mapping
+  // 3. Build article index for [#ID]→URL mapping
   const articleMap = new Map<number, DigestArticle>();
   allArticles.forEach((a, i) => articleMap.set(i + 1, a as DigestArticle));
 
-  // 7. Resolve API key for digest provider
+  // 4. LLM call
   const digestApiKey = resolveApiKey(config.provider, apiKeys);
   let llmBullets: string | null = null;
   let llmResult: LLMResult | null = null;
@@ -304,7 +409,7 @@ export const compileAndSendDigest = async (
     logger.warn({ provider: config.provider }, "[digest] no API key for digest provider");
   }
 
-  // 8. Build raw bullet body (no platform-specific formatting yet)
+  // 5. Build raw bullet body
   let rawBullets: string;
   if (llmBullets) {
     rawBullets = llmBullets;
@@ -312,7 +417,8 @@ export const compileAndSendDigest = async (
     rawBullets = buildFallbackBulletsPlain(allArticles as DigestArticle[]);
   }
 
-  // 9. Georgian translation of raw bullets (if needed)
+  // 6. Georgian translation (if needed)
+  let translatedBullets: string | null = null;
   let translationResult: LLMResult | null = null;
   if (config.language === "ka") {
     const transApiKey = resolveTranslationApiKey(config.translationProvider, apiKeys);
@@ -325,10 +431,10 @@ export const compileAndSendDigest = async (
         rawBullets,
       );
       if (tr && tr.text.trim().length > 0) {
-        rawBullets = tr.text;
+        translatedBullets = tr.text;
         translationResult = tr;
         logger.info(
-          { len: rawBullets.length, preview: rawBullets.slice(0, 200) },
+          { len: translatedBullets.length, preview: translatedBullets.slice(0, 200) },
           "[digest] translated to Georgian",
         );
       } else {
@@ -339,15 +445,60 @@ export const compileAndSendDigest = async (
     }
   }
 
-  // 10. Pipeline stats
+  // 7. Pipeline stats
   const stats = await queryPipelineStats(db, lookback, config.minScore);
+
+  // 8. Score distribution of articles fed to LLM
+  const scoreDistribution: Record<string, number> = {};
+  for (const a of allArticles) {
+    const s = String(a.importanceScore ?? 0);
+    scoreDistribution[s] = (scoreDistribution[s] ?? 0) + 1;
+  }
+
+  return {
+    rawBullets,
+    translatedBullets,
+    articleIds: allArticles.map((a) => a.id),
+    articleMap,
+    allArticles: allArticles as DigestArticle[],
+    llmResult,
+    translationResult,
+    stats,
+    hasLLM: !!llmBullets,
+    scoreDistribution,
+    maxArticles: articleLimit,
+  };
+};
+
+// ─── B. Deliver digest to platforms (steps 10-14) ───────────────────────────
+
+export const deliverDigest = async (
+  deps: DigestDeps,
+  config: DigestConfig,
+  content: GeneratedContent,
+  opts: { isTest?: boolean; slotId?: string; draftId?: string } = {},
+): Promise<DigestResult> => {
+  const { db, telegramConfig, facebookConfig, linkedinConfig } = deps;
+  const isTest = opts.isTest ?? false;
+
+  // Per-channel language: pick translated or raw text based on channel language
+  const pickText = (lang: "en" | "ka") =>
+    lang === "ka" && content.translatedBullets ? content.translatedBullets : content.rawBullets;
+  const pickHeader = (lang: "en" | "ka") =>
+    lang === "ka" && content.translatedBullets ? "რა მოხდა დღეს" : "What Happened Today";
+
+  const hasTelegram = config.telegramEnabled && telegramConfig?.botToken && config.telegramChatId;
+  const hasFacebook = config.facebookEnabled && facebookConfig;
+  const hasLinkedin = config.linkedinEnabled && linkedinConfig;
+
+  if (!hasTelegram && !hasFacebook && !hasLinkedin) {
+    logger.warn("[digest] no delivery channels configured, skipping");
+    return { sent: false, articleCount: content.allArticles.length, messageCount: 0 };
+  }
+
   const dateStr = formatDate(new Date(), config.timezone);
 
-  // 11. Build localized header
-  const isKa = config.language === "ka";
-  const lblHeader = isKa ? "რა მოხდა დღეს" : "What Happened Today";
-
-  // 12. Generate cover image (if any platform has image enabled)
+  // Generate cover image at DELIVERY time (correct date)
   const wantImage = config.imageTelegram || config.imageFacebook || config.imageLinkedin;
   let coverBuffer: Buffer | null = null;
 
@@ -361,51 +512,24 @@ export const compileAndSendDigest = async (
     }
   }
 
-  // 13. Deliver to each enabled platform
   let anySent = false;
   let totalMessages = 0;
   const channelResults: Record<string, string> = {};
 
   // ── Telegram (HTML formatting) ──
   if (hasTelegram) {
+    const tgText = pickText(config.telegramLanguage);
+    const tgHeader = pickHeader(config.telegramLanguage);
     let bodyHtml: string;
-    if (!llmBullets) {
-      bodyHtml = buildFallbackBullets(allArticles as DigestArticle[]);
+    if (!content.hasLLM) {
+      bodyHtml = buildFallbackBullets(content.allArticles);
     } else {
-      // Replace [#ID] refs with <a> links BEFORE escaping, so links stay valid HTML.
-      // 1. Map refs → placeholder tokens (won't be escaped)
-      const placeholders: string[] = [];
-      const withPlaceholders = rawBullets.replace(
-        /\[#(\d+(?:,\s*#\d+)*)\]/g,
-        (match, inner: string) => {
-          const ids = inner.split(/,\s*#/).map((s) => parseInt(s.replace("#", ""), 10));
-          let linkNum = 0;
-          const links = ids
-            .map((id) => {
-              const article = articleMap.get(id);
-              if (!article) return null;
-              linkNum++;
-              return `<a href="${escapeUrl(article.url)}">${linkNum}</a>`;
-            })
-            .filter(Boolean);
-          if (links.length === 0) return match;
-          const token = `\x00REF${placeholders.length}\x00`;
-          placeholders.push(`[${links.join(", ")}]`);
-          return token;
-        },
-      );
-      // 2. Escape the text (safe for Telegram HTML)
-      let escaped = cleanForTelegram(withPlaceholders);
-      // 3. Restore link placeholders (un-escaped HTML)
-      for (let i = 0; i < placeholders.length; i++) {
-        escaped = escaped.replace(`\x00REF${i}\x00`, placeholders[i]);
-      }
-      bodyHtml = escaped;
+      bodyHtml = buildTelegramHtml(tgText, content.articleMap);
     }
 
     if (!bodyHtml.trim()) {
       logger.warn("[digest] telegram body is empty after assembly, using fallback");
-      bodyHtml = buildFallbackBullets(allArticles as DigestArticle[]);
+      bodyHtml = buildFallbackBullets(content.allArticles);
     }
 
     logger.info(
@@ -413,21 +537,18 @@ export const compileAndSendDigest = async (
       "[digest] telegram body assembled",
     );
 
-    // Split body into individual lines so the splitter can paginate without
-    // cutting HTML tags in half (each bullet is its own section).
     const bodyLines = bodyHtml
       .split("\n")
       .map((l) => l.trim())
       .filter(Boolean);
     const sections: string[] = [
-      `<b>\u{1F4CA} ${cleanForTelegram(lblHeader)} \u2014 ${cleanForTelegram(dateStr)}</b>`,
+      `<b>\u{1F4CA} ${cleanForTelegram(tgHeader)} \u2014 ${cleanForTelegram(dateStr)}</b>`,
       ...bodyLines,
     ];
 
     const messages = splitTelegramMessages(sections);
     let tgOk = false;
 
-    // Send cover image first (if enabled)
     if (config.imageTelegram && coverBuffer) {
       const photoResult = await sendTelegramPhoto(telegramConfig!.botToken, config.telegramChatId, coverBuffer);
       if (photoResult.ok) { tgOk = true; totalMessages++; }
@@ -453,11 +574,12 @@ export const compileAndSendDigest = async (
   // ── Facebook ──
   if (hasFacebook) {
     try {
-      const plainBody = formatPlainDigest(rawBullets, allArticles as DigestArticle[], !!llmBullets);
-      const fbText = `\u{1F4CA} ${lblHeader} \u2014 ${dateStr}\n\n${plainBody}`;
+      const fbBullets = pickText(config.facebookLanguage);
+      const fbHeader = pickHeader(config.facebookLanguage);
+      const plainBody = formatPlainDigest(fbBullets, content.allArticles, content.hasLLM);
+      const fbText = `\u{1F4CA} ${fbHeader} \u2014 ${dateStr}\n\n${plainBody}`;
 
       if (config.imageFacebook && coverBuffer) {
-        // Photo post via multipart (direct buffer upload, no R2 needed)
         const result = await postFacebookPhoto(facebookConfig!, fbText, coverBuffer);
         if (result.success) {
           anySent = true;
@@ -491,10 +613,11 @@ export const compileAndSendDigest = async (
   // ── LinkedIn (plain text, 3000 char limit) ──
   if (hasLinkedin) {
     try {
-      const plainBody = formatPlainDigest(rawBullets, allArticles as DigestArticle[], !!llmBullets);
-      const header = `\u{1F4CA} ${lblHeader} \u2014 ${dateStr}`;
-      // LinkedIn allows 3000 chars (personal) — truncate body to fit
-      const maxBody = 3000 - header.length - 4; // 4 for \n\n separator
+      const liBullets = pickText(config.linkedinLanguage);
+      const liHeader = pickHeader(config.linkedinLanguage);
+      const plainBody = formatPlainDigest(liBullets, content.allArticles, content.hasLLM);
+      const header = `\u{1F4CA} ${liHeader} \u2014 ${dateStr}`;
+      const maxBody = 3000 - header.length - 4;
       const truncBody = plainBody.length > maxBody
         ? plainBody.slice(0, plainBody.lastIndexOf("\n", maxBody)) || plainBody.slice(0, maxBody)
         : plainBody;
@@ -523,8 +646,17 @@ export const compileAndSendDigest = async (
     }
   }
 
-  // 12. Update last_digest_sent_at (skip for test)
+  // Update last_digest_sent_at + mark articles as digested
   if (!isTest && anySent) {
+    // Mark articles so they won't appear in other digest slots
+    const digestedIds = content.allArticles.map((a) => a.id);
+    if (digestedIds.length > 0) {
+      await db
+        .update(articles)
+        .set({ digestedAt: new Date() })
+        .where(inArray(articles.id, digestedIds));
+    }
+
     await db
       .insert(appConfig)
       .values({ key: "last_digest_sent_at", value: new Date().toISOString(), updatedAt: new Date() })
@@ -534,29 +666,29 @@ export const compileAndSendDigest = async (
       });
   }
 
-  // 13. Log telemetry
-  if (llmResult) {
-    const cost = calculateLLMCost(config.provider, config.model, llmResult.inputTokens, llmResult.outputTokens);
+  // Log telemetry
+  if (content.llmResult) {
+    const cost = calculateLLMCost(config.provider, config.model, content.llmResult.inputTokens, content.llmResult.outputTokens);
     await db.insert(llmTelemetry).values({
       articleId: null,
       operation: "digest_summary",
       provider: config.provider,
       model: config.model,
       isFallback: false,
-      inputTokens: llmResult.inputTokens,
-      outputTokens: llmResult.outputTokens,
-      totalTokens: llmResult.inputTokens + llmResult.outputTokens,
+      inputTokens: content.llmResult.inputTokens,
+      outputTokens: content.llmResult.outputTokens,
+      totalTokens: content.llmResult.inputTokens + content.llmResult.outputTokens,
       costMicrodollars: cost,
-      latencyMs: llmResult.latencyMs,
+      latencyMs: content.llmResult.latencyMs,
       status: "success",
     });
   }
-  if (translationResult) {
+  if (content.translationResult) {
     const cost = calculateLLMCost(
       config.translationProvider,
       config.translationModel,
-      translationResult.inputTokens,
-      translationResult.outputTokens,
+      content.translationResult.inputTokens,
+      content.translationResult.outputTokens,
     );
     await db.insert(llmTelemetry).values({
       articleId: null,
@@ -564,40 +696,44 @@ export const compileAndSendDigest = async (
       provider: config.translationProvider,
       model: config.translationModel,
       isFallback: false,
-      inputTokens: translationResult.inputTokens,
-      outputTokens: translationResult.outputTokens,
-      totalTokens: translationResult.inputTokens + translationResult.outputTokens,
+      inputTokens: content.translationResult.inputTokens,
+      outputTokens: content.translationResult.outputTokens,
+      totalTokens: content.translationResult.inputTokens + content.translationResult.outputTokens,
       costMicrodollars: cost,
-      latencyMs: translationResult.latencyMs,
+      latencyMs: content.translationResult.latencyMs,
       status: "success",
     });
   }
 
-  // 14. Record digest run in history
+  // Record digest run
   const sentChannels = Object.keys(channelResults);
   if (sentChannels.length > 0) {
     await db.insert(digestRuns).values({
+      slotId: opts.slotId ?? null,
+      draftId: opts.draftId ?? null,
       sentAt: new Date(),
       isTest,
       language: config.language,
-      articleCount: allArticles.length,
+      articleCount: content.allArticles.length,
       channels: sentChannels,
       channelResults,
       provider: config.provider,
       model: config.model,
       minScore: config.minScore,
-      statsScanned: stats.totalIngested,
-      statsScored: stats.passedFilters,
-      statsAboveThreshold: stats.aboveThreshold,
+      statsScanned: content.stats.totalIngested,
+      statsScored: content.stats.passedFilters,
+      statsAboveThreshold: content.stats.aboveThreshold,
+      maxArticles: content.maxArticles,
+      scoreDistribution: content.scoreDistribution,
     });
   }
 
   logger.info(
     {
-      articles: allArticles.length,
+      articles: content.allArticles.length,
       totalMessages,
-      hasLLM: !!llmBullets,
-      translated: !!translationResult,
+      hasLLM: content.hasLLM,
+      translated: !!content.translationResult,
       telegram: !!hasTelegram,
       facebook: !!hasFacebook,
       linkedin: !!hasLinkedin,
@@ -606,7 +742,255 @@ export const compileAndSendDigest = async (
     "[digest] complete",
   );
 
-  return { sent: anySent, articleCount: allArticles.length, messageCount: totalMessages };
+  return { sent: anySent, articleCount: content.allArticles.length, messageCount: totalMessages };
+};
+
+// ─── C. Save draft to DB ─────────────────────────────────────────────────────
+
+export const saveDraft = async (
+  db: Database,
+  slotId: string,
+  content: GeneratedContent,
+  config: DigestConfig,
+  status: "draft" | "sent" = "draft",
+): Promise<string> => {
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h from now
+
+  const [row] = await db
+    .insert(digestDrafts)
+    .values({
+      slotId,
+      status,
+      generatedText: content.rawBullets,
+      translatedText: content.translatedBullets,
+      articleCount: content.allArticles.length,
+      articleIds: content.articleIds,
+      provider: config.provider,
+      model: config.model,
+      llmTokensIn: content.llmResult?.inputTokens ?? null,
+      llmTokensOut: content.llmResult?.outputTokens ?? null,
+      llmCostMicrodollars: content.llmResult
+        ? calculateLLMCost(config.provider, config.model, content.llmResult.inputTokens, content.llmResult.outputTokens)
+        : null,
+      translationProvider: content.translationResult ? config.translationProvider : null,
+      translationModel: content.translationResult ? config.translationModel : null,
+      translationCostMicrodollars: content.translationResult
+        ? calculateLLMCost(config.translationProvider, config.translationModel, content.translationResult.inputTokens, content.translationResult.outputTokens)
+        : null,
+      statsScanned: content.stats.totalIngested,
+      statsScored: content.stats.passedFilters,
+      statsAboveThreshold: content.stats.aboveThreshold,
+      maxArticles: content.maxArticles,
+      scoreDistribution: content.scoreDistribution,
+      expiresAt,
+      sentAt: status === "sent" ? new Date() : null,
+    })
+    .returning({ id: digestDrafts.id });
+
+  logger.info({ draftId: row.id, slotId, status }, "[digest] draft saved");
+  return row.id;
+};
+
+// ─── D. Deliver an existing draft (for manual approval) ─────────────────────
+
+export const deliverDraft = async (
+  deps: DigestDeps,
+  draftId: string,
+): Promise<DigestResult> => {
+  const { db } = deps;
+
+  // 1. Load draft
+  const [draft] = await db
+    .select()
+    .from(digestDrafts)
+    .where(eq(digestDrafts.id, draftId));
+
+  if (!draft) throw new Error(`[digest] draft ${draftId} not found`);
+  if (!["draft", "approved"].includes(draft.status)) {
+    throw new Error(`[digest] draft ${draftId} has status '${draft.status}', cannot deliver`);
+  }
+  if (draft.expiresAt < new Date()) {
+    await db
+      .update(digestDrafts)
+      .set({ status: "expired" })
+      .where(eq(digestDrafts.id, draftId));
+    throw new Error(`[digest] draft ${draftId} has expired`);
+  }
+
+  // 2. Load slot config
+  const config = await readSlotConfig(db, draft.slotId);
+
+  // 3. Reconstruct content from draft (for delivery)
+  // Use edited text if user modified it, else original
+  const bulletText = draft.translatedText ?? draft.generatedText;
+  const articleIds = draft.articleIds as string[];
+
+  // Load articles for ref mapping
+  const draftArticles = articleIds.length > 0
+    ? await db
+        .select({
+          id: articles.id,
+          title: articles.title,
+          llmSummary: articles.llmSummary,
+          importanceScore: articles.importanceScore,
+          url: articles.url,
+          sectorName: sectors.name,
+          translationStatus: articles.translationStatus,
+        })
+        .from(articles)
+        .leftJoin(sectors, eq(articles.sectorId, sectors.id))
+        .where(inArray(articles.id, articleIds))
+        .orderBy(desc(articles.importanceScore))
+    : [];
+
+  const articleMap = new Map<number, DigestArticle>();
+  draftArticles.forEach((a, i) => articleMap.set(i + 1, a as DigestArticle));
+
+  const content: GeneratedContent = {
+    rawBullets: draft.generatedText,
+    translatedBullets: draft.translatedText,
+    articleIds,
+    articleMap,
+    allArticles: draftArticles as DigestArticle[],
+    llmResult: null, // already logged at generation time
+    translationResult: null,
+    stats: {
+      totalIngested: draft.statsScanned,
+      passedFilters: draft.statsScored,
+      aboveThreshold: draft.statsAboveThreshold,
+      minScore: config.minScore,
+    },
+    hasLLM: true, // draft always has LLM content
+    scoreDistribution: (draft.scoreDistribution as Record<string, number>) ?? {},
+    maxArticles: draft.maxArticles ?? config.maxArticles,
+  };
+
+  // 4. Deliver
+  try {
+    const result = await deliverDigest(deps, config, content, {
+      slotId: draft.slotId,
+      draftId: draft.id,
+    });
+
+    // 5. Update draft status
+    const channelResults: Record<string, string> = {};
+    const sentChannels: string[] = [];
+    if (config.telegramEnabled) sentChannels.push("telegram");
+    if (config.facebookEnabled) sentChannels.push("facebook");
+    if (config.linkedinEnabled) sentChannels.push("linkedin");
+
+    await db
+      .update(digestDrafts)
+      .set({
+        status: result.sent ? "sent" : "send_failed",
+        sentAt: result.sent ? new Date() : null,
+        channels: sentChannels,
+      })
+      .where(eq(digestDrafts.id, draftId));
+
+    logger.info({ draftId, sent: result.sent }, "[digest] draft delivered");
+    return { ...result, draftId };
+  } catch (err) {
+    await db
+      .update(digestDrafts)
+      .set({ status: "send_failed" })
+      .where(eq(digestDrafts.id, draftId));
+    throw err;
+  }
+};
+
+// ─── E. Orchestrator (modified compileAndSendDigest) ────────────────────────
+
+export const compileAndSendDigest = async (
+  deps: DigestDeps,
+  opts: { isTest?: boolean; slotId?: string; draftId?: string } = {},
+): Promise<DigestResult> => {
+  // If delivering an existing draft, use deliverDraft
+  if (opts.draftId) {
+    return deliverDraft(deps, opts.draftId);
+  }
+
+  const { db } = deps;
+  const slotId = opts.slotId;
+  const isTest = opts.isTest ?? false;
+
+  // Read config
+  const config = slotId ? await readSlotConfig(db, slotId) : await readDigestConfig(db);
+
+  // Generate content
+  const content = await generateDigestContent(deps, config, opts);
+  if (!content) {
+    return { sent: false, articleCount: 0, messageCount: 0 };
+  }
+
+  // Decision: auto-post or save as draft?
+  if (slotId && !config.autoPost && !isTest) {
+    // Save as draft for manual review
+    const draftId = await saveDraft(db, slotId, content, config, "draft");
+
+    // Still log telemetry for the generation
+    if (content.llmResult) {
+      const cost = calculateLLMCost(config.provider, config.model, content.llmResult.inputTokens, content.llmResult.outputTokens);
+      await db.insert(llmTelemetry).values({
+        articleId: null,
+        operation: "digest_summary",
+        provider: config.provider,
+        model: config.model,
+        isFallback: false,
+        inputTokens: content.llmResult.inputTokens,
+        outputTokens: content.llmResult.outputTokens,
+        totalTokens: content.llmResult.inputTokens + content.llmResult.outputTokens,
+        costMicrodollars: cost,
+        latencyMs: content.llmResult.latencyMs,
+        status: "success",
+      });
+    }
+    if (content.translationResult) {
+      const cost = calculateLLMCost(
+        config.translationProvider,
+        config.translationModel,
+        content.translationResult.inputTokens,
+        content.translationResult.outputTokens,
+      );
+      await db.insert(llmTelemetry).values({
+        articleId: null,
+        operation: "digest_translation",
+        provider: config.translationProvider,
+        model: config.translationModel,
+        isFallback: false,
+        inputTokens: content.translationResult.inputTokens,
+        outputTokens: content.translationResult.outputTokens,
+        totalTokens: content.translationResult.inputTokens + content.translationResult.outputTokens,
+        costMicrodollars: cost,
+        latencyMs: content.translationResult.latencyMs,
+        status: "success",
+      });
+    }
+
+    logger.info({ draftId, slotId, articles: content.allArticles.length }, "[digest] saved as draft (manual approval)");
+    return { sent: false, articleCount: content.allArticles.length, messageCount: 0, draftId };
+  }
+
+  // Auto-post path: save draft as 'sent' + deliver
+  if (slotId) {
+    const draftId = await saveDraft(db, slotId, content, config, "sent");
+    const result = await deliverDigest(deps, config, content, { isTest, slotId, draftId });
+
+    // Update draft with channel results
+    const sentChannels: string[] = [];
+    if (config.telegramEnabled) sentChannels.push("telegram");
+    if (config.facebookEnabled) sentChannels.push("facebook");
+    if (config.linkedinEnabled) sentChannels.push("linkedin");
+    await db
+      .update(digestDrafts)
+      .set({ channels: sentChannels, sentAt: new Date() })
+      .where(eq(digestDrafts.id, draftId));
+
+    return { ...result, draftId };
+  }
+
+  // Legacy path (no slotId): deliver directly without draft
+  return deliverDigest(deps, config, content, opts);
 };
 
 // ─── API key resolution ─────────────────────────────────────────────────────
@@ -653,7 +1037,7 @@ const callLLM = async (
       const client = new Anthropic({ apiKey: config.apiKey });
       const response = await client.messages.create({
         model: config.model,
-        max_tokens: 1200,
+        max_tokens: 2500,
         temperature: 0.3,
         system: systemPrompt,
         messages: [{ role: "user", content: userPrompt }],
@@ -677,7 +1061,7 @@ const callLLM = async (
       const genModel = client.getGenerativeModel({
         model: config.model,
         systemInstruction: systemPrompt,
-        generationConfig: { maxOutputTokens: 1200, temperature: 0.3 },
+        generationConfig: { maxOutputTokens: 2500, temperature: 0.3 },
       });
 
       const result = await genModel.generateContent(userPrompt);
@@ -700,7 +1084,7 @@ const callLLM = async (
     });
     const response = await client.chat.completions.create({
       model: config.model,
-      max_tokens: 1200,
+      max_tokens: 2500,
       temperature: 0.3,
       messages: [
         { role: "system", content: systemPrompt },
@@ -742,6 +1126,37 @@ const buildUserPrompt = (allArticles: DigestArticle[], config: DigestConfig): st
   return lines.join("\n");
 };
 
+// ─── Telegram HTML builder (extracted from inline) ──────────────────────────
+
+const buildTelegramHtml = (bulletText: string, articleMap: Map<number, DigestArticle>): string => {
+  // Replace [#ID] refs with <a> links BEFORE escaping
+  const placeholders: string[] = [];
+  const withPlaceholders = bulletText.replace(
+    /\[#(\d+(?:,\s*#\d+)*)\]/g,
+    (match, inner: string) => {
+      const ids = inner.split(/,\s*#/).map((s) => parseInt(s.replace("#", ""), 10));
+      let linkNum = 0;
+      const links = ids
+        .map((id) => {
+          const article = articleMap.get(id);
+          if (!article) return null;
+          linkNum++;
+          return `<a href="${escapeUrl(article.url)}">${linkNum}</a>`;
+        })
+        .filter(Boolean);
+      if (links.length === 0) return match;
+      const token = `\x00REF${placeholders.length}\x00`;
+      placeholders.push(`[${links.join(", ")}]`);
+      return token;
+    },
+  );
+  let escaped = cleanForTelegram(withPlaceholders);
+  for (let i = 0; i < placeholders.length; i++) {
+    escaped = escaped.replace(`\x00REF${i}\x00`, placeholders[i]);
+  }
+  return escaped;
+};
+
 // ─── Template-only fallback (Telegram HTML) ──────────────────────────────────
 
 const buildFallbackBullets = (allArticles: DigestArticle[]): string => {
@@ -749,7 +1164,7 @@ const buildFallbackBullets = (allArticles: DigestArticle[]): string => {
   for (const a of allArticles.slice(0, 20)) {
     const title = cleanForTelegram(a.title);
     const link = `<a href="${escapeUrl(a.url)}">${title}</a>`;
-    lines.push(`\u2022 Score ${a.importanceScore} \u2014 ${link}`);
+    lines.push(`\u2022 ${link}`);
   }
   return lines.join("\n");
 };
@@ -759,13 +1174,12 @@ const buildFallbackBullets = (allArticles: DigestArticle[]): string => {
 const buildFallbackBulletsPlain = (allArticles: DigestArticle[]): string => {
   const lines: string[] = [];
   for (const a of allArticles.slice(0, 20)) {
-    lines.push(`\u2022 Score ${a.importanceScore} \u2014 ${a.title}`);
+    lines.push(`\u2022 ${a.title}`);
   }
   return lines.join("\n");
 };
 
 // ─── Plain text formatter for Facebook / LinkedIn ────────────────────────────
-// Text-only: strip [#ID] source refs entirely — raw URLs clutter social posts
 
 const formatPlainDigest = (
   rawBullets: string,
@@ -773,15 +1187,13 @@ const formatPlainDigest = (
   hasLLM: boolean,
 ): string => {
   if (!hasLLM) {
-    // Fallback: plain bullet list (no URLs)
     const lines: string[] = [];
     for (const a of allArticles.slice(0, 20)) {
-      lines.push(`\u2022 Score ${a.importanceScore} \u2014 ${a.title}`);
+      lines.push(`\u2022 ${a.title}`);
     }
     return lines.join("\n");
   }
 
-  // Strip [#ID] refs — clean text only
   return rawBullets.replace(/\s*\[#\d+(?:,\s*#\d+)*\]/g, "").trim();
 };
 
@@ -911,16 +1323,13 @@ const splitTelegramMessages = (sections: string[]): string[] => {
   let current = "";
 
   for (const section of sections) {
-    // Join with single newline between bullet lines (double after header)
     const sep = current ? (current.endsWith("</b>") ? "\n\n" : "\n") : "";
     const candidate = current + sep + section;
 
     if (candidate.length <= MAX_MESSAGE_LENGTH) {
       current = candidate;
     } else {
-      // Current chunk is full — push it and start new message with this section
       if (current) messages.push(current);
-      // If single section still exceeds limit, truncate at last newline boundary
       if (section.length > MAX_MESSAGE_LENGTH) {
         const truncated = section.slice(0, MAX_MESSAGE_LENGTH - 4);
         const lastNl = truncated.lastIndexOf("\n");

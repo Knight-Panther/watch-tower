@@ -15,6 +15,8 @@ import {
   setPostDeliveriesTtl,
   getAlertDeliveriesTtl,
   setAlertDeliveriesTtl,
+  getDigestRunsTtl,
+  setDigestRunsTtl,
   getTelemetrySummary,
   getTelemetryByProvider,
   getTelemetryByOperation,
@@ -113,6 +115,8 @@ export default function Settings() {
   const [postDeliveriesTtlError, setPostDeliveriesTtlError] = useState<string | null>(null);
   const [alertDeliveriesTtlDays, setAlertDeliveriesTtlDays] = useState("");
   const [alertDeliveriesTtlError, setAlertDeliveriesTtlError] = useState<string | null>(null);
+  const [digestRunsTtlDays, setDigestRunsTtlDays] = useState("");
+  const [digestRunsTtlError, setDigestRunsTtlError] = useState<string | null>(null);
 
   // Telemetry state
   const [telemetrySummary, setTelemetrySummary] = useState<TelemetrySummary | null>(null);
@@ -140,6 +144,7 @@ export default function Settings() {
         articleImagesTtl,
         postDeliveriesTtl,
         alertDeliveriesTtl,
+        digestRunsTtl,
       ] = await Promise.all([
         getFeedItemsTtl(),
         getFeedFetchRunsTtl(),
@@ -148,6 +153,7 @@ export default function Settings() {
         getArticleImagesTtl(),
         getPostDeliveriesTtl(),
         getAlertDeliveriesTtl(),
+        getDigestRunsTtl(),
       ]);
       setConstraints(constraintsData);
       setTtlDays(String(ttlValue));
@@ -165,6 +171,7 @@ export default function Settings() {
       setArticleImagesTtlDays(String(articleImagesTtl));
       setPostDeliveriesTtlDays(String(postDeliveriesTtl));
       setAlertDeliveriesTtlDays(String(alertDeliveriesTtl));
+      setDigestRunsTtlDays(String(digestRunsTtl));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load settings";
       toast.error(message);
@@ -358,6 +365,27 @@ export default function Settings() {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to update alert deliveries TTL";
       setAlertDeliveriesTtlError(message);
+      toast.error(message);
+    }
+  };
+
+  const onSaveDigestRunsTtl = async () => {
+    const min = constraints?.digestRunsTtl?.min ?? 1;
+    const max = constraints?.digestRunsTtl?.max ?? 90;
+    const value = Number(digestRunsTtlDays);
+    if (Number.isNaN(value) || value < min || value > max) {
+      setDigestRunsTtlError(`TTL must be between ${min} and ${max} days`);
+      toast.error(`TTL must be between ${min} and ${max} days`);
+      return;
+    }
+    try {
+      const updated = await setDigestRunsTtl(value);
+      setDigestRunsTtlDays(String(updated));
+      setDigestRunsTtlError(null);
+      toast.success("Digest runs TTL updated");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update digest runs TTL";
+      setDigestRunsTtlError(message);
       toast.error(message);
     }
   };
@@ -903,6 +931,40 @@ export default function Settings() {
                     Keyword alert delivery audit trail retention.
                     {alertDeliveriesTtlError ? (
                       <span className="ml-2 text-red-400">{alertDeliveriesTtlError}</span>
+                    ) : null}
+                  </td>
+                </tr>
+
+                {/* Digest Runs TTL */}
+                <tr>
+                  <td className="py-3 pr-4 font-medium text-slate-300">Digest Runs</td>
+                  <td className="py-3 pr-4">
+                    <div className="flex items-center gap-2">
+                      <input
+                        value={digestRunsTtlDays}
+                        onChange={(e) => setDigestRunsTtlDays(e.target.value)}
+                        placeholder="1-90"
+                        className="w-20 rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1.5 text-sm text-slate-200 outline-none focus:border-slate-600"
+                      />
+                      <span className="text-slate-500">days</span>
+                    </div>
+                  </td>
+                  <td className="py-3 pr-4 font-mono text-xs text-emerald-400/70">
+                    {formatTtlHint(digestRunsTtlDays)}
+                  </td>
+                  <td className="py-3 pr-4">
+                    <button
+                      onClick={onSaveDigestRunsTtl}
+                      disabled={!digestRunsTtlDays.trim()}
+                      className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300 transition hover:border-slate-500 disabled:opacity-40"
+                    >
+                      Save
+                    </button>
+                  </td>
+                  <td className="py-3 text-xs text-slate-500">
+                    Digest history retention (runs + drafts).
+                    {digestRunsTtlError ? (
+                      <span className="ml-2 text-red-400">{digestRunsTtlError}</span>
                     ) : null}
                   </td>
                 </tr>

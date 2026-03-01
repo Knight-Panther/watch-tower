@@ -92,6 +92,27 @@ export type StatsUpdatedEvent = {
   data: PipelineStats;
 };
 
+export type DigestDraftReadyEvent = {
+  type: "digest:draft-ready";
+  data: {
+    draftId: string;
+    slotId: string;
+    slotName: string;
+    articleCount: number;
+  };
+};
+
+export type DigestSentEvent = {
+  type: "digest:sent";
+  data: {
+    slotId: string;
+    slotName: string;
+    articleCount: number;
+    isTest: boolean;
+    channels: string[];
+  };
+};
+
 // Union type for all server events
 export type ServerEvent =
   | ArticleIngestedEvent
@@ -102,5 +123,7 @@ export type ServerEvent =
   | ArticlePostedEvent
   | ArticleTranslatedEvent
   | SourceFetchedEvent
-  | StatsUpdatedEvent;
+  | StatsUpdatedEvent
+  | DigestDraftReadyEvent
+  | DigestSentEvent;
 

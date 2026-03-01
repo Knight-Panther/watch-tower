@@ -24,6 +24,8 @@ import {
   type AlertTemplateConfig,
   type AlertWeeklyStats,
   type Sector,
+  getAlertRuleDefaults,
+  type AlertRuleDefaultsResponse,
 } from "../api";
 import {
   getAlertTranslationConfig,
@@ -349,10 +351,17 @@ const INITIAL_FORM: CreateFormState = {
 type CreateFormProps = {
   onCreated: (rule: AlertRule) => void;
   sectors: Sector[];
+  defaults: AlertRuleDefaultsResponse | null;
 };
 
-function CreateForm({ onCreated, sectors }: CreateFormProps) {
-  const [form, setForm] = useState<CreateFormState>(INITIAL_FORM);
+function CreateForm({ onCreated, sectors, defaults }: CreateFormProps) {
+  const initialForm: CreateFormState = {
+    ...INITIAL_FORM,
+    minScore: defaults?.min_score ?? INITIAL_FORM.minScore,
+    language: defaults?.language ?? INITIAL_FORM.language,
+    template: { ...DEFAULT_TEMPLATE, ...(defaults?.template ?? {}) },
+  };
+  const [form, setForm] = useState<CreateFormState>(initialForm);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const keywordInputRef = useRef<HTMLInputElement>(null);
 
@@ -1404,6 +1413,7 @@ export default function Alerts() {
   const [rules, setRules] = useState<AlertRule[]>([]);
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [weeklyStats, setWeeklyStats] = useState<AlertWeeklyStats | null>(null);
+  const [alertDefaults, setAlertDefaults] = useState<AlertRuleDefaultsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
@@ -1428,6 +1438,7 @@ export default function Alerts() {
     loadRules();
     listSectors().then(setSectors).catch(() => {});
     getAlertWeeklyStats().then(setWeeklyStats).catch(() => {});
+    getAlertRuleDefaults().then(setAlertDefaults).catch(() => {});
   }, [loadRules]);
 
   const handleCreated = useCallback((rule: AlertRule) => {
@@ -1521,7 +1532,7 @@ export default function Alerts() {
       </div>
 
       {/* Create Form */}
-      <CreateForm onCreated={handleCreated} sectors={sectors} />
+      <CreateForm onCreated={handleCreated} sectors={sectors} defaults={alertDefaults} />
 
       {/* Rules List */}
       <div className="space-y-4">

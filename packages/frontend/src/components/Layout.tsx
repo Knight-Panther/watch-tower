@@ -14,7 +14,7 @@ const navItems = [
   { to: "/image-template", label: "Image Template" },
   { to: "/site-rules", label: "Restrictions" },
   { to: "/alerts", label: "Alerts" },
-  { to: "/digest", label: "Daily Digest" },
+  { to: "/digest", label: "Digests" },
   { to: "/analytics", label: "Analytics" },
   { to: "/settings", label: "DB/Telemetry" },
 ];

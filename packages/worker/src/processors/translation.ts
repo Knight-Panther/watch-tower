@@ -129,7 +129,11 @@ export const createTranslationWorker = ({
       // 2. ATOMIC CLAIM: Get articles needing translation
       // Queries by importance_score + translation_status (NOT pipeline_stage)
       // This catches both 'scored' (3-4) and 'approved' (5) articles
-      const scoreList = config.scores.length > 0 ? config.scores : [3, 4, 5];
+      // Empty scores = translation disabled (don't fall back to all scores)
+      if (config.scores.length === 0) {
+        return { skipped: true, reason: "no_scores_configured" };
+      }
+      const scoreList = config.scores;
 
       // Backfill guard: only translate articles created after translation was enabled
       const enabledSince = config.enabledSince ? new Date(config.enabledSince) : new Date();

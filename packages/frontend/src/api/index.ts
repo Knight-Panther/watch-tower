@@ -14,4 +14,5 @@ export * from "./provider-health";
 export * from "./image-gen";
 export * from "./alerts";
 export * from "./digest";
+export * from "./digest-slots";
 export * from "./analytics";

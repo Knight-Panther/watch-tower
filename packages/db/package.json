@@ -15,7 +15,8 @@
     "migrate": "drizzle-kit migrate",
     "push": "drizzle-kit push",
     "studio": "drizzle-kit studio",
-    "seed": "node --env-file=../../.env src/seed-runner.mjs"
+    "seed": "node --env-file=../../.env src/seed-runner.mjs",
+    "seed:digest-slot": "node --env-file=../../.env src/seed-digest-slot.mjs"
   },
   "dependencies": {
     "drizzle-orm": "^0.44.0",

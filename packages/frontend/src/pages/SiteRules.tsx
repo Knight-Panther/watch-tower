@@ -870,6 +870,11 @@ API_RATE_LIMIT_PER_MINUTE=200`}
                 </label>
               ))}
             </div>
+            <p className="mt-3 text-xs text-slate-500">
+              Only articles ingested <span className="text-slate-300">after</span> you enable a score
+              will be auto-translated. Already-scored articles won't be picked up retroactively.
+              To translate older articles, use the translate button on individual articles.
+            </p>
           </div>
 
           {/* Translation Provider & Model */}

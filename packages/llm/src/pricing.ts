@@ -18,6 +18,10 @@ export const LLM_PRICING: Record<string, Record<string, { input: number; output:
     "claude-3-5-sonnet-20241022": { input: 3_000_000, output: 15_000_000 },
     "claude-3-haiku-20240307": { input: 250_000, output: 1_250_000 }, // $0.25/$1.25 per 1M
   },
+  gemini: {
+    "gemini-2.5-flash": { input: 150_000, output: 600_000 }, // $0.15/$0.60 per 1M
+    "gemini-2.5-pro": { input: 1_250_000, output: 10_000_000 }, // $1.25/$10.00 per 1M
+  },
 };
 
 // Embedding pricing: price per 1M tokens

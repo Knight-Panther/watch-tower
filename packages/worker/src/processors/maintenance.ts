@@ -24,6 +24,8 @@ import {
   llmTelemetry,
   articleImages,
   digestRuns,
+  digestSlots,
+  digestDrafts,
   alertDeliveries,
 } from "@watch-tower/db";
 import {
@@ -95,66 +97,86 @@ const getConfigString = async (db: Database, key: string, fallback: string) => {
 };
 
 /**
- * Check if it's time to send the daily digest.
+ * Check which digest slots are due to fire right now.
+ * Returns array of slot IDs that should trigger a digest.
  * Uses Intl.DateTimeFormat for timezone handling (supports DST automatically).
  */
-const checkDigestDue = async (db: Database): Promise<boolean> => {
-  const enabled = await getConfigBoolean(db, "digest_enabled", false);
-  if (!enabled) return false;
+const checkDigestSlotsDue = async (db: Database): Promise<string[]> => {
+  const slots = await db
+    .select()
+    .from(digestSlots)
+    .where(eq(digestSlots.enabled, true));
 
-  const time = await getConfigString(db, "digest_time", "08:00");
-  const timezone = await getConfigString(db, "digest_timezone", "UTC");
+  if (slots.length === 0) return [];
 
-  // Read digest_days from JSONB
-  const [daysRow] = await db
-    .select({ value: appConfig.value })
-    .from(appConfig)
-    .where(eq(appConfig.key, "digest_days"));
-  const days: number[] = Array.isArray(daysRow?.value) ? (daysRow.value as number[]) : [1, 2, 3, 4, 5, 6, 7];
-
-  // Get current time in configured timezone
   const now = new Date();
-  let currentTime: string;
-  try {
-    currentTime = new Intl.DateTimeFormat("en-GB", {
-      timeZone: timezone,
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).format(now);
-  } catch {
-    logger.warn({ timezone }, "[digest] invalid timezone, using UTC");
-    currentTime = new Intl.DateTimeFormat("en-GB", {
-      timeZone: "UTC",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).format(now);
-  }
-
-  // Get day-of-week in configured timezone (ISO: 1=Mon...7=Sun)
-  const dayStr = new Intl.DateTimeFormat("en-US", { timeZone: timezone, weekday: "short" }).format(now);
+  const dueSlotIds: string[] = [];
   const dayMap: Record<string, number> = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
-  const isoDay = dayMap[dayStr] ?? 0;
-  if (!days.includes(isoDay)) return false;
 
-  // Check time match: fire at target or up to 2 minutes AFTER (forward-only)
-  const [targetH, targetM] = time.split(":").map(Number);
-  const [currentH, currentM] = currentTime.split(":").map(Number);
-  const targetMinutes = targetH * 60 + targetM;
-  const currentMinutes = currentH * 60 + currentM;
-  // Forward difference: how many minutes past the target are we?
-  const forwardDiff = (currentMinutes - targetMinutes + 1440) % 1440;
-  if (forwardDiff > 2) return false; // Only fire 0-2 min after target, never before
+  for (const slot of slots) {
+    const timezone = slot.timezone || "UTC";
+    const days: number[] = Array.isArray(slot.days) ? (slot.days as number[]) : [1, 2, 3, 4, 5, 6, 7];
 
-  // Idempotency: skip if last digest was within 1 hour
-  const lastSent = await getConfigString(db, "last_digest_sent_at", "");
-  if (lastSent) {
-    const lastSentTime = new Date(lastSent).getTime();
-    if (!Number.isNaN(lastSentTime) && Date.now() - lastSentTime < 60 * 60 * 1000) return false;
+    // Get current time in slot's timezone
+    let currentTime: string;
+    try {
+      currentTime = new Intl.DateTimeFormat("en-GB", {
+        timeZone: timezone,
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }).format(now);
+    } catch {
+      logger.warn({ timezone, slotId: slot.id }, "[digest] invalid timezone, using UTC");
+      currentTime = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "UTC",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }).format(now);
+    }
+
+    // Get day-of-week in slot's timezone (ISO: 1=Mon...7=Sun)
+    const dayStr = new Intl.DateTimeFormat("en-US", { timeZone: timezone, weekday: "short" }).format(now);
+    const isoDay = dayMap[dayStr] ?? 0;
+    if (!days.includes(isoDay)) continue;
+
+    // Check time match: fire at target or up to 2 minutes AFTER (forward-only)
+    const [targetH, targetM] = slot.time.split(":").map(Number);
+    const [currentH, currentM] = currentTime.split(":").map(Number);
+    const targetMinutes = targetH * 60 + targetM;
+    const currentMinutes = currentH * 60 + currentM;
+    const forwardDiff = (currentMinutes - targetMinutes + 1440) % 1440;
+    if (forwardDiff > 2) continue;
+
+    // Per-slot idempotency: skip if last run for this slot was within 5 minutes
+    // (prevents 30s scheduler loop from triple-firing, but allows re-scheduling)
+    const [lastRun] = await db
+      .select({ sentAt: digestRuns.sentAt })
+      .from(digestRuns)
+      .where(and(eq(digestRuns.slotId, slot.id), eq(digestRuns.isTest, false)))
+      .orderBy(desc(digestRuns.sentAt))
+      .limit(1);
+
+    if (lastRun?.sentAt) {
+      const elapsed = Date.now() - lastRun.sentAt.getTime();
+      if (elapsed < 5 * 60 * 1000) continue;
+    }
+
+    // For manual slots: skip if there's already a pending draft
+    if (!slot.autoPost) {
+      const [pendingDraft] = await db
+        .select({ id: digestDrafts.id })
+        .from(digestDrafts)
+        .where(and(eq(digestDrafts.slotId, slot.id), eq(digestDrafts.status, "draft")))
+        .limit(1);
+      if (pendingDraft) continue;
+    }
+
+    dueSlotIds.push(slot.id);
   }
 
-  return true;
+  return dueSlotIds;
 };
 
 const runScheduledIngests = async (db: Database, ingestQueue: Queue, force = false) => {
@@ -1046,16 +1068,53 @@ export const createMaintenanceWorker = ({
         // Process any scheduled posts that are due
         await processScheduledPosts(db, providers, rateLimiter, eventPublisher);
 
-        // Check if daily digest is due
+        // Expire old digest drafts (24h TTL)
         try {
-          const digestDue = await checkDigestDue(db);
-          if (digestDue) {
+          const expired = await db
+            .update(digestDrafts)
+            .set({ status: "expired" })
+            .where(and(eq(digestDrafts.status, "draft"), lt(digestDrafts.expiresAt, new Date())))
+            .returning({ id: digestDrafts.id });
+          if (expired.length > 0) {
+            logger.info({ count: expired.length }, "[scheduler] expired digest drafts");
+          }
+        } catch (err) {
+          logger.error("[scheduler] draft expiry check failed", err);
+        }
+
+        // Deliver scheduled digest drafts that are due
+        try {
+          const dueDrafts = await db
+            .select({ id: digestDrafts.id, slotId: digestDrafts.slotId })
+            .from(digestDrafts)
+            .where(
+              and(
+                eq(digestDrafts.status, "approved"),
+                lt(digestDrafts.scheduledAt, new Date()),
+              ),
+            );
+          for (const draft of dueDrafts) {
             await maintenanceQueue.add(
               JOB_DAILY_DIGEST,
-              { isTest: false },
-              { jobId: `digest-${Date.now()}` },
+              { draftId: draft.id, slotId: draft.slotId },
+              { jobId: `digest-draft-${draft.id}` },
             );
-            logger.info("[scheduler] queued daily digest");
+            logger.info({ draftId: draft.id, slotId: draft.slotId }, "[scheduler] queued scheduled draft delivery");
+          }
+        } catch (err) {
+          logger.error("[scheduler] scheduled draft delivery check failed", err);
+        }
+
+        // Check which digest slots are due
+        try {
+          const dueSlotIds = await checkDigestSlotsDue(db);
+          for (const slotId of dueSlotIds) {
+            await maintenanceQueue.add(
+              JOB_DAILY_DIGEST,
+              { isTest: false, slotId },
+              { jobId: `digest-${slotId}-${Date.now()}` },
+            );
+            logger.info({ slotId }, "[scheduler] queued digest for slot");
           }
         } catch (err) {
           logger.error("[scheduler] digest check failed", err);
@@ -1066,18 +1125,61 @@ export const createMaintenanceWorker = ({
 
       if (job.name === JOB_DAILY_DIGEST) {
         const isTest = job.data?.isTest === true;
-        logger.info(`[digest] starting ${isTest ? "test" : "scheduled"} digest`);
+        const slotId = job.data?.slotId as string | undefined;
+        const draftId = job.data?.draftId as string | undefined;
+        logger.info({ isTest, slotId, draftId }, `[digest] starting ${draftId ? "draft delivery" : isTest ? "test" : "scheduled"} digest`);
         const result = await compileAndSendDigest(
           { db, telegramConfig, facebookConfig, linkedinConfig, apiKeys },
-          { isTest },
+          { isTest, slotId, draftId },
         );
         if (result.sent) {
           logger.info(
-            { articles: result.articleCount, messages: result.messageCount },
-            `[digest] ${isTest ? "test" : "scheduled"} digest sent`,
+            { articles: result.articleCount, messages: result.messageCount, slotId, draftId },
+            `[digest] ${draftId ? "draft" : isTest ? "test" : "scheduled"} digest sent`,
           );
+          // Notify frontend via SSE
+          if (slotId && eventPublisher) {
+            const [slot] = await db
+              .select({ name: digestSlots.name, telegramEnabled: digestSlots.telegramEnabled, facebookEnabled: digestSlots.facebookEnabled, linkedinEnabled: digestSlots.linkedinEnabled })
+              .from(digestSlots)
+              .where(eq(digestSlots.id, slotId))
+              .limit(1);
+            const channels: string[] = [];
+            if (slot?.telegramEnabled) channels.push("telegram");
+            if (slot?.facebookEnabled) channels.push("facebook");
+            if (slot?.linkedinEnabled) channels.push("linkedin");
+            await eventPublisher.publish({
+              type: "digest:sent",
+              data: {
+                slotId,
+                slotName: slot?.name ?? "Unknown",
+                articleCount: result.articleCount,
+                isTest,
+                channels,
+              },
+            });
+          }
+        } else if (result.draftId) {
+          logger.info({ slotId, draftId: result.draftId }, "[digest] saved as draft for manual approval");
+          // Notify frontend via SSE
+          if (slotId && eventPublisher) {
+            const [slot] = await db
+              .select({ name: digestSlots.name })
+              .from(digestSlots)
+              .where(eq(digestSlots.id, slotId))
+              .limit(1);
+            await eventPublisher.publish({
+              type: "digest:draft-ready",
+              data: {
+                draftId: result.draftId,
+                slotId,
+                slotName: slot?.name ?? "Unknown",
+                articleCount: result.articleCount,
+              },
+            });
+          }
         } else {
-          logger.info("[digest] skipped (no qualifying articles or disabled)");
+          logger.info({ slotId }, "[digest] skipped (no qualifying articles or disabled)");
         }
         return;
       }

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { eq, desc, sql, and } from "drizzle-orm";
 import { alertRules, alertDeliveries, articles, sectors } from "@watch-tower/db";
-import { logger } from "@watch-tower/shared";
+import { logger, ALERT_RULE_DEFAULTS } from "@watch-tower/shared";
 import type { ApiDeps } from "../server.js";
 
 const mapRule = (r: typeof alertRules.$inferSelect) => ({
@@ -20,6 +20,13 @@ const mapRule = (r: typeof alertRules.$inferSelect) => ({
 });
 
 export const registerAlertsRoutes = (app: FastifyInstance, deps: ApiDeps) => {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // GET /alerts/defaults — single source of truth for new-rule form defaults
+  // ─────────────────────────────────────────────────────────────────────────────
+  app.get("/alerts/defaults", { preHandler: deps.requireApiKey }, async () => {
+    return ALERT_RULE_DEFAULTS;
+  });
+
   // ─────────────────────────────────────────────────────────────────────────────
   // GET /alerts — list all rules with last-triggered info
   // ─────────────────────────────────────────────────────────────────────────────

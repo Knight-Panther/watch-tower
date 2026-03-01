@@ -13,6 +13,7 @@ import {
   customType,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import { DIGEST_SLOT_DEFAULTS, ALERT_RULE_DEFAULTS } from "@watch-tower/shared";
 
 // ─── Custom Types ────────────────────────────────────────────────────────────
 
@@ -100,6 +101,7 @@ export const articles = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     scoredAt: timestamp("scored_at", { withTimezone: true }),
     approvedAt: timestamp("approved_at", { withTimezone: true }),
+    digestedAt: timestamp("digested_at", { withTimezone: true }),
   },
   (table) => [
     index("idx_articles_source_published").on(table.sourceId, table.publishedAt),
@@ -316,12 +318,111 @@ export const allowedDomains = pgTable("allowed_domains", {
 
 // ─── Alert Rules (P3: Keyword Alerts → Telegram) ────────────────────────────
 
+// ─── Digest Slots (multi-schedule digest configuration) ──────────────────────
+
+export const digestSlots = pgTable(
+  "digest_slots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    enabled: boolean("enabled").notNull().default(DIGEST_SLOT_DEFAULTS.enabled),
+    // Schedule
+    time: text("time").notNull().default(DIGEST_SLOT_DEFAULTS.time),
+    timezone: text("timezone").notNull().default(DIGEST_SLOT_DEFAULTS.timezone),
+    days: jsonb("days").notNull().default(DIGEST_SLOT_DEFAULTS.days),
+    // Content rules
+    minScore: smallint("min_score").notNull().default(DIGEST_SLOT_DEFAULTS.min_score),
+    maxArticles: smallint("max_articles").notNull().default(DIGEST_SLOT_DEFAULTS.max_articles),
+    sectorIds: jsonb("sector_ids"), // uuid[] or null (all sectors)
+    language: text("language").notNull().default(DIGEST_SLOT_DEFAULTS.language),
+    // Prompts
+    systemPrompt: text("system_prompt"), // NULL = use default
+    translationPrompt: text("translation_prompt"), // NULL = use default
+    // LLM config
+    provider: text("provider").notNull().default(DIGEST_SLOT_DEFAULTS.provider),
+    model: text("model").notNull().default(DIGEST_SLOT_DEFAULTS.model),
+    translationProvider: text("translation_provider").notNull().default(DIGEST_SLOT_DEFAULTS.translation_provider),
+    translationModel: text("translation_model").notNull().default(DIGEST_SLOT_DEFAULTS.translation_model),
+    // Delivery behavior
+    autoPost: boolean("auto_post").notNull().default(DIGEST_SLOT_DEFAULTS.auto_post),
+    telegramChatId: text("telegram_chat_id"),
+    telegramEnabled: boolean("telegram_enabled").notNull().default(DIGEST_SLOT_DEFAULTS.telegram_enabled),
+    facebookEnabled: boolean("facebook_enabled").notNull().default(DIGEST_SLOT_DEFAULTS.facebook_enabled),
+    linkedinEnabled: boolean("linkedin_enabled").notNull().default(DIGEST_SLOT_DEFAULTS.linkedin_enabled),
+    // Per-channel language
+    telegramLanguage: text("telegram_language").notNull().default(DIGEST_SLOT_DEFAULTS.telegram_language),
+    facebookLanguage: text("facebook_language").notNull().default(DIGEST_SLOT_DEFAULTS.facebook_language),
+    linkedinLanguage: text("linkedin_language").notNull().default(DIGEST_SLOT_DEFAULTS.linkedin_language),
+    // Cover image toggles
+    imageTelegram: boolean("image_telegram").notNull().default(DIGEST_SLOT_DEFAULTS.image_telegram),
+    imageFacebook: boolean("image_facebook").notNull().default(DIGEST_SLOT_DEFAULTS.image_facebook),
+    imageLinkedin: boolean("image_linkedin").notNull().default(DIGEST_SLOT_DEFAULTS.image_linkedin),
+    // Timestamps
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("idx_digest_slots_enabled").on(table.enabled)],
+);
+
+// ─── Digest Drafts (generated digest content with lifecycle tracking) ────────
+
+export const digestDrafts = pgTable(
+  "digest_drafts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    slotId: uuid("slot_id")
+      .notNull()
+      .references(() => digestSlots.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("draft"),
+    // 'draft' | 'approved' | 'sent' | 'expired' | 'discarded' | 'send_failed'
+    // Content
+    generatedText: text("generated_text").notNull(), // Raw LLM output (English bullets)
+    translatedText: text("translated_text"), // Georgian translation (NULL if language=en)
+    edited: boolean("edited").notNull().default(false), // True if user modified text
+    // Article tracking (for dedup)
+    articleCount: smallint("article_count").notNull().default(0),
+    articleIds: jsonb("article_ids").notNull().default([]), // uuid[] of included articles
+    // LLM metadata
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    llmTokensIn: integer("llm_tokens_in"),
+    llmTokensOut: integer("llm_tokens_out"),
+    llmCostMicrodollars: integer("llm_cost_microdollars"),
+    translationProvider: text("translation_provider"),
+    translationModel: text("translation_model"),
+    translationCostMicrodollars: integer("translation_cost_microdollars"),
+    // Pipeline stats snapshot
+    statsScanned: integer("stats_scanned").notNull().default(0),
+    statsScored: integer("stats_scored").notNull().default(0),
+    statsAboveThreshold: integer("stats_above_threshold").notNull().default(0),
+    maxArticles: smallint("max_articles"),
+    scoreDistribution: jsonb("score_distribution"), // { "5": 4, "4": 8, "3": 6 }
+    // Delivery results (filled after send)
+    channels: text("channels").array(), // platforms attempted
+    channelResults: jsonb("channel_results"), // { telegram: "sent", facebook: "failed" }
+    // Timestamps
+    generatedAt: timestamp("generated_at", { withTimezone: true }).notNull().defaultNow(),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }), // NULL = post immediately on approve
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(), // generated_at + 24h
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_digest_drafts_slot").on(table.slotId),
+    index("idx_digest_drafts_status").on(table.status),
+    index("idx_digest_drafts_expires").on(table.expiresAt),
+  ],
+);
+
 // ─── Digest Runs (history of sent digests) ──────────────────────────────────
 
 export const digestRuns = pgTable(
   "digest_runs",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    slotId: uuid("slot_id").references(() => digestSlots.id, { onDelete: "set null" }),
+    draftId: uuid("draft_id").references(() => digestDrafts.id, { onDelete: "set null" }),
     sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
     isTest: boolean("is_test").notNull().default(false),
     language: text("language").notNull().default("en"), // "en" | "ka"
@@ -334,6 +435,8 @@ export const digestRuns = pgTable(
     statsScanned: integer("stats_scanned").notNull().default(0),
     statsScored: integer("stats_scored").notNull().default(0),
     statsAboveThreshold: integer("stats_above_threshold").notNull().default(0),
+    maxArticles: smallint("max_articles"),
+    scoreDistribution: jsonb("score_distribution"), // { "5": 4, "4": 8, "3": 6 }
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index("idx_digest_runs_sent_at").on(table.sentAt)],
@@ -347,15 +450,15 @@ export const alertRules = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     name: text("name").notNull(),
     keywords: text("keywords").array().notNull(),
-    minScore: smallint("min_score").notNull().default(1),
+    minScore: smallint("min_score").notNull().default(ALERT_RULE_DEFAULTS.min_score),
     telegramChatId: text("telegram_chat_id").notNull(),
-    active: boolean("active").notNull().default(true),
+    active: boolean("active").notNull().default(ALERT_RULE_DEFAULTS.active),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     sectorId: uuid("sector_id").references(() => sectors.id, { onDelete: "cascade" }),
     template: jsonb("template"),
     muteUntil: timestamp("mute_until", { withTimezone: true }),
-    language: text("language").notNull().default("en"),
+    language: text("language").notNull().default(ALERT_RULE_DEFAULTS.language),
   },
   (table) => [index("idx_alert_rules_active").on(table.active)],
 );

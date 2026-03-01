@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { eq, inArray, sql, desc } from "drizzle-orm";
-import { appConfig, articles, digestRuns } from "@watch-tower/db";
+import { appConfig, articles, digestRuns, digestSlots } from "@watch-tower/db";
 import { logger, imageTemplateSchema, DEFAULT_IMAGE_TEMPLATE, JOB_DAILY_DIGEST } from "@watch-tower/shared";
 import type { ApiDeps } from "../server.js";
 
@@ -750,67 +750,60 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
   // Daily Digest Settings
   // ─────────────────────────────────────────────────────────────────────────────
 
+  // Backward compat shim: reads from first digest_slots row (Slot #1)
   app.get("/config/digest", { preHandler: deps.requireApiKey }, async () => {
-    const keys = [
-      "digest_enabled",
-      "digest_time",
-      "digest_timezone",
-      "digest_days",
-      "digest_min_score",
-      "digest_language",
-      "digest_system_prompt",
-      "digest_telegram_chat_id",
-      "digest_telegram_enabled",
-      "digest_facebook_enabled",
-      "digest_linkedin_enabled",
-      "digest_provider",
-      "digest_model",
-      "digest_translation_provider",
-      "digest_translation_model",
-      "digest_translation_prompt",
-      "digest_image_telegram",
-      "digest_image_facebook",
-      "digest_image_linkedin",
-      "last_digest_sent_at",
-      "posting_language",
-      "translation_provider",
-      "translation_model",
-    ];
+    const [slot] = await deps.db
+      .select()
+      .from(digestSlots)
+      .orderBy(digestSlots.createdAt)
+      .limit(1);
 
-    const rows = await deps.db
-      .select({ key: appConfig.key, value: appConfig.value })
-      .from(appConfig)
-      .where(inArray(appConfig.key, keys));
+    if (!slot) {
+      // No slot exists — return defaults
+      return {
+        enabled: false, time: "08:00", timezone: "UTC", days: [1, 2, 3, 4, 5, 6, 7],
+        minScore: 3, language: "en", systemPrompt: "", telegramChatId: "",
+        telegramEnabled: true, facebookEnabled: false, linkedinEnabled: false,
+        provider: "claude", model: "", translationProvider: "gemini",
+        translationModel: "gemini-2.5-flash", translationPrompt: "",
+        imageTelegram: false, imageFacebook: false, imageLinkedin: false,
+        lastDigestSentAt: null,
+      };
+    }
 
-    const m = new Map(rows.map((r) => [r.key, r.value]));
-    const postingLanguage = (m.get("posting_language") as string) ?? "en";
-    const globalTransProvider = (m.get("translation_provider") as string) ?? "gemini";
-    const globalTransModel = (m.get("translation_model") as string) ?? "gemini-2.5-flash";
+    // Get last run time for backward compat
+    const [lastRun] = await deps.db
+      .select({ sentAt: digestRuns.sentAt })
+      .from(digestRuns)
+      .where(eq(digestRuns.slotId, slot.id))
+      .orderBy(desc(digestRuns.sentAt))
+      .limit(1);
 
     return {
-      enabled: m.get("digest_enabled") === true || m.get("digest_enabled") === "true" ? true : false,
-      time: (m.get("digest_time") as string) ?? "08:00",
-      timezone: (m.get("digest_timezone") as string) ?? "UTC",
-      days: Array.isArray(m.get("digest_days")) ? m.get("digest_days") : [1, 2, 3, 4, 5, 6, 7],
-      minScore: Number(m.get("digest_min_score")) || 3,
-      language: (m.get("digest_language") as string) ?? postingLanguage,
-      systemPrompt: (m.get("digest_system_prompt") as string) ?? "",
-      telegramChatId: String(m.get("digest_telegram_chat_id") ?? ""),
-      telegramEnabled: m.get("digest_telegram_enabled") === true || m.get("digest_telegram_enabled") === "true" || !m.has("digest_telegram_enabled"),
-      facebookEnabled: m.get("digest_facebook_enabled") === true || m.get("digest_facebook_enabled") === "true" ? true : false,
-      linkedinEnabled: m.get("digest_linkedin_enabled") === true || m.get("digest_linkedin_enabled") === "true" ? true : false,
-      provider: (m.get("digest_provider") as string) ?? "claude",
-      model: (m.get("digest_model") as string) ?? "",
-      translationProvider: (m.get("digest_translation_provider") as string) ?? globalTransProvider,
-      translationModel: (m.get("digest_translation_model") as string) ?? globalTransModel,
-      translationPrompt: (m.get("digest_translation_prompt") as string) ?? "",
-      imageTelegram: m.get("digest_image_telegram") === true || m.get("digest_image_telegram") === "true" ? true : false,
-      imageFacebook: m.get("digest_image_facebook") === true || m.get("digest_image_facebook") === "true" ? true : false,
-      imageLinkedin: m.get("digest_image_linkedin") === true || m.get("digest_image_linkedin") === "true" ? true : false,
-      lastDigestSentAt: (m.get("last_digest_sent_at") as string) ?? null,
+      enabled: slot.enabled,
+      time: slot.time,
+      timezone: slot.timezone,
+      days: slot.days,
+      minScore: slot.minScore,
+      language: slot.language,
+      systemPrompt: slot.systemPrompt ?? "",
+      telegramChatId: slot.telegramChatId ?? "",
+      telegramEnabled: slot.telegramEnabled,
+      facebookEnabled: slot.facebookEnabled,
+      linkedinEnabled: slot.linkedinEnabled,
+      provider: slot.provider,
+      model: slot.model,
+      translationProvider: slot.translationProvider,
+      translationModel: slot.translationModel,
+      translationPrompt: slot.translationPrompt ?? "",
+      imageTelegram: slot.imageTelegram,
+      imageFacebook: slot.imageFacebook,
+      imageLinkedin: slot.imageLinkedin,
+      lastDigestSentAt: lastRun?.sentAt?.toISOString() ?? null,
     };
   });
 
+  // Backward compat shim: writes to first digest_slots row (Slot #1)
   app.patch<{
     Body: {
       enabled?: boolean;
@@ -836,6 +829,15 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
   }>("/config/digest", { preHandler: deps.requireApiKey }, async (request, reply) => {
     const body = request.body ?? {};
 
+    // Find first slot
+    const [slot] = await deps.db
+      .select({ id: digestSlots.id })
+      .from(digestSlots)
+      .orderBy(digestSlots.createdAt)
+      .limit(1);
+    if (!slot) return reply.code(404).send({ error: "No digest slot exists. Create one first." });
+
+    // Validation (same as before)
     if (body.enabled !== undefined && typeof body.enabled !== "boolean") {
       return reply.code(400).send({ error: "enabled must be a boolean" });
     }
@@ -869,7 +871,6 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     if (body.model !== undefined && body.model.length > 100) {
       return reply.code(400).send({ error: "model must be 100 characters or less" });
     }
-    // Cross-validate model against provider when both are provided
     const VALID_MODELS: Record<string, string[]> = {
       claude: ["claude-sonnet-4-20250514", "claude-haiku-4-5-20251001", "claude-opus-4-20250514"],
       openai: ["gpt-4o", "gpt-4o-mini", "o3-mini"],
@@ -890,7 +891,6 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     if (body.translationModel !== undefined && body.translationModel.length > 100) {
       return reply.code(400).send({ error: "translationModel must be 100 characters or less" });
     }
-    // Cross-validate translation model against translation provider
     const VALID_TRANSLATION_MODELS: Record<string, string[]> = {
       gemini: ["gemini-2.5-flash", "gemini-2.5-pro"],
       openai: ["gpt-4o-mini", "gpt-4o"],
@@ -907,52 +907,50 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       return reply.code(400).send({ error: "translationPrompt must be 1000 characters or less" });
     }
 
-    const updates: { key: string; value: unknown }[] = [];
-    if (body.enabled !== undefined) updates.push({ key: "digest_enabled", value: body.enabled });
-    if (body.time !== undefined) updates.push({ key: "digest_time", value: body.time });
-    if (body.timezone !== undefined) updates.push({ key: "digest_timezone", value: body.timezone });
-    if (body.days !== undefined) updates.push({ key: "digest_days", value: body.days });
-    if (body.minScore !== undefined) updates.push({ key: "digest_min_score", value: body.minScore });
-    if (body.language !== undefined) updates.push({ key: "digest_language", value: body.language });
-    if (body.systemPrompt !== undefined)
-      updates.push({ key: "digest_system_prompt", value: body.systemPrompt });
-    if (body.telegramChatId !== undefined)
-      updates.push({ key: "digest_telegram_chat_id", value: body.telegramChatId });
-    if (body.telegramEnabled !== undefined)
-      updates.push({ key: "digest_telegram_enabled", value: body.telegramEnabled });
-    if (body.facebookEnabled !== undefined)
-      updates.push({ key: "digest_facebook_enabled", value: body.facebookEnabled });
-    if (body.linkedinEnabled !== undefined)
-      updates.push({ key: "digest_linkedin_enabled", value: body.linkedinEnabled });
-    if (body.provider !== undefined) updates.push({ key: "digest_provider", value: body.provider });
-    if (body.model !== undefined) updates.push({ key: "digest_model", value: body.model });
-    if (body.translationProvider !== undefined)
-      updates.push({ key: "digest_translation_provider", value: body.translationProvider });
-    if (body.translationModel !== undefined)
-      updates.push({ key: "digest_translation_model", value: body.translationModel });
-    if (body.translationPrompt !== undefined)
-      updates.push({ key: "digest_translation_prompt", value: body.translationPrompt });
-    if (body.imageTelegram !== undefined)
-      updates.push({ key: "digest_image_telegram", value: body.imageTelegram });
-    if (body.imageFacebook !== undefined)
-      updates.push({ key: "digest_image_facebook", value: body.imageFacebook });
-    if (body.imageLinkedin !== undefined)
-      updates.push({ key: "digest_image_linkedin", value: body.imageLinkedin });
+    // Build slot update (write directly to digest_slots instead of app_config)
+    const updates: Record<string, unknown> = { updatedAt: new Date() };
+    if (body.enabled !== undefined) updates.enabled = body.enabled;
+    if (body.time !== undefined) updates.time = body.time;
+    if (body.timezone !== undefined) updates.timezone = body.timezone;
+    if (body.days !== undefined) updates.days = body.days;
+    if (body.minScore !== undefined) updates.minScore = body.minScore;
+    if (body.language !== undefined) updates.language = body.language;
+    if (body.systemPrompt !== undefined) updates.systemPrompt = body.systemPrompt;
+    if (body.telegramChatId !== undefined) updates.telegramChatId = body.telegramChatId;
+    if (body.telegramEnabled !== undefined) updates.telegramEnabled = body.telegramEnabled;
+    if (body.facebookEnabled !== undefined) updates.facebookEnabled = body.facebookEnabled;
+    if (body.linkedinEnabled !== undefined) updates.linkedinEnabled = body.linkedinEnabled;
+    if (body.provider !== undefined) updates.provider = body.provider;
+    if (body.model !== undefined) updates.model = body.model;
+    if (body.translationProvider !== undefined) updates.translationProvider = body.translationProvider;
+    if (body.translationModel !== undefined) updates.translationModel = body.translationModel;
+    if (body.translationPrompt !== undefined) updates.translationPrompt = body.translationPrompt;
+    if (body.imageTelegram !== undefined) updates.imageTelegram = body.imageTelegram;
+    if (body.imageFacebook !== undefined) updates.imageFacebook = body.imageFacebook;
+    if (body.imageLinkedin !== undefined) updates.imageLinkedin = body.imageLinkedin;
 
-    for (const { key, value } of updates) {
-      await upsertTypedConfig(deps, key, value);
-    }
+    await deps.db
+      .update(digestSlots)
+      .set(updates)
+      .where(eq(digestSlots.id, slot.id));
 
-    logger.info("[config] digest settings updated");
+    logger.info("[config] digest settings updated (via slot shim)");
     return { success: true };
   });
 
+  // Backward compat shim: test using first slot's ID
   app.post("/config/digest/test", { preHandler: deps.requireApiKey }, async (_request, reply) => {
     try {
+      const [slot] = await deps.db
+        .select({ id: digestSlots.id })
+        .from(digestSlots)
+        .orderBy(digestSlots.createdAt)
+        .limit(1);
+
       await deps.maintenanceQueue.add(
         JOB_DAILY_DIGEST,
-        { isTest: true },
-        { jobId: `digest-test-${Date.now()}` },
+        { isTest: true, slotId: slot?.id },
+        { jobId: `digest-test-${slot?.id ?? "legacy"}-${Date.now()}` },
       );
       return { queued: true, message: "Test digest queued. Check Telegram in ~30 seconds." };
     } catch (err) {
@@ -964,6 +962,7 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
 
   // ─── Digest History ────────────────────────────────────────────────────────
 
+  // Backward compat: show all runs (legacy + slot-based)
   app.get<{ Querystring: { limit?: string } }>(
     "/config/digest/history",
     { preHandler: deps.requireApiKey },
