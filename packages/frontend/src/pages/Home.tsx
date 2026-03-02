@@ -12,7 +12,9 @@ import {
   listSources,
   runIngest,
   updateSource,
+  verifyFeedUrl,
   type Constraints,
+  type FeedVerifyResult,
   type ProviderHealthResult,
   type Sector,
   type Source,
@@ -47,6 +49,9 @@ export default function Home() {
     ingestIntervalMinutes?: string;
   }>({});
   const [isTriggering, setIsTriggering] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<FeedVerifyResult | null>(null);
+  const [skipVerification, setSkipVerification] = useState(false);
   const [maxAgeDrafts, setMaxAgeDrafts] = useState<Record<string, string>>({});
   const [sectorDrafts, setSectorDrafts] = useState<Record<string, string>>({});
   const [sourceIntervalDrafts, setSourceIntervalDrafts] = useState<Record<string, string>>({});
@@ -166,15 +171,20 @@ export default function Home() {
     }
 
     try {
-      const created = await createSource({
-        url: sourceForm.url,
-        name: sourceForm.name,
-        sector_id: sourceForm.sectorId,
-        max_age_days: maxAge,
-        ingest_interval_minutes: intervalValue,
-      });
+      const created = await createSource(
+        {
+          url: sourceForm.url,
+          name: sourceForm.name,
+          sector_id: sourceForm.sectorId,
+          max_age_days: maxAge,
+          ingest_interval_minutes: intervalValue,
+        },
+        { skipVerification },
+      );
       setSources((prev) => [created, ...prev]);
       setSourceForm(emptySourceForm);
+      setVerifyResult(null);
+      setSkipVerification(false);
       toast.success("Source added");
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to create source";
@@ -439,13 +449,112 @@ export default function Home() {
       <div className="grid gap-4 md:grid-cols-[3fr_2fr]">
         <section className="rounded-2xl border border-slate-800 bg-slate-900/40 p-6">
           <h2 className="text-sm font-semibold text-slate-300">Add source</h2>
+          <p className="mt-1 text-xs text-slate-500">
+            Paste an RSS/Atom feed URL and click Verify to check it before adding. Verification
+            fetches the feed, confirms it returns valid XML with articles, and checks freshness.
+          </p>
           <form onSubmit={onSubmit} className="mt-3 grid gap-2.5 grid-cols-2">
-            <input
-              value={sourceForm.url}
-              onChange={(e) => setSourceForm({ ...sourceForm, url: e.target.value })}
-              placeholder="RSS URL"
-              className="col-span-2 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-600"
-            />
+            <div className="col-span-2 flex gap-2">
+              <input
+                value={sourceForm.url}
+                onChange={(e) => {
+                  setSourceForm({ ...sourceForm, url: e.target.value });
+                  setVerifyResult(null);
+                }}
+                placeholder="RSS URL"
+                className="flex-1 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-slate-600"
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={!sourceForm.url.trim() || isVerifying}
+                loading={isVerifying}
+                loadingText="..."
+                onClick={async () => {
+                  setIsVerifying(true);
+                  setVerifyResult(null);
+                  try {
+                    const result = await verifyFeedUrl(sourceForm.url.trim());
+                    setVerifyResult(result);
+                  } catch {
+                    setVerifyResult({
+                      ok: false,
+                      error: "Network error",
+                      errorKind: "unknown",
+                    });
+                  } finally {
+                    setIsVerifying(false);
+                  }
+                }}
+                title="Fetches the URL, parses RSS/Atom XML, and reports feed title, item count, and latest article date. Takes up to 8 seconds."
+              >
+                Verify
+              </Button>
+            </div>
+            {verifyResult &&
+              (verifyResult.ok ? (
+                <div
+                  className={`col-span-2 rounded-lg border px-3 py-2 text-xs ${
+                    verifyResult.warnings.length > 0
+                      ? "border-amber-800/50 bg-amber-950/30 text-amber-300"
+                      : "border-emerald-800/50 bg-emerald-950/30 text-emerald-300"
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span>{verifyResult.warnings.length > 0 ? "~" : "OK"}</span>
+                    <span className="font-semibold">{verifyResult.title ?? "Untitled feed"}</span>
+                  </div>
+                  <div className="mt-0.5 text-[11px] opacity-80">
+                    {verifyResult.itemCount} article{verifyResult.itemCount !== 1 ? "s" : ""} in
+                    feed
+                    {verifyResult.mostRecentDate && (
+                      <>
+                        {" / "}latest published:{" "}
+                        {new Date(verifyResult.mostRecentDate).toLocaleDateString()}
+                        {verifyResult.staleDays !== null && verifyResult.staleDays <= 1
+                          ? " (today)"
+                          : verifyResult.staleDays !== null
+                            ? ` (${verifyResult.staleDays}d ago)`
+                            : ""}
+                      </>
+                    )}
+                  </div>
+                  {verifyResult.warnings.map((w, i) => (
+                    <div key={i} className="mt-1 text-[11px] text-amber-400">
+                      {w}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="col-span-2 rounded-lg border border-red-800/50 bg-red-950/30 px-3 py-2 text-xs text-red-300">
+                  <div className="font-semibold">Verification failed</div>
+                  <div className="mt-0.5 text-[11px] opacity-80">{verifyResult.error}</div>
+                  {verifyResult.errorKind === "timeout" && (
+                    <div className="mt-1 text-[11px] text-red-400/70">
+                      The server did not respond within 8 seconds. It may be down, blocking
+                      non-browser requests, or very slow.
+                    </div>
+                  )}
+                  {verifyResult.errorKind === "http" && (
+                    <div className="mt-1 text-[11px] text-red-400/70">
+                      The server returned an HTTP error. Check that the URL points to a valid RSS
+                      feed and the server is accessible.
+                    </div>
+                  )}
+                  {verifyResult.errorKind === "parse" && (
+                    <div className="mt-1 text-[11px] text-red-400/70">
+                      The URL returned content that could not be parsed as RSS or Atom XML. It may
+                      be an HTML page, JSON API, or malformed feed.
+                    </div>
+                  )}
+                  {verifyResult.errorKind === "empty" && (
+                    <div className="mt-1 text-[11px] text-red-400/70">
+                      The feed parsed successfully but contains zero articles. It may be a valid
+                      feed that is currently empty.
+                    </div>
+                  )}
+                </div>
+              ))}
             {sourceErrors.url ? (
               <p className="col-span-2 text-xs text-red-400">{sourceErrors.url}</p>
             ) : null}
@@ -499,6 +608,19 @@ export default function Home() {
                 {sourceErrors.ingestIntervalMinutes}
               </p>
             ) : null}
+            <label
+              className="col-span-2 flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none"
+              title="When checked, the feed URL will not be verified on submit. Use for temporarily-down feeds or non-standard sources you trust."
+            >
+              <input
+                type="checkbox"
+                checked={skipVerification}
+                onChange={(e) => setSkipVerification(e.target.checked)}
+                className="h-3.5 w-3.5 accent-slate-500"
+              />
+              Skip feed verification on submit
+              <span className="text-slate-600">(for temporarily-down or trusted feeds)</span>
+            </label>
             <div className="col-span-2">
               <Button variant="primary" type="submit" fullWidth disabled={sectors.length === 0}>
                 Add

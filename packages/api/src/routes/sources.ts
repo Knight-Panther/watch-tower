@@ -4,6 +4,7 @@ import { rssSources, sectors } from "@watch-tower/db";
 import { JOB_INGEST_FETCH, validateFeedUrl } from "@watch-tower/shared";
 import type { ApiDeps } from "../server.js";
 import { isDomainAllowed } from "../utils/domain-whitelist.js";
+import { verifyFeedUrl } from "../utils/feed-verify.js";
 
 const clampMaxAgeDays = (value: number) => Math.min(15, Math.max(1, value));
 
@@ -47,6 +48,35 @@ export const registerSourceRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     return selectSourcesWithSector(deps);
   });
 
+  // ─── Verify endpoint ─────────────────────────────────────────────────────────
+  app.post<{ Body: { url: string } }>(
+    "/sources/verify",
+    { preHandler: deps.requireApiKey },
+    async (request, reply) => {
+      const { url } = request.body ?? {};
+      if (!url) {
+        return reply.code(400).send({ error: "url is required" });
+      }
+
+      // Same security checks as POST /sources
+      const urlValidation = validateFeedUrl(url);
+      if (!urlValidation.valid) {
+        return reply.code(400).send({ error: urlValidation.error });
+      }
+      const whitelistCheck = await isDomainAllowed(deps.db, url);
+      if (!whitelistCheck.allowed) {
+        return reply.code(403).send({
+          error: whitelistCheck.reason || "Domain not authorized",
+          domain: whitelistCheck.domain,
+        });
+      }
+
+      const result = await verifyFeedUrl(url);
+      return result;
+    },
+  );
+
+  // ─── Create source ──────────────────────────────────────────────────────────
   app.post<{
     Body: {
       url: string;
@@ -56,9 +86,11 @@ export const registerSourceRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       max_age_days?: number;
       ingest_interval_minutes: number;
     };
+    Querystring: { skipVerification?: string };
   }>("/sources", { preHandler: deps.requireApiKey }, async (request, reply) => {
     const { url, name, active, sector_id, max_age_days, ingest_interval_minutes } =
       request.body ?? {};
+    const skipVerification = request.query.skipVerification === "true";
 
     if (!url) {
       return reply.code(400).send({ error: "url is required" });
@@ -89,6 +121,17 @@ export const registerSourceRoutes = (app: FastifyInstance, deps: ApiDeps) => {
         error: whitelistCheck.reason || "Domain not authorized",
         domain: whitelistCheck.domain,
       });
+    }
+
+    // Feed verification (skip if toggled)
+    if (!skipVerification) {
+      const verification = await verifyFeedUrl(url);
+      if (!verification.ok) {
+        return reply.code(422).send({
+          error: `Feed verification failed: ${verification.error}`,
+          errorKind: verification.errorKind,
+        });
+      }
     }
 
     let inserted;

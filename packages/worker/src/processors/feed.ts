@@ -138,10 +138,17 @@ export const createIngestWorker = ({ connection, db, eventPublisher }: IngestDep
             ((item as Record<string, unknown>).summary as string | undefined);
 
           // Capture RSS <category> tags (already parsed by rss-parser)
+          // Some feeds (e.g. The War Zone) return xml2js objects: { _: "Air", $: { domain: "..." } }
+          // String() throws on these because $ contains nested objects — extract ._ text content
           const categories =
             Array.isArray(item.categories) && item.categories.length > 0
               ? item.categories
-                  .map((c: string) => c.trim())
+                  .map((c: unknown) => {
+                    if (typeof c === "string") return c.trim();
+                    if (c && typeof c === "object" && "_" in c)
+                      return String((c as Record<string, unknown>)._ ?? "").trim();
+                    return "";
+                  })
                   .filter(Boolean)
                   .slice(0, 20)
               : null;

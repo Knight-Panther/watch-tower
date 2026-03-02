@@ -36,7 +36,23 @@
       "WebFetch(domain:www.technologyreview.com)",
       "WebFetch(domain:venturebeat.com)",
       "WebFetch(domain:arstechnica.com)",
-      "WebFetch(domain:www.nasa.gov)"
+      "WebFetch(domain:www.nasa.gov)",
+      "Bash(psql \"postgres://watchtower:watchtower@127.0.0.1:5432/watchtower\" -f packages/db/seed-sectors.sql)",
+      "Bash(docker exec -i watch-tower-postgres-1 psql -U watchtower -d watchtower -c \":*)",
+      "WebFetch(domain:www.defensenews.com)",
+      "WebFetch(domain:www.realcleardefense.com)",
+      "WebFetch(domain:ecfr.eu)",
+      "WebFetch(domain:www.eia.gov)",
+      "WebFetch(domain:www.darkreading.com)",
+      "WebFetch(domain:feeds.feedburner.com)",
+      "WebFetch(domain:rss.feedspot.com)",
+      "WebFetch(domain:cleantechnica.com)",
+      "WebFetch(domain:www.spglobal.com)",
+      "WebFetch(domain:oilprice.com)",
+      "WebFetch(domain:www.energymonitor.ai)",
+      "Bash(tr '>' '>\\\\n')",
+      "Bash(docker exec:*)",
+      "Bash(PGPASSWORD=watchtower psql -h 127.0.0.1 -U watchtower -d watchtower -f packages/db/seed-sectors.sql)"
     ],
     "additionalDirectories": [
       "C:\\Users\\VM-Dev\\Desktop\\watch-tower"

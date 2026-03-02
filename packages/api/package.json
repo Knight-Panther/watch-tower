@@ -16,6 +16,7 @@
     "@fastify/cors": "^11.2.0",
     "@fastify/rate-limit": "^10.3.0",
     "@watch-tower/db": "file:../db",
+    "@watch-tower/rss": "file:../rss",
     "@watch-tower/shared": "file:../shared",
     "bullmq": "^5.66.5",
     "dotenv": "^17.2.3",
