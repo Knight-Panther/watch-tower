@@ -52,7 +52,8 @@
       "WebFetch(domain:www.energymonitor.ai)",
       "Bash(tr '>' '>\\\\n')",
       "Bash(docker exec:*)",
-      "Bash(PGPASSWORD=watchtower psql -h 127.0.0.1 -U watchtower -d watchtower -f packages/db/seed-sectors.sql)"
+      "Bash(PGPASSWORD=watchtower psql -h 127.0.0.1 -U watchtower -d watchtower -f packages/db/seed-sectors.sql)",
+      "Bash(xargs grep -l \"GET /stats\\\\|GET /telemetry\\\\|GET /articles\")"
     ],
     "additionalDirectories": [
       "C:\\Users\\VM-Dev\\Desktop\\watch-tower"

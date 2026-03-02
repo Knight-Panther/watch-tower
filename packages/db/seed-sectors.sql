@@ -358,18 +358,22 @@ SELECT s.id, '', jsonb_build_object(
     'Analyst ratings and price target changes'
   ),
   'rejectKeywords', jsonb_build_array(
-    'app update', 'firmware', 'how to', 'best of', 'deal', 'sale',
+    'app update', 'firmware', 'how to', 'best of', 'deals roundup', 'deal alert', 'sale',
     'review:', 'unboxing', 'gift guide', 'sponsored', 'tutorial',
     'coupon', 'discount', 'promo code',
     'stock pick', 'buy rating', 'sell rating', 'market wrap',
-    'premarket', 'mad money', 'cramer'
+    'premarket', 'mad money', 'cramer',
+    'market report', 'market size', 'forecast to', 'industry report'
   ),
   'score1', 'Noise — press releases, product listings, SEO articles, minor app updates, promotional content with no news value',
   'score2', 'Routine — scheduled earnings meeting expectations, minor feature launches, incremental updates to known stories',
   'score3', 'Noteworthy — new development in ongoing story, notable product launch, regulatory filing, meaningful partnership',
-  'score4', 'Significant — unexpected M&A, major policy shift, security breach affecting millions, leadership change at FAANG-tier company',
+  'score4', 'Significant — unexpected M&A, major policy shift, security breach or major service outage affecting millions, leadership change at FAANG-tier company',
   'score5', 'Breaking/Urgent — platform outage affecting >100M users, antitrust breakup order, major company collapse, critical infrastructure failure',
-  'examples', '[]'::jsonb,
+  'examples', jsonb_build_array(
+    jsonb_build_object('title', 'Anthropic confirms Claude is down in a worldwide outage', 'score', 4, 'reasoning', 'Major AI service outage affecting millions of users globally'),
+    jsonb_build_object('title', 'Samsung Galaxy S26 launches with updated AI features', 'score', 2, 'reasoning', 'Routine product launch, incremental update')
+  ),
   'summaryMaxChars', 200,
   'summaryTone', 'professional',
   'summaryLanguage', 'English',
@@ -400,7 +404,8 @@ SELECT s.id, '', jsonb_build_object(
   ),
   'rejectKeywords', jsonb_build_array(
     'tonight''s sky', 'stargazing', 'horoscope', 'best telescope',
-    'gift guide', 'astrophotography tips', 'beginner guide'
+    'gift guide', 'astrophotography tips', 'beginner guide',
+    'what to see', 'meteor shower guide'
   ),
   'score1', 'Noise — stargazing tips, telescope reviews, astrology content, promotional material',
   'score2', 'Routine — scheduled satellite launches, routine ISS operations, minor mission updates',
@@ -441,14 +446,21 @@ SELECT s.id, '', jsonb_build_object(
   'rejectKeywords', jsonb_build_array(
     'tutorial', 'how to build', 'course', 'webinar', 'podcast',
     'hiring', 'job opening', 'internship', 'bootcamp',
-    'top 10', 'best tools', 'free trial', 'vs comparison'
+    'top 10', 'best tools', 'free trial', 'vs comparison',
+    'market report', 'market size', 'forecast to', 'industry report',
+    'built a', 'personal project', 'open source project'
   ),
-  'score1', 'Noise — tutorials, course announcements, minor chatbot updates, promotional AI tool launches',
+  'score1', 'Noise — tutorials, course announcements, minor chatbot updates, promotional AI tool launches, market research reports',
   'score2', 'Routine — incremental model improvements, routine benchmark results, minor robotics demos',
   'score3', 'Noteworthy — new model release from established lab, notable robotics deployment, AI policy proposal',
-  'score4', 'Significant — frontier model with major capability jump, AI regulation enacted, autonomous weapons policy shift, major safety incident',
+  'score4', 'Significant — major AI model release or lab announcement, AI regulation enacted, significant acquisition (>$500M), autonomous weapons policy shift, major safety incident, large-scale deployment milestone',
   'score5', 'Breaking/Urgent — credible AGI claim by major lab, autonomous weapon deployment confirmed, AI causes mass casualties, global AI moratorium',
-  'examples', '[]'::jsonb,
+  'examples', jsonb_build_array(
+    jsonb_build_object('title', 'OpenAI releases GPT-5 with 10x reasoning capability', 'score', 5, 'reasoning', 'Frontier model leap from major lab'),
+    jsonb_build_object('title', 'Anthropic raises $3B Series D at $60B valuation', 'score', 4, 'reasoning', 'Major AI lab funding event exceeding $1B'),
+    jsonb_build_object('title', 'EU formally enforces AI Act penalties on non-compliant companies', 'score', 4, 'reasoning', 'AI regulation enacted with real enforcement'),
+    jsonb_build_object('title', 'New paper shows GPT-4 beats radiologists on X-ray diagnosis', 'score', 3, 'reasoning', 'Notable research but no real-world deployment yet')
+  ),
   'summaryMaxChars', 200,
   'summaryTone', 'professional',
   'summaryLanguage', 'English',
@@ -480,9 +492,11 @@ SELECT s.id, '', jsonb_build_object(
     'Book reviews and commentary (Nature non-research content)'
   ),
   'rejectKeywords', jsonb_build_array(
-    'partnership', 'licensing deal', 'conference recap', 'webinar',
+    'licensing deal', 'conference recap', 'webinar',
     'podcast', 'sponsored', 'career', 'job opening',
-    'book review', 'obituary', 'retraction watch'
+    'book review', 'obituary', 'retraction watch',
+    'opinion:', 'first opinion', 'correction:', 'author correction',
+    'action figure', 'letter to'
   ),
   'score1', 'Noise — press releases, minor licensing deals, promotional content, career postings',
   'score2', 'Routine — scheduled FDA meetings, minor clinical updates, small biotech earnings',
@@ -522,7 +536,8 @@ SELECT s.id, '', jsonb_build_object(
   ),
   'rejectKeywords', jsonb_build_array(
     'opinion:', 'editorial', 'book review', 'podcast', 'job fair',
-    'veteran', 'memorial', 'museum', 'history of'
+    'veteran', 'memorial', 'museum', 'history of',
+    'photo essay', 'photo gallery'
   ),
   'score1', 'Noise — opinion pieces, book reviews, military history, memorial events, minor base announcements',
   'score2', 'Routine — small procurement contracts, routine exercises, minor personnel changes',
@@ -562,15 +577,18 @@ SELECT s.id, '', jsonb_build_object(
   ),
   'rejectKeywords', jsonb_build_array(
     'opinion:', 'photo essay', 'in pictures', 'quiz', 'travel',
-    'food', 'lifestyle', 'sport', 'entertainment', 'celebrity',
+    'lifestyle', 'sport', 'entertainment', 'celebrity',
     'recipe', 'fashion'
   ),
   'score1', 'Noise — lifestyle, travel, entertainment, sports, cultural fluff with no political substance',
   'score2', 'Routine — scheduled summits with no surprises, minor diplomatic statements, local politics',
   'score3', 'Noteworthy — new sanctions package, election in medium power, diplomatic incident, trade negotiation shift',
-  'score4', 'Significant — major election result, conflict escalation, sanctions on major economy, treaty signed or violated',
+  'score4', 'Significant — major election result, conflict escalation, sanctions on major economy, treaty signed or violated, escalatory acts by state or religious leaders',
   'score5', 'Breaking/Urgent — coup in major power, UN sanctions on P5 member, leader assassination, war declared, treaty collapse',
-  'examples', '[]'::jsonb,
+  'examples', jsonb_build_array(
+    jsonb_build_object('title', 'Senior Iranian clerics issue fatwa against America and Israel', 'score', 4, 'reasoning', 'Escalatory religious-political act with geopolitical implications'),
+    jsonb_build_object('title', 'Canadian PM Carney signs deals worth billions with India''s Modi', 'score', 4, 'reasoning', 'Major bilateral diplomatic breakthrough between two powers')
+  ),
   'summaryMaxChars', 200,
   'summaryTone', 'professional',
   'summaryLanguage', 'English',
@@ -601,7 +619,9 @@ SELECT s.id, '', jsonb_build_object(
   ),
   'rejectKeywords', jsonb_build_array(
     'tutorial', 'how to', 'best practices', 'webinar', 'sponsored',
-    'hiring', 'career', 'certification', 'training course'
+    'hiring', 'career', 'certification', 'training course',
+    'worth it', 'should I', 'which is better', 'market report',
+    'market size', 'meetup', 'password manager', 'advice thread'
   ),
   'score1', 'Noise — tutorials, product launches, career advice, certification news, minor patches',
   'score2', 'Routine — standard vulnerability patches, small-scale phishing campaigns, minor malware variants',
@@ -642,7 +662,9 @@ SELECT s.id, '', jsonb_build_object(
   'rejectKeywords', jsonb_build_array(
     'sponsored', 'webinar', 'conference', 'podcast', 'job opening',
     'internship', 'recipe', 'lifestyle',
-    'test drive', 'car review', 'best EV', 'buying guide'
+    'test drive', 'car review', 'best EV', 'buying guide',
+    'dealer', 'dealership', 'opens a new', 'monthly sales',
+    'deliveries report', 'video review', 'first drive'
   ),
   'score1', 'Noise — promotional content, minor company news, sponsored articles, career postings',
   'score2', 'Routine — incremental policy updates, minor production adjustments, routine EIA data releases',
@@ -661,7 +683,27 @@ ON CONFLICT (sector_id) DO UPDATE SET
   auto_approve_threshold = EXCLUDED.auto_approve_threshold,
   auto_reject_threshold = EXCLUDED.auto_reject_threshold;
 
--- ─── 5. FIX UNASSIGNED SOURCES ──────────────────────────────────────────────
+-- ─── 5. SOURCE INTERVAL TUNING (based on Day 1 signal analysis) ─────────────
+-- Noisy sources get longer intervals to reduce pipeline volume.
+-- Sources use ON CONFLICT DO NOTHING in section 3, so intervals need UPDATE.
+
+-- Reddit r/cybersecurity: avg 1.29, 90% noise → slow down
+UPDATE rss_sources SET ingest_interval_minutes = 360
+WHERE url = 'https://www.reddit.com/r/cybersecurity/.rss';
+
+-- GN: Artificial Intelligence: avg 1.71, 0% signal, 59 articles → slow down
+UPDATE rss_sources SET ingest_interval_minutes = 240
+WHERE url LIKE '%news.google.com%artificial+intelligence%';
+
+-- GN: Big Tech: avg 1.72, 5% signal, 58 articles → slow down
+UPDATE rss_sources SET ingest_interval_minutes = 240
+WHERE url LIKE '%news.google.com%Apple+OR+Google%';
+
+-- CleanTechnica: avg 1.65, 0% signal, 43 articles → slow down
+UPDATE rss_sources SET ingest_interval_minutes = 240
+WHERE url = 'https://cleantechnica.com/feed/';
+
+-- ─── 6. FIX UNASSIGNED SOURCES ──────────────────────────────────────────────
 -- Sources added manually via UI that ended up with NULL sector_id.
 -- Also normalizes names for manually-added Google News feeds.
 
