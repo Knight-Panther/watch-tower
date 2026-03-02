@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import Spinner from "../components/Spinner";
 import ConfirmModal from "../components/ConfirmModal";
@@ -14,18 +14,32 @@ import {
   getAlertSectorKeywords,
   type Sector,
   type ScoringConfig,
+  type ScoringExample,
   type ScoringRule,
 } from "../api";
+import { DEFAULT_SCORING_EXAMPLES } from "@watch-tower/shared";
 
 const DEFAULT_CONFIG: ScoringConfig = {
   priorities: [],
   ignore: [],
   rejectKeywords: [],
-  score1: "Not newsworthy (press releases, minor updates, promotional content)",
-  score2: "Low importance (routine news, minor developments)",
-  score3: "Moderate importance (notable but not urgent)",
-  score4: "High importance (significant developments, major launches)",
-  score5: "Critical importance (industry-changing news, major breaking stories)",
+  score1:
+    "Noise \u2014 press releases, promotional content, SEO articles, product listings, " +
+    "routine HR announcements, no new information beyond what is already known",
+  score2:
+    "Routine \u2014 scheduled earnings reports meeting expectations, minor personnel changes, " +
+    "incremental updates to previously reported stories, conference attendance announcements",
+  score3:
+    "Noteworthy \u2014 new development in an ongoing story, notable partnership or collaboration, " +
+    "regulatory filing, earnings with modest surprise, product launch from established company",
+  score4:
+    "Significant \u2014 unexpected corporate action (M&A, IPO filing, major lawsuit), " +
+    "policy shift with broad impact, earnings with major surprise, security breach " +
+    "affecting users, leadership change at major company",
+  score5:
+    "Breaking/Urgent \u2014 market-moving event, catastrophic incident, unprecedented regulatory " +
+    "action, major geopolitical development affecting markets, critical infrastructure " +
+    "failure, confirmed major data breach at scale",
   summaryMaxChars: 200,
   summaryTone: "professional",
   summaryLanguage: "English",
@@ -34,6 +48,99 @@ const DEFAULT_CONFIG: ScoringConfig = {
 };
 
 const TONE_OPTIONS: ScoringConfig["summaryTone"][] = ["professional", "casual", "urgent"];
+
+const LS_KEY = "scoringRules_sections";
+
+/** Read persisted open/closed state from localStorage. */
+function getSectionState(id: string, fallback: boolean): boolean {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return fallback;
+    const map = JSON.parse(raw);
+    return typeof map[id] === "boolean" ? map[id] : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/** Persist a single section's open/closed state. */
+function setSectionState(id: string, open: boolean) {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    const map = raw ? JSON.parse(raw) : {};
+    map[id] = open;
+    localStorage.setItem(LS_KEY, JSON.stringify(map));
+  } catch {
+    // localStorage full or unavailable — ignore
+  }
+}
+
+/** Collapsible card section with chevron toggle. Persists state in localStorage. */
+function Section({
+  id,
+  title,
+  subtitle,
+  titleClass,
+  borderClass,
+  badge,
+  defaultOpen = false,
+  headerRight,
+  children,
+}: {
+  id: string;
+  title: string;
+  subtitle?: string;
+  titleClass?: string;
+  borderClass?: string;
+  badge?: React.ReactNode;
+  defaultOpen?: boolean;
+  headerRight?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(() => getSectionState(id, defaultOpen));
+  const toggle = () =>
+    setOpen((prev) => {
+      const next = !prev;
+      setSectionState(id, next);
+      return next;
+    });
+  return (
+    <div className={`rounded-2xl bg-slate-900/40 p-5 ${borderClass ?? "border border-slate-800"}`}>
+      <button
+        type="button"
+        onClick={toggle}
+        className="flex w-full items-center justify-between text-left"
+      >
+        <div className="flex items-center gap-2">
+          <h2 className={`font-semibold ${titleClass ?? ""}`}>{title}</h2>
+          {badge}
+        </div>
+        <svg
+          className={`h-4 w-4 shrink-0 text-slate-500 transition-transform ${open ? "rotate-180" : ""}`}
+          viewBox="0 0 20 20"
+          fill="currentColor"
+        >
+          <path
+            fillRule="evenodd"
+            d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+            clipRule="evenodd"
+          />
+        </svg>
+      </button>
+      {subtitle && <p className="mt-1 text-xs text-slate-400">{subtitle}</p>}
+      {open && <div className="mt-3">{children}</div>}
+      {/* Show headerRight (e.g. Add button) even when collapsed, below the toggle */}
+      {!open && headerRight && <div className="mt-2">{headerRight}</div>}
+    </div>
+  );
+}
+
+/** Auto-resize textarea to fit content. Attach via ref callback. */
+const autoResize = (el: HTMLTextAreaElement | null) => {
+  if (!el) return;
+  el.style.height = "auto";
+  el.style.height = el.scrollHeight + "px";
+};
 
 export default function ScoringRules() {
   // Data state
@@ -46,6 +153,16 @@ export default function ScoringRules() {
   // Form state
   const [config, setConfig] = useState<ScoringConfig>(DEFAULT_CONFIG);
   const [autoApprove, setAutoApprove] = useState(5);
+
+  // Auto-resize textareas when config loads (sector switch)
+  const textareaContainerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!textareaContainerRef.current) return;
+    const areas = textareaContainerRef.current.querySelectorAll<HTMLTextAreaElement>(
+      "textarea[data-autoresize]",
+    );
+    areas.forEach(autoResize);
+  }, [config]);
   const [autoReject, setAutoReject] = useState(2);
   const [hasChanges, setHasChanges] = useState(false);
 
@@ -235,7 +352,7 @@ Example: {"reasoning": "...", "score": 3, "summary": "...", "matched_alert_keywo
   return (
     <div className="grid gap-6">
       {/* Header - sticky below nav */}
-      <section className="sticky top-28 z-10 rounded-2xl border border-slate-800 bg-slate-900 p-6">
+      <section className="sticky top-[var(--nav-h)] z-10 rounded-2xl border border-slate-800 bg-slate-900 p-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">LLM Brain</h1>
@@ -279,70 +396,92 @@ Example: {"reasoning": "...", "score": 3, "summary": "...", "matched_alert_keywo
       ) : (
         <div className="grid gap-6 xl:grid-cols-[2fr_3fr]">
           {/* Left: Form controls */}
-          <section className="space-y-5">
+          <section className="space-y-5" ref={textareaContainerRef}>
             {/* Priorities */}
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
-              <h2 className="font-semibold">Topics to Prioritize</h2>
-              <p className="mt-1 text-xs text-slate-400">
-                Articles about these topics will score higher.
-              </p>
-              <div className="mt-3">
-                <TagInput
-                  tags={config.priorities}
-                  onChange={(tags) => updateConfig("priorities", tags)}
-                  maxTags={20}
-                  placeholder="Add topic..."
-                  color="emerald"
-                />
-              </div>
-            </div>
+            <Section
+              id="priorities"
+              title="Topics to Prioritize"
+              subtitle="Articles about these topics will score higher."
+              badge={
+                config.priorities.length > 0 ? (
+                  <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] text-emerald-300">
+                    {config.priorities.length}
+                  </span>
+                ) : null
+              }
+            >
+              <TagInput
+                tags={config.priorities}
+                onChange={(tags) => updateConfig("priorities", tags)}
+                maxTags={20}
+                placeholder="Add topic..."
+                color="emerald"
+              />
+            </Section>
 
             {/* Ignore */}
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
-              <h2 className="font-semibold">Topics to Ignore</h2>
-              <p className="mt-1 text-xs text-slate-400">
-                Articles about these topics will score lower.
-              </p>
-              <div className="mt-3">
-                <TagInput
-                  tags={config.ignore}
-                  onChange={(tags) => updateConfig("ignore", tags)}
-                  maxTags={20}
-                  placeholder="Add topic..."
-                  color="red"
-                />
-              </div>
-            </div>
+            <Section
+              id="ignore"
+              title="Topics to Ignore"
+              subtitle="Articles about these topics will score lower."
+              badge={
+                config.ignore.length > 0 ? (
+                  <span className="rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] text-red-300">
+                    {config.ignore.length}
+                  </span>
+                ) : null
+              }
+            >
+              <TagInput
+                tags={config.ignore}
+                onChange={(tags) => updateConfig("ignore", tags)}
+                maxTags={20}
+                placeholder="Add topic..."
+                color="red"
+              />
+            </Section>
 
             {/* Hard Reject Keywords */}
-            <div className="rounded-2xl border border-orange-500/20 bg-slate-900/40 p-5">
-              <h2 className="font-semibold text-orange-200">Reject Before Scoring</h2>
-              <p className="mt-1 text-xs text-slate-400">
-                Articles matching these keywords skip LLM entirely (saves cost).
-              </p>
-              <div className="mt-3">
-                <TagInput
-                  tags={config.rejectKeywords}
-                  onChange={(tags) => updateConfig("rejectKeywords", tags)}
-                  maxTags={50}
-                  placeholder="Add keyword..."
-                  color="orange"
-                />
-              </div>
-            </div>
+            <Section
+              id="reject"
+              title="Reject Before Scoring"
+              titleClass="text-orange-200"
+              subtitle="Articles matching these keywords skip LLM entirely (saves cost)."
+              borderClass="border border-orange-500/20"
+              badge={
+                config.rejectKeywords.length > 0 ? (
+                  <span className="rounded-full bg-orange-500/20 px-2 py-0.5 text-[10px] text-orange-300">
+                    {config.rejectKeywords.length}
+                  </span>
+                ) : null
+              }
+            >
+              <TagInput
+                tags={config.rejectKeywords}
+                onChange={(tags) => updateConfig("rejectKeywords", tags)}
+                maxTags={50}
+                placeholder="Add keyword..."
+                color="orange"
+              />
+            </Section>
 
             {/* Alert Keywords (read-only) */}
-            <div className="rounded-2xl border border-violet-500/20 bg-slate-900/40 p-5">
-              <h2 className="font-semibold text-violet-200">Alert Keywords (Injected)</h2>
-              <p className="mt-1 text-xs text-slate-400">
-                Injected into LLM prompt for semantic matching. Manage on{" "}
-                <a href="/alerts" className="text-violet-400 hover:underline">
-                  Alerts
-                </a>
-                .
-              </p>
+            <Section
+              id="alerts"
+              title="Alert Keywords (Injected)"
+              titleClass="text-violet-200"
+              subtitle={`Injected into LLM prompt for semantic matching. ${alertRuleCount} active rule${alertRuleCount !== 1 ? "s" : ""}.`}
+              borderClass="border border-violet-500/20"
+              badge={
+                alertKeywords.length > 0 ? (
+                  <span className="rounded-full bg-violet-500/20 px-2 py-0.5 text-[10px] text-violet-300">
+                    {alertKeywords.length}
+                  </span>
+                ) : null
+              }
+            >
               {alertKeywords.length > 0 ? (
-                <div className="mt-3 flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-1.5">
                   {alertKeywords.map((kw, i) => (
                     <span
                       key={i}
@@ -353,39 +492,165 @@ Example: {"reasoning": "...", "score": 3, "summary": "...", "matched_alert_keywo
                   ))}
                 </div>
               ) : (
-                <p className="mt-3 text-xs text-slate-500">No alert keywords for this sector.</p>
+                <p className="text-xs text-slate-500">No alert keywords for this sector.</p>
               )}
               <p className="mt-2 text-xs text-slate-500">
-                {alertRuleCount} active rule{alertRuleCount !== 1 ? "s" : ""} for this sector
+                Manage on{" "}
+                <a href="/alerts" className="text-violet-400 hover:underline">
+                  Alerts page
+                </a>
               </p>
-            </div>
+            </Section>
 
             {/* Score Definitions */}
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
-              <h2 className="font-semibold">Score Definitions</h2>
-              <div className="mt-3 space-y-2">
+            <Section id="scores" title="Score Definitions" subtitle="What each score level (1-5) means.">
+              <div className="space-y-2">
                 {([1, 2, 3, 4, 5] as const).map((level) => (
                   <div key={level} className="flex items-start gap-2">
                     <span className="mt-2 w-12 shrink-0 text-xs font-semibold text-slate-300">
                       {"★".repeat(level)}
                     </span>
                     <textarea
+                      data-autoresize
                       value={config[`score${level}` as keyof ScoringConfig] as string}
-                      onChange={(e) =>
-                        updateConfig(`score${level}` as keyof ScoringConfig, e.target.value)
-                      }
+                      onChange={(e) => {
+                        updateConfig(`score${level}` as keyof ScoringConfig, e.target.value);
+                        autoResize(e.target);
+                      }}
                       rows={1}
-                      className="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-slate-500"
+                      className="flex-1 resize-y overflow-hidden rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-slate-500"
                     />
                   </div>
                 ))}
               </div>
-            </div>
+            </Section>
+
+            {/* Calibration Examples */}
+            <Section
+              id="examples"
+              title="Calibration Examples"
+              subtitle={`Few-shot examples in the LLM prompt. ${config.examples.length === 0 ? `Using ${DEFAULT_SCORING_EXAMPLES.length} built-in defaults.` : ""}`}
+              badge={
+                config.examples.length > 0 ? (
+                  <span className="rounded-full bg-cyan-500/20 px-2 py-0.5 text-[10px] text-cyan-300">
+                    {config.examples.length}
+                  </span>
+                ) : null
+              }
+            >
+              <div className="flex justify-end">
+                {config.examples.length < 20 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      updateConfig("examples", [
+                        ...config.examples,
+                        { title: "", score: 3, reasoning: "" },
+                      ]);
+                    }}
+                    className="shrink-0 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-700"
+                  >
+                    + Add Example
+                  </button>
+                )}
+              </div>
+
+              {config.examples.length === 0 ? (
+                <div className="mt-2 rounded-lg border border-dashed border-slate-700 p-4 text-center">
+                  <p className="text-xs text-slate-500">
+                    No custom examples.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => updateConfig("examples", [...DEFAULT_SCORING_EXAMPLES])}
+                    className="mt-2 text-xs text-cyan-400 hover:underline"
+                  >
+                    Load built-in defaults to customize
+                  </button>
+                </div>
+              ) : (
+                <div className="mt-2 space-y-3">
+                  {config.examples.map((ex, idx) => (
+                    <div
+                      key={idx}
+                      className="rounded-lg border border-slate-700 bg-slate-950/50 p-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 space-y-2">
+                          <input
+                            value={ex.title}
+                            onChange={(e) => {
+                              const updated = [...config.examples];
+                              updated[idx] = { ...ex, title: e.target.value };
+                              updateConfig("examples", updated);
+                            }}
+                            placeholder="Article title..."
+                            maxLength={200}
+                            className="w-full rounded-md border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-slate-500"
+                          />
+                          <div className="flex gap-2">
+                            <select
+                              value={ex.score}
+                              onChange={(e) => {
+                                const updated = [...config.examples];
+                                updated[idx] = { ...ex, score: parseInt(e.target.value) };
+                                updateConfig("examples", updated);
+                              }}
+                              className="w-20 rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-slate-500"
+                            >
+                              {[1, 2, 3, 4, 5].map((n) => (
+                                <option key={n} value={n}>
+                                  {"★".repeat(n)} {n}
+                                </option>
+                              ))}
+                            </select>
+                            <input
+                              value={ex.reasoning}
+                              onChange={(e) => {
+                                const updated = [...config.examples];
+                                updated[idx] = { ...ex, reasoning: e.target.value };
+                                updateConfig("examples", updated);
+                              }}
+                              placeholder="Why this score..."
+                              maxLength={300}
+                              className="flex-1 rounded-md border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-slate-500"
+                            />
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = config.examples.filter((_, i) => i !== idx);
+                            updateConfig("examples", updated);
+                          }}
+                          className="mt-1 shrink-0 rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-red-400"
+                          title="Remove example"
+                        >
+                          <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                            <path
+                              fillRule="evenodd"
+                              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                              clipRule="evenodd"
+                            />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <p className="text-xs text-slate-500">
+                    {config.examples.length}/20 examples
+                  </p>
+                </div>
+              )}
+            </Section>
 
             {/* Summary Settings */}
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
-              <h2 className="font-semibold">Summary Settings</h2>
-              <div className="mt-3 space-y-3">
+            <Section
+              id="summary"
+              title="Summary Settings"
+              subtitle={`${config.summaryMaxChars} chars, ${config.summaryTone}, ${config.summaryLanguage}`}
+            >
+              <div className="space-y-3">
                 <div className="flex items-center gap-3">
                   <label className="w-20 text-xs text-slate-300">Max Length</label>
                   <input
@@ -429,20 +694,27 @@ Example: {"reasoning": "...", "score": 3, "summary": "...", "matched_alert_keywo
                 <div className="flex items-start gap-3">
                   <label className="w-20 pt-1.5 text-xs text-slate-300">Style</label>
                   <textarea
+                    data-autoresize
                     value={config.summaryStyle}
-                    onChange={(e) => updateConfig("summaryStyle", e.target.value)}
-                    rows={2}
+                    onChange={(e) => {
+                      updateConfig("summaryStyle", e.target.value);
+                      autoResize(e.target);
+                    }}
+                    rows={1}
                     placeholder="Instructions for summary style..."
-                    className="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-slate-500"
+                    className="flex-1 resize-y overflow-hidden rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-slate-500"
                   />
                 </div>
               </div>
-            </div>
+            </Section>
 
             {/* Score Thresholds */}
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
-              <h2 className="font-semibold">Score Thresholds</h2>
-              <div className="mt-3 flex flex-wrap gap-4">
+            <Section
+              id="thresholds"
+              title="Score Thresholds"
+              subtitle={`Approve: ${autoApprove === 0 ? "OFF" : `${autoApprove}+`} / Reject: ${autoReject === 0 ? "OFF" : `${autoReject}-`}`}
+            >
+              <div className="flex flex-wrap gap-4">
                 <div className="flex items-center gap-2">
                   <label className="text-xs text-slate-300">Auto-approve:</label>
                   <select
@@ -486,7 +758,7 @@ Example: {"reasoning": "...", "score": 3, "summary": "...", "matched_alert_keywo
                   {autoApprove}).
                 </p>
               )}
-            </div>
+            </Section>
 
             {/* Actions */}
             <div className="flex gap-3">
@@ -507,7 +779,7 @@ Example: {"reasoning": "...", "score": 3, "summary": "...", "matched_alert_keywo
           </section>
 
           {/* Right: Sticky prompt preview */}
-          <section className="xl:sticky xl:top-44 xl:self-start">
+          <section className="xl:sticky xl:top-[calc(var(--nav-h)+6rem)] xl:self-start">
             <div className="rounded-2xl border border-slate-800 bg-slate-900/40 p-5">
               <div className="flex items-center justify-between">
                 <h2 className="font-semibold">Prompt Preview</h2>

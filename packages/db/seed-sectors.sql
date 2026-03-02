@@ -1,7 +1,11 @@
 -- ═══════════════════════════════════════════════════════════════════════════════
--- Watch Tower — Sector & RSS Feed Seed
+-- Watch Tower — Sector & RSS Feed Seed (CANONICAL for production)
 -- Seismic news monitoring: Tech, Space, Robotics/AI, Biotech, Military,
 -- World Politics, Cybersecurity, Energy & Climate
+--
+-- This is the recommended seed for new deployments. Includes 8 sectors with
+-- full scoring_rules config (priorities, reject keywords, score definitions,
+-- calibration examples, summary settings).
 --
 -- Safe to run multiple times (ON CONFLICT DO NOTHING / DO UPDATE)
 -- Run AFTER seed.sql (requires app_config + social_accounts to exist)
@@ -428,18 +432,23 @@ ON CONFLICT (sector_id) DO UPDATE SET
 INSERT INTO scoring_rules (sector_id, prompt_template, score_criteria, auto_approve_threshold, auto_reject_threshold)
 SELECT s.id, '', jsonb_build_object(
   'priorities', jsonb_build_array(
-    'AGI claims or frontier model releases by major labs',
-    'AI regulation: EU AI Act enforcement, US executive orders, international treaties',
-    'Autonomous weapons policy decisions or deployments',
-    'AI safety incidents or alignment breakthroughs',
-    'Humanoid robot milestones (Boston Dynamics, Tesla Bot, Figure)',
-    'Robotics in warfare — confirmed deployments or doctrine changes',
-    'AI lab funding rounds exceeding $1B (OpenAI, Anthropic, xAI)'
+    'Frontier model releases from major labs (OpenAI, Anthropic, Google, xAI, Meta, DeepSeek, Amazon, Alibaba, ByteDance)',
+    'Hyperscale AI data center investments and campus announcements (>$1B)',
+    'AI capability milestones: reasoning, multimodal, and agent autonomy breakthroughs',
+    'AI regulation and policy: EU AI Act, US executive orders, international treaties',
+    'Autonomous weapons policy and deployments',
+    'AI safety incidents and alignment breakthroughs',
+    'Humanoid robot milestones: Tesla Optimus, Figure, Boston Dynamics, Unitree, Agility, 1X NEO, Apptronik',
+    'Robotics in warfare: confirmed deployments or doctrine changes',
+    'AI lab mega-funding rounds (>$1B)'
   ),
   'ignore', jsonb_build_array(
-    'Minor chatbot feature updates',
+    'Minor chatbot feature updates (UI changes, dark mode, minor UX tweaks)',
+    'Routine model version bumps without new capabilities (e.g. date suffix updates, minor patch releases)',
+    'Data center routine maintenance or minor expansion of existing facilities',
     'AI-generated art controversies (unless policy-level)',
-    'Startup demo videos without deployment',
+    'Startup demo videos without real-world deployment or customer orders',
+    'Minor robot firmware updates or cosmetic hardware revisions',
     'Conference paper summaries (unless Nature/Science-tier)',
     'AI-powered product marketing with no technical substance'
   ),
@@ -450,16 +459,29 @@ SELECT s.id, '', jsonb_build_object(
     'market report', 'market size', 'forecast to', 'industry report',
     'built a', 'personal project', 'open source project'
   ),
-  'score1', 'Noise — tutorials, course announcements, minor chatbot updates, promotional AI tool launches, market research reports',
-  'score2', 'Routine — incremental model improvements, routine benchmark results, minor robotics demos',
-  'score3', 'Noteworthy — new model release from established lab, notable robotics deployment, AI policy proposal',
-  'score4', 'Significant — major AI model release or lab announcement, AI regulation enacted, significant acquisition (>$500M), autonomous weapons policy shift, major safety incident, large-scale deployment milestone',
-  'score5', 'Breaking/Urgent — credible AGI claim by major lab, autonomous weapon deployment confirmed, AI causes mass casualties, global AI moratorium',
+  'score1', 'Noise — tutorials, course announcements, minor chatbot UI updates, promotional AI tool launches, market research reports',
+  'score2', 'Routine — minor feature additions to existing AI products, routine benchmark results, minor robotics demos, small startup announcements',
+  'score3', 'Noteworthy — notable robotics deployment, AI policy proposal, significant research paper, mid-tier AI company announcement',
+  'score4', 'Significant — incremental model update from major lab (minor version bump or feature addition to existing model), AI regulation enacted, significant acquisition (>$500M), autonomous weapons policy shift, major safety incident, large-scale deployment milestone, major AI lab funding round (>$1B)',
+  'score5', 'Breaking/Urgent — new frontier model release from a major lab (OpenAI, Anthropic, Google DeepMind, xAI, Amazon, DeepSeek, Meta, Alibaba, ByteDance), major new AI capability that changes what AI can do (not incremental), hyperscale data center announcement (>$1B investment), humanoid robot first commercial deployment or mass production milestone (Tesla Optimus, Figure, Unitree, Boston Dynamics), credible AGI claim, autonomous weapon deployment confirmed, global AI moratorium',
   'examples', jsonb_build_array(
-    jsonb_build_object('title', 'OpenAI releases GPT-5 with 10x reasoning capability', 'score', 5, 'reasoning', 'Frontier model leap from major lab'),
-    jsonb_build_object('title', 'Anthropic raises $3B Series D at $60B valuation', 'score', 4, 'reasoning', 'Major AI lab funding event exceeding $1B'),
+    jsonb_build_object('title', 'Anthropic releases Claude 5 with autonomous coding and real-time web browsing', 'score', 5, 'reasoning', 'New frontier model family with major capability jump from top AI lab'),
+    jsonb_build_object('title', 'Google DeepMind unveils Gemini 3 with native video understanding', 'score', 5, 'reasoning', 'Major new model generation with genuinely new capability'),
+    jsonb_build_object('title', 'xAI releases Grok 4 with 1M-token context and real-time reasoning', 'score', 5, 'reasoning', 'New frontier model from major lab with significant capability advance'),
+    jsonb_build_object('title', 'DeepSeek releases V4 open-source model rivaling GPT-5 on benchmarks', 'score', 5, 'reasoning', 'Major Chinese lab open-source release that shifts competitive landscape'),
+    jsonb_build_object('title', 'Microsoft and OpenAI announce $50B Stargate data center campus', 'score', 5, 'reasoning', 'Hyperscale AI infrastructure investment reshaping the industry'),
+    jsonb_build_object('title', 'Amazon invests $10B in new AI data center cluster in Virginia', 'score', 5, 'reasoning', 'Major hyperscale AI infrastructure deal exceeding $1B'),
+    jsonb_build_object('title', 'Tesla deploys 1,000 Optimus robots across Gigafactories for real production tasks', 'score', 5, 'reasoning', 'First mass commercial deployment of humanoid robots — industry milestone'),
+    jsonb_build_object('title', 'Unitree announces mass production of H1 humanoid robot at $90K price point', 'score', 5, 'reasoning', 'First affordable mass-produced humanoid robot, shifts commercial viability'),
+    jsonb_build_object('title', 'Figure 02 demonstrates fully autonomous warehouse picking without human supervision', 'score', 5, 'reasoning', 'Major humanoid robot capability milestone — autonomous real-world task completion'),
+    jsonb_build_object('title', 'Boston Dynamics unveils new Atlas prototype with improved balance', 'score', 4, 'reasoning', 'Incremental hardware update to existing platform, not a deployment milestone'),
+    jsonb_build_object('title', 'Unitree Go2 robot dog gets new obstacle avoidance firmware', 'score', 2, 'reasoning', 'Minor firmware update to quadruped robot, routine improvement'),
+    jsonb_build_object('title', 'Google updates Gemini 2.5 Pro with improved math scores', 'score', 4, 'reasoning', 'Incremental improvement to existing model, not a new generation'),
+    jsonb_build_object('title', 'Anthropic raises $5B Series E at $100B valuation', 'score', 4, 'reasoning', 'Major funding round but financial event not technical milestone'),
     jsonb_build_object('title', 'EU formally enforces AI Act penalties on non-compliant companies', 'score', 4, 'reasoning', 'AI regulation enacted with real enforcement'),
-    jsonb_build_object('title', 'New paper shows GPT-4 beats radiologists on X-ray diagnosis', 'score', 3, 'reasoning', 'Notable research but no real-world deployment yet')
+    jsonb_build_object('title', 'New paper shows GPT-4 beats radiologists on X-ray diagnosis', 'score', 3, 'reasoning', 'Notable research but no real-world deployment yet'),
+    jsonb_build_object('title', 'OpenAI adds file search to ChatGPT Plus', 'score', 2, 'reasoning', 'Minor feature addition to existing product, routine update'),
+    jsonb_build_object('title', 'Claude now supports dark mode in mobile app', 'score', 1, 'reasoning', 'UI update with no AI capability change')
   ),
   'summaryMaxChars', 200,
   'summaryTone', 'professional',

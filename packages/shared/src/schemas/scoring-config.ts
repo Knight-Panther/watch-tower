@@ -18,8 +18,8 @@ export type ScoringExample = z.infer<typeof scoringExampleSchema>;
  */
 export const scoringConfigSchema = z.object({
   // Scoring guidance - what to prioritize or ignore
-  priorities: z.array(z.string().min(1).max(100)).max(20).default([]),
-  ignore: z.array(z.string().min(1).max(100)).max(20).default([]),
+  priorities: z.array(z.string().min(1).max(500)).max(20).default([]),
+  ignore: z.array(z.string().min(1).max(500)).max(20).default([]),
   // Hard reject keywords - articles matching these skip LLM entirely (cost gate)
   rejectKeywords: z.array(z.string().min(1).max(100)).max(50).default([]),
 
@@ -63,7 +63,7 @@ export const scoringConfigSchema = z.object({
     ),
 
   // Few-shot calibration examples (empty = use built-in defaults)
-  examples: z.array(scoringExampleSchema).max(6).default([]),
+  examples: z.array(scoringExampleSchema).max(20).default([]),
 
   // Summary settings
   summaryMaxChars: z.number().int().min(50).max(500).default(200),

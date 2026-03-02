@@ -53,10 +53,14 @@
       "Bash(tr '>' '>\\\\n')",
       "Bash(docker exec:*)",
       "Bash(PGPASSWORD=watchtower psql -h 127.0.0.1 -U watchtower -d watchtower -f packages/db/seed-sectors.sql)",
-      "Bash(xargs grep -l \"GET /stats\\\\|GET /telemetry\\\\|GET /articles\")"
+      "Bash(xargs grep -l \"GET /stats\\\\|GET /telemetry\\\\|GET /articles\")",
+      "Bash(node --env-file=.env -e \":*)",
+      "Bash(xargs grep -l \"ScoreCriteria\\\\|score_criteria\")",
+      "Read(//c/Users/VM-Dev/.claude/projects/c--Users-VM-Dev-Desktop-watch-tower/5a47320c-c5d1-4734-800e-bf33c60ff620/tool-results/**)"
     ],
     "additionalDirectories": [
-      "C:\\Users\\VM-Dev\\Desktop\\watch-tower"
+      "C:\\Users\\VM-Dev\\Desktop\\watch-tower",
+      "\\tmp"
     ]
   }
 }

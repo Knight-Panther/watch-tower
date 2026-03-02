@@ -134,7 +134,7 @@ export default function Monitoring() {
   return (
     <div className="grid gap-4">
       {/* Header - sticky below nav */}
-      <section className="sticky top-32 z-10 rounded-2xl border border-slate-800 bg-slate-900 p-6">
+      <section className="sticky top-[var(--nav-h)] z-10 rounded-2xl border border-slate-800 bg-slate-900 p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Monitoring</h1>

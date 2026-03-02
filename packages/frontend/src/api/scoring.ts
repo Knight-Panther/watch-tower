@@ -1,22 +1,8 @@
 import { API_BASE, authHeaders } from "./client";
+import type { ScoringConfig, ScoringExample } from "@watch-tower/shared";
 
-// ─── Scoring Rules Types ────────────────────────────────────────────────────
-
-export type ScoringConfig = {
-  priorities: string[];
-  ignore: string[];
-  rejectKeywords: string[];
-  score1: string;
-  score2: string;
-  score3: string;
-  score4: string;
-  score5: string;
-  examples: Array<{ title: string; score: number; reasoning: string }>;
-  summaryMaxChars: number;
-  summaryTone: "professional" | "casual" | "urgent";
-  summaryLanguage: string;
-  summaryStyle: string;
-};
+// Re-export shared types so existing imports from "../api" keep working
+export type { ScoringConfig, ScoringExample };
 
 export type ScoringRule = {
   id?: string;

@@ -220,6 +220,9 @@ export const registerScoringRulesRoutes = (app: FastifyInstance, deps: ApiDeps) 
     if (!sector_name || typeof sector_name !== "string") {
       return reply.code(400).send({ error: "sector_name is required" });
     }
+    if (sector_name.length > 200) {
+      return reply.code(400).send({ error: "sector_name must be 200 characters or fewer" });
+    }
 
     const parsed = scoringConfigSchema.safeParse(config);
     if (!parsed.success) {

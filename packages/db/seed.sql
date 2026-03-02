@@ -1,4 +1,5 @@
--- Seed data for local development
+-- LEGACY: Basic 3-sector seed for minimal local development.
+-- For production deployments, use seed-sectors.sql (8 sectors with full scoring config).
 -- Safe to run multiple times (ON CONFLICT DO NOTHING)
 
 INSERT INTO sectors (name, slug, default_max_age_days) VALUES

@@ -41,8 +41,8 @@
   ],
   "lint-staged": {
     "packages/**/*.{ts,tsx}": [
-      "prettier --write",
-      "eslint --fix"
+      "npx prettier --write",
+      "npx eslint --fix"
     ]
   },
   "devDependencies": {
