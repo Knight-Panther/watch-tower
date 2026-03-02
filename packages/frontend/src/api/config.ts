@@ -207,7 +207,7 @@ export const getAutoPostTelegram = async (): Promise<boolean> => {
 export const setAutoPostTelegram = async (enabled: boolean): Promise<boolean> => {
   const res = await fetch(`${API_BASE}/config/auto-post-telegram`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json", ...(authHeaders) },
+    headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify({ enabled }),
   });
   if (!res.ok) {
@@ -218,12 +218,7 @@ export const setAutoPostTelegram = async (enabled: boolean): Promise<boolean> =>
   return data.enabled ?? enabled;
 };
 
-// ── Facebook (Placeholder - Coming Soon) ──
-// TODO: Enable when Facebook Graph API integration is complete
-// To wire up:
-// 1. Implement FacebookProvider in packages/social/src/facebook.ts
-// 2. Add facebook case to distribution.ts worker
-// 3. Uncomment these functions and the UI toggle
+// ── Facebook ──
 export const getAutoPostFacebook = async (): Promise<boolean> => {
   const res = await fetch(`${API_BASE}/config/auto-post-facebook`, {
     headers: authHeaders,
@@ -239,7 +234,7 @@ export const getAutoPostFacebook = async (): Promise<boolean> => {
 export const setAutoPostFacebook = async (enabled: boolean): Promise<boolean> => {
   const res = await fetch(`${API_BASE}/config/auto-post-facebook`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json", ...(authHeaders) },
+    headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify({ enabled }),
   });
   if (!res.ok) {
@@ -250,12 +245,7 @@ export const setAutoPostFacebook = async (enabled: boolean): Promise<boolean> =>
   return data.enabled ?? enabled;
 };
 
-// ── LinkedIn (Placeholder - Coming Soon) ──
-// TODO: Enable when LinkedIn API integration is complete
-// To wire up:
-// 1. Implement LinkedInProvider in packages/social/src/linkedin.ts
-// 2. Add linkedin case to distribution.ts worker
-// 3. Uncomment these functions and the UI toggle
+// ── LinkedIn ──
 export const getAutoPostLinkedin = async (): Promise<boolean> => {
   const res = await fetch(`${API_BASE}/config/auto-post-linkedin`, {
     headers: authHeaders,
@@ -271,7 +261,7 @@ export const getAutoPostLinkedin = async (): Promise<boolean> => {
 export const setAutoPostLinkedin = async (enabled: boolean): Promise<boolean> => {
   const res = await fetch(`${API_BASE}/config/auto-post-linkedin`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json", ...(authHeaders) },
+    headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify({ enabled }),
   });
   if (!res.ok) {
@@ -445,9 +435,7 @@ export const getAlertQuietHours = async (): Promise<AlertQuietHours> => {
   return res.json();
 };
 
-export const setAlertQuietHours = async (
-  payload: AlertQuietHours,
-): Promise<AlertQuietHours> => {
+export const setAlertQuietHours = async (payload: AlertQuietHours): Promise<AlertQuietHours> => {
   const res = await fetch(`${API_BASE}/config/alert-quiet-hours`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json", ...authHeaders },
@@ -481,7 +469,7 @@ export type ResetResult = {
 export const resetAllData = async (): Promise<ResetResult> => {
   const res = await fetch(`${API_BASE}/reset`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...(authHeaders) },
+    headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify({ confirm: true }),
   });
   if (!res.ok) {

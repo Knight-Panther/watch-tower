@@ -1,6 +1,6 @@
 # Watch Tower
 
-Independent media monitoring agent. Scans RSS feeds by sector, deduplicates (URL + semantic), scores articles with LLM for importance, and distributes to social media with approval workflow. Includes keyword alerts, daily intelligence digests, and Georgian translation.
+Independent media monitoring agent. Scans RSS feeds by sector, deduplicates (URL + semantic), scores articles with LLM for importance, and distributes to social media with approval workflow. Includes keyword alerts, daily intelligence digests, Georgian translation, and SmartHub pipeline intelligence advisor.
 
 ## Pipeline Architecture
 
@@ -16,6 +16,7 @@ Independent media monitoring agent. Scans RSS feeds by sector, deduplicates (URL
 **Additional output channels (bypass distribution pipeline):**
 - **Keyword Alerts** — instant Telegram notification when scored articles match keywords
 - **Daily Digest** — LLM-curated intelligence briefing to Telegram/Facebook/LinkedIn
+- **SmartHub Advisor** — scheduled LLM analysis of pipeline metrics with actionable recommendations
 
 ## Tech Stack
 
@@ -44,7 +45,7 @@ packages/
 ├── embeddings/    # Embedding generation + pgvector similarity search
 ├── translation/   # Georgian translation (Gemini, OpenAI providers)
 ├── social/        # Social poster abstraction (Telegram, Facebook, LinkedIn)
-├── worker/        # Pipeline processors (ingest, dedup, score, translate, image-gen, distribute, alerts, digest)
+├── worker/        # Pipeline processors (ingest, dedup, score, translate, image-gen, distribute, alerts, digest, advisor)
 ├── api/           # Fastify REST API
 └── frontend/      # React admin dashboard
 ```
@@ -120,6 +121,8 @@ Core tables (PostgreSQL + pgvector):
 | `digest_slots` | Multi-schedule digest configuration (name, time, timezone, days, LLM config, per-channel language, cover image toggles) |
 | `digest_drafts` | Generated digest content with lifecycle (draft → approved → sent/expired/discarded), editable text, LLM cost tracking |
 | `digest_runs` | Historical audit trail of sent digests (immutable record, channel results, article count, score distribution) |
+| `sector_post_templates` | Per-sector format overrides for social posts (platform-specific templates) |
+| `advisor_reports` | SmartHub advisor analysis results (stats snapshot JSONB, recommendations JSONB, LLM metadata) |
 
 ### Articles Table Key Columns
 
@@ -129,10 +132,15 @@ Core tables (PostgreSQL + pgvector):
 | `content_snippet` | `text` | Enriched snippet (up to 1500 chars from `content:encoded`) |
 | `importance_score` | `smallint` | LLM score (1-5) |
 | `score_reasoning` | `text` | LLM explanation of the score (up to 1000 chars) |
+| `llm_summary` | `text` | LLM-generated article summary |
 | `rejection_reason` | `text` | Why article was rejected (pre-filter keyword, LLM score, or manual) |
 | `pipeline_stage` | `text` | Current stage in pipeline |
+| `is_semantic_duplicate` | `boolean` | Marked by dedup processor |
+| `duplicate_of_id` | `uuid` | Reference to original article |
+| `similarity_score` | `real` | Cosine similarity score when duplicate |
 | `title_ka` / `llm_summary_ka` | `text` | Georgian translations |
 | `translation_status` | `text` | NULL → translating → translated / failed / exhausted |
+| `scored_at` / `approved_at` | `timestamp` | Lifecycle timestamps |
 | `digested_at` | `timestamp` | When included in daily digest |
 
 **Pipeline stages** (on `articles.pipeline_stage`):
@@ -150,7 +158,7 @@ Core tables (PostgreSQL + pgvector):
 | `pipeline-translation` | `translation-batch` | 1 | Translate approved articles to Georgian (Gemini/OpenAI) |
 | `pipeline-image-generation` | `image-generate` | 1 | Generate AI news card images (gpt-image-1-mini + R2) |
 | `pipeline-distribution` | `distribution-immediate` | 1 | Post individual articles to platforms |
-| `maintenance` | maintenance-schedule/maintenance-cleanup/platform-health-check/daily-digest | 1 | Recurring scheduling (30s), TTL cleanup (24h), platform health (2h), digest |
+| `maintenance` | maintenance-schedule/maintenance-cleanup/platform-health-check/daily-digest/pipeline-advisor | 1 | Recurring scheduling (30s), TTL cleanup (24h), platform health (2h), digest, advisor |
 
 **Chaining:** Each processor queries DB for unprocessed articles and queues the next stage. Database `pipeline_stage` is the source of truth (not queue state).
 
@@ -236,6 +244,28 @@ Operator tool for identifying signal vs noise sources.
 - **Frontend**: Color-coded badges on Home page (green ≥40%, amber ≥15%, red <15%)
 - **Use**: Identify noise sources (low signal ratio) to disable or deprioritize
 
+## SmartHub Advisor (Pipeline Intelligence)
+
+LLM-driven pipeline analysis that generates actionable recommendations. Runs on schedule or manually.
+
+### Architecture
+- **No new queue**: `JOB_PIPELINE_ADVISOR` runs on `QUEUE_MAINTENANCE`. Scheduler checks `advisor_time`/`advisor_timezone` every 30s.
+- **Two-stage flow**: `collectAdvisorStats()` (pure SQL, 13 metric sections) → `runAdvisorAnalysis()` (LLM structured output)
+- **Table**: `advisor_reports` stores status lifecycle (`collecting` → `analyzing` → `ready`/`failed`), stats snapshot JSONB, recommendations JSONB, LLM cost tracking
+- **Config**: `advisor_enabled`, `advisor_time`, `advisor_timezone`, `advisor_window_days` (default 30), `advisor_provider`, `advisor_model` in app_config
+
+### Stats Snapshot (13 sections)
+Source stats, sector stats, rejection breakdown, score trends, keyword effectiveness, category correlations, dedup stats, cost analysis, operator overrides, fetch efficiency, platform delivery, alert effectiveness, scoring rule configs
+
+### Recommendations
+- **Categories**: `source`, `keyword`, `threshold`, `prompt`, `interval`, `dedup`, `cost`, `alert`
+- **Priorities**: `high`, `medium`, `low`
+- **Actions**: Structured `AdvisorAction` with `type`, `endpoint`, `params` — designed for one-click apply
+- **Apply tracking**: `applied_at` timestamp per recommendation via `PATCH /advisor/reports/:id/recommendations/:recId/apply`
+
+### UI
+- Standalone `/advisor` page with latest report, recommendation cards (category/priority/reason), manual trigger, config panel (schedule, LLM provider/model), history, data range info
+
 ## Code Conventions
 
 ### Naming
@@ -275,12 +305,13 @@ Operator tool for identifying signal vs noise sources.
 | `/site-rules` | SiteRules | Restrictions | Domain whitelist, feed limits, CORS, emergency controls |
 | `/alerts` | Alerts | Alerts | Keyword alert rules CRUD + delivery history + translation config |
 | `/digest` | DigestSettings | Digests | Multi-slot digest management, drafts, approval workflow, test button |
+| `/advisor` | Advisor | SmartHub | Pipeline intelligence advisor — LLM-driven recommendations |
 | `/analytics` | Analytics | Analytics | Score distribution, approval rates, rejection breakdown, source ranking |
 | `/settings` | Settings | DB/Telemetry | Database tools, LLM telemetry |
 
 ## API Routes
 
-18 route modules registered in `server.ts`:
+19 route modules registered in `server.ts`:
 
 | Module | Key Endpoints |
 |--------|--------------|
@@ -302,6 +333,7 @@ Operator tool for identifying signal vs noise sources.
 | `provider-health` | `POST /health/providers` — synchronous API provider health check |
 | `alerts` | Alert rules CRUD, test, mute/unmute, sector keywords, weekly stats |
 | `digest-slots` | Multi-slot digest CRUD, test, history, draft management (edit/approve/schedule/discard) |
+| `advisor` | `GET /advisor/latest`, `/history`, `/data-range`, `/reports/:id`, `POST /advisor/run`, config CRUD |
 
 ## Environment Variables
 
@@ -593,6 +625,7 @@ docker compose -f docker-compose.prod.yml ps
 - [x] P5: Source quality dashboard
 - [x] P6: Global dedup threshold in DB (UI slider via Site Rules page)
 - [x] P7: Analytics dashboard (score distribution, approval rates, rejection breakdown, source ranking, sector performance)
+- [x] P8: SmartHub pipeline intelligence advisor (stats collection + LLM recommendations)
 - [x] Deployment scripts + Docker production stack
 
 ### Deployment-Day Tasks (no code changes needed):
@@ -646,6 +679,7 @@ RSS is the core, but these already work as RSS sources:
 8. **Delivery-controlled posting** — `post_deliveries` table decouples approval from posting; article stays `approved`, delivery row tracks per-platform scheduling
 9. **Digest on maintenance queue** — no separate queue; scheduler checks `digest_slots` time/tz/day every 30s and queues digest job when due. Multi-slot with draft approval workflow.
 10. **Alerts bypass distribution** — keyword alerts go directly to Telegram via Bot API, no rate limiting or scheduling (only 5-min cooldown)
+11. **Advisor on maintenance queue** — two-stage pipeline (SQL stats → LLM analysis), scheduled like digest, stored as structured JSONB with apply-tracking
 
 ## Completed Features
 
@@ -680,6 +714,7 @@ All core pipeline and intelligence features:
 27. Digest Draft Management — edit, approve, schedule, discard generated digests before posting
 28. Global Dedup Threshold (P6) — UI slider on Site Rules page, DB-backed, worker reads per-job
 29. Analytics Dashboard (P7) — score distribution, approval rates, rejection breakdown, source ranking, sector performance
+30. SmartHub Advisor (P8) — scheduled pipeline intelligence, 13-metric SQL snapshot, LLM recommendations, one-click apply
 
 ## Ideas Explored and Parked
 

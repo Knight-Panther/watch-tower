@@ -1628,11 +1628,93 @@ export default function DigestSettings() {
                             ? "text-amber-400"
                             : "text-slate-500"
                       }`}
+                      title="Time before this draft auto-expires. Drafts expire 24h after generation if not approved."
                     >
                       {expiry.text}
                     </span>
                   </div>
-                  <div className="mt-3 flex items-center gap-2">
+                  {/* Score distribution sparkline */}
+                  {d.score_distribution &&
+                    Object.keys(d.score_distribution).length > 0 &&
+                    (() => {
+                      const dist = d.score_distribution!;
+                      const total = Object.values(dist).reduce((a, b) => a + b, 0);
+                      if (total === 0) return null;
+                      const SPARK_COLORS: Record<number, string> = {
+                        1: "bg-red-500",
+                        2: "bg-orange-400",
+                        3: "bg-amber-400",
+                        4: "bg-emerald-400",
+                        5: "bg-emerald-300",
+                      };
+                      const SPARK_TEXT: Record<number, string> = {
+                        1: "text-red-400",
+                        2: "text-orange-400",
+                        3: "text-amber-400",
+                        4: "text-emerald-400",
+                        5: "text-emerald-300",
+                      };
+                      const segments = [1, 2, 3, 4, 5]
+                        .map((s) => ({ score: s, count: dist[String(s)] ?? 0 }))
+                        .filter((s) => s.count > 0);
+                      return (
+                        <div className="mt-2">
+                          <div className="flex h-2 w-full overflow-hidden rounded-full bg-slate-800">
+                            {segments.map(({ score, count }) => (
+                              <div
+                                key={score}
+                                className={SPARK_COLORS[score]}
+                                style={{ width: `${(count / total) * 100}%` }}
+                                title={`Score ${score}: ${count} articles`}
+                              />
+                            ))}
+                          </div>
+                          <div className="mt-0.5 flex w-full">
+                            {segments.map(({ score, count }) => (
+                              <div
+                                key={score}
+                                className={`text-center text-[9px] leading-tight ${SPARK_TEXT[score]}`}
+                                style={{ width: `${(count / total) * 100}%` }}
+                              >
+                                {count / total >= 0.08 ? `${score}:${count}` : count}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                  {/* Stats row: model, funnel, cost */}
+                  <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-slate-500">
+                    <span title={`LLM: ${d.provider}/${d.model}`}>{shortModelName(d.model)}</span>
+                    <span className="text-slate-700">{"\u00B7"}</span>
+                    <span
+                      title={`${d.stats_scanned} scanned \u2192 ${d.stats_scored} scored \u2192 ${d.stats_above_threshold} above threshold`}
+                    >
+                      {d.stats_scanned} {"\u2192"} {d.stats_above_threshold} qualifying
+                    </span>
+                    {(d.llm_cost_microdollars || d.translation_cost_microdollars) && (
+                      <>
+                        <span className="text-slate-700">{"\u00B7"}</span>
+                        <span>
+                          $
+                          {(
+                            ((d.llm_cost_microdollars ?? 0) +
+                              (d.translation_cost_microdollars ?? 0)) /
+                            1_000_000
+                          ).toFixed(4)}
+                        </span>
+                      </>
+                    )}
+                    {d.edited && (
+                      <>
+                        <span className="text-slate-700">{"\u00B7"}</span>
+                        <span className="text-amber-400/80">Edited</span>
+                      </>
+                    )}
+                  </div>
+
+                  <div className="mt-2.5 flex items-center gap-2">
                     <Button size="xs" variant="secondary" onClick={() => setPreviewDraft(d)}>
                       Preview
                     </Button>
@@ -1773,6 +1855,43 @@ export default function DigestSettings() {
                         ))
                       ) : (
                         <span className="text-xs text-slate-500">All sectors</span>
+                      )}
+                    </div>
+                    {/* Metadata row: model, min score, max articles, cover images */}
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                      <span
+                        className="rounded-full bg-slate-800/60 px-2 py-0.5 text-xs text-slate-500"
+                        title={`LLM: ${slot.provider}/${slot.model}`}
+                      >
+                        {shortModelName(slot.model)}
+                      </span>
+                      <span
+                        className="rounded-full bg-slate-800/60 px-2 py-0.5 text-xs text-slate-500"
+                        title="Minimum importance score for inclusion"
+                      >
+                        {"\u2265"}
+                        {slot.min_score}
+                      </span>
+                      <span
+                        className="rounded-full bg-slate-800/60 px-2 py-0.5 text-xs text-slate-500"
+                        title="Maximum articles per digest"
+                      >
+                        max {slot.max_articles}
+                      </span>
+                      {(slot.image_telegram || slot.image_facebook || slot.image_linkedin) && (
+                        <span
+                          className="rounded-full bg-slate-800/60 px-2 py-0.5 text-xs text-slate-500"
+                          title={`Cover images: ${[slot.image_telegram && "TG", slot.image_facebook && "FB", slot.image_linkedin && "LI"].filter(Boolean).join(", ")}`}
+                        >
+                          {"IMG "}
+                          {[
+                            slot.image_telegram && "TG",
+                            slot.image_facebook && "FB",
+                            slot.image_linkedin && "LI",
+                          ]
+                            .filter(Boolean)
+                            .join("+")}
+                        </span>
                       )}
                     </div>
                   </div>

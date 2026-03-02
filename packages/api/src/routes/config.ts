@@ -1,7 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import { eq, inArray, sql, desc } from "drizzle-orm";
 import { appConfig, articles, digestRuns, digestSlots } from "@watch-tower/db";
-import { logger, imageTemplateSchema, DEFAULT_IMAGE_TEMPLATE, JOB_DAILY_DIGEST } from "@watch-tower/shared";
+import {
+  logger,
+  imageTemplateSchema,
+  DEFAULT_IMAGE_TEMPLATE,
+  JOB_DAILY_DIGEST,
+} from "@watch-tower/shared";
 import type { ApiDeps } from "../server.js";
 
 const CONSTRAINTS = {
@@ -406,7 +411,8 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
         }
       }
 
-      if (provider !== undefined) await upsertTypedConfig(deps, "alert_translation_provider", provider);
+      if (provider !== undefined)
+        await upsertTypedConfig(deps, "alert_translation_provider", provider);
       if (model !== undefined) await upsertTypedConfig(deps, "alert_translation_model", model);
 
       logger.info("[config] alert translation settings updated");
@@ -441,12 +447,7 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     },
   );
 
-  // ── Facebook (Placeholder - Coming Soon) ──
-  // TODO: To enable Facebook auto-posting:
-  // 1. Implement FacebookProvider in packages/social/src/facebook.ts
-  // 2. Add Facebook Graph API credentials to env (FB_PAGE_ID, FB_ACCESS_TOKEN)
-  // 3. Update distribution.ts worker to check this config and post to Facebook
-  // 4. Enable the UI toggle in ScoringRules.tsx
+  // ── Facebook ──
   app.get("/config/auto-post-facebook", { preHandler: deps.requireApiKey }, async () => {
     const enabled = await getBooleanConfig(deps, "auto_post_facebook", false);
     return { enabled };
@@ -465,12 +466,7 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     },
   );
 
-  // ── LinkedIn (Placeholder - Coming Soon) ──
-  // TODO: To enable LinkedIn auto-posting:
-  // 1. Implement LinkedInProvider in packages/social/src/linkedin.ts
-  // 2. Add LinkedIn API credentials to env (LINKEDIN_ORG_ID, LINKEDIN_ACCESS_TOKEN)
-  // 3. Update distribution.ts worker to check this config and post to LinkedIn
-  // 4. Enable the UI toggle in ScoringRules.tsx
+  // ── LinkedIn ──
   app.get("/config/auto-post-linkedin", { preHandler: deps.requireApiKey }, async () => {
     const enabled = await getBooleanConfig(deps, "auto_post_linkedin", false);
     return { enabled };
@@ -723,7 +719,9 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     }
     const validQualities = ["low", "medium", "high"];
     if (quality !== undefined && !validQualities.includes(quality)) {
-      return reply.code(400).send({ error: `quality must be one of: ${validQualities.join(", ")}` });
+      return reply
+        .code(400)
+        .send({ error: `quality must be one of: ${validQualities.join(", ")}` });
     }
     const validSizes = ["1024x1024", "1024x1536", "1536x1024"];
     if (size !== undefined && !validSizes.includes(size)) {
@@ -758,19 +756,23 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     return row?.value ?? DEFAULT_IMAGE_TEMPLATE;
   });
 
-  app.patch("/config/image-template", { preHandler: deps.requireApiKey }, async (request, reply) => {
-    const parsed = imageTemplateSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({
-        error: "Invalid image template",
-        details: parsed.error.flatten().fieldErrors,
-      });
-    }
+  app.patch(
+    "/config/image-template",
+    { preHandler: deps.requireApiKey },
+    async (request, reply) => {
+      const parsed = imageTemplateSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: "Invalid image template",
+          details: parsed.error.flatten().fieldErrors,
+        });
+      }
 
-    await upsertTypedConfig(deps, "image_template", parsed.data);
-    logger.info("[config] image template updated");
-    return parsed.data;
-  });
+      await upsertTypedConfig(deps, "image_template", parsed.data);
+      logger.info("[config] image template updated");
+      return parsed.data;
+    },
+  );
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Daily Digest Settings
@@ -778,21 +780,30 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
 
   // Backward compat shim: reads from first digest_slots row (Slot #1)
   app.get("/config/digest", { preHandler: deps.requireApiKey }, async () => {
-    const [slot] = await deps.db
-      .select()
-      .from(digestSlots)
-      .orderBy(digestSlots.createdAt)
-      .limit(1);
+    const [slot] = await deps.db.select().from(digestSlots).orderBy(digestSlots.createdAt).limit(1);
 
     if (!slot) {
       // No slot exists — return defaults
       return {
-        enabled: false, time: "08:00", timezone: "UTC", days: [1, 2, 3, 4, 5, 6, 7],
-        minScore: 3, language: "en", systemPrompt: "", telegramChatId: "",
-        telegramEnabled: true, facebookEnabled: false, linkedinEnabled: false,
-        provider: "claude", model: "", translationProvider: "gemini",
-        translationModel: "gemini-2.5-flash", translationPrompt: "",
-        imageTelegram: false, imageFacebook: false, imageLinkedin: false,
+        enabled: false,
+        time: "08:00",
+        timezone: "UTC",
+        days: [1, 2, 3, 4, 5, 6, 7],
+        minScore: 3,
+        language: "en",
+        systemPrompt: "",
+        telegramChatId: "",
+        telegramEnabled: true,
+        facebookEnabled: false,
+        linkedinEnabled: false,
+        provider: "claude",
+        model: "",
+        translationProvider: "gemini",
+        translationModel: "gemini-2.5-flash",
+        translationPrompt: "",
+        imageTelegram: false,
+        imageFacebook: false,
+        imageLinkedin: false,
         lastDigestSentAt: null,
       };
     }
@@ -891,8 +902,13 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     if (body.systemPrompt !== undefined && body.systemPrompt.length > 2000) {
       return reply.code(400).send({ error: "systemPrompt must be 2000 characters or less" });
     }
-    if (body.provider !== undefined && !["claude", "openai", "deepseek", "gemini"].includes(body.provider)) {
-      return reply.code(400).send({ error: "provider must be 'claude', 'openai', 'deepseek', or 'gemini'" });
+    if (
+      body.provider !== undefined &&
+      !["claude", "openai", "deepseek", "gemini"].includes(body.provider)
+    ) {
+      return reply
+        .code(400)
+        .send({ error: "provider must be 'claude', 'openai', 'deepseek', or 'gemini'" });
     }
     if (body.model !== undefined && body.model.length > 100) {
       return reply.code(400).send({ error: "model must be 100 characters or less" });
@@ -911,7 +927,10 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
         });
       }
     }
-    if (body.translationProvider !== undefined && !["gemini", "openai"].includes(body.translationProvider)) {
+    if (
+      body.translationProvider !== undefined &&
+      !["gemini", "openai"].includes(body.translationProvider)
+    ) {
       return reply.code(400).send({ error: "translationProvider must be 'gemini' or 'openai'" });
     }
     if (body.translationModel !== undefined && body.translationModel.length > 100) {
@@ -921,7 +940,11 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
       gemini: ["gemini-2.5-flash", "gemini-2.5-pro"],
       openai: ["gpt-4o-mini", "gpt-4o"],
     };
-    if (body.translationProvider !== undefined && body.translationModel !== undefined && body.translationModel) {
+    if (
+      body.translationProvider !== undefined &&
+      body.translationModel !== undefined &&
+      body.translationModel
+    ) {
       const allowed = VALID_TRANSLATION_MODELS[body.translationProvider];
       if (allowed && !allowed.includes(body.translationModel)) {
         return reply.code(400).send({
@@ -948,17 +971,15 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     if (body.linkedinEnabled !== undefined) updates.linkedinEnabled = body.linkedinEnabled;
     if (body.provider !== undefined) updates.provider = body.provider;
     if (body.model !== undefined) updates.model = body.model;
-    if (body.translationProvider !== undefined) updates.translationProvider = body.translationProvider;
+    if (body.translationProvider !== undefined)
+      updates.translationProvider = body.translationProvider;
     if (body.translationModel !== undefined) updates.translationModel = body.translationModel;
     if (body.translationPrompt !== undefined) updates.translationPrompt = body.translationPrompt;
     if (body.imageTelegram !== undefined) updates.imageTelegram = body.imageTelegram;
     if (body.imageFacebook !== undefined) updates.imageFacebook = body.imageFacebook;
     if (body.imageLinkedin !== undefined) updates.imageLinkedin = body.imageLinkedin;
 
-    await deps.db
-      .update(digestSlots)
-      .set(updates)
-      .where(eq(digestSlots.id, slot.id));
+    await deps.db.update(digestSlots).set(updates).where(eq(digestSlots.id, slot.id));
 
     logger.info("[config] digest settings updated (via slot shim)");
     return { success: true };
@@ -1003,16 +1024,12 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     },
   );
 
-  app.delete(
-    "/config/digest/history",
-    { preHandler: deps.requireApiKey },
-    async () => {
-      const result = await deps.db.delete(digestRuns);
-      const deleted = result.rowCount ?? 0;
-      logger.info({ deleted }, "[config] digest history cleared");
-      return { deleted };
-    },
-  );
+  app.delete("/config/digest/history", { preHandler: deps.requireApiKey }, async () => {
+    const result = await deps.db.delete(digestRuns);
+    const deleted = result.rowCount ?? 0;
+    logger.info({ deleted }, "[config] digest history cleared");
+    return { deleted };
+  });
 
   // ─── Dedup Sensitivity ────────────────────────────────────────────────────────
 
@@ -1034,9 +1051,7 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
     async (request, reply) => {
       const { value } = request.body ?? {};
       if (value === undefined || !Number.isFinite(value) || value < 0.5 || value > 0.99) {
-        return reply
-          .code(400)
-          .send({ error: "Threshold must be a number between 0.50 and 0.99" });
+        return reply.code(400).send({ error: "Threshold must be a number between 0.50 and 0.99" });
       }
       const rounded = Math.round(value * 100) / 100;
       await upsertConfig(deps, "similarity_threshold", rounded);
