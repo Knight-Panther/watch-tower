@@ -17,6 +17,8 @@ import {
   setAlertDeliveriesTtl,
   getDigestRunsTtl,
   setDigestRunsTtl,
+  getAdvisorReportsTtl,
+  setAdvisorReportsTtl,
   getTelemetrySummary,
   getTelemetryByProvider,
   getTelemetryByOperation,
@@ -117,6 +119,8 @@ export default function Settings() {
   const [alertDeliveriesTtlError, setAlertDeliveriesTtlError] = useState<string | null>(null);
   const [digestRunsTtlDays, setDigestRunsTtlDays] = useState("");
   const [digestRunsTtlError, setDigestRunsTtlError] = useState<string | null>(null);
+  const [advisorReportsTtlDays, setAdvisorReportsTtlDays] = useState("");
+  const [advisorReportsTtlError, setAdvisorReportsTtlError] = useState<string | null>(null);
 
   // Telemetry state
   const [telemetrySummary, setTelemetrySummary] = useState<TelemetrySummary | null>(null);
@@ -145,6 +149,7 @@ export default function Settings() {
         postDeliveriesTtl,
         alertDeliveriesTtl,
         digestRunsTtl,
+        advisorReportsTtl,
       ] = await Promise.all([
         getFeedItemsTtl(),
         getFeedFetchRunsTtl(),
@@ -154,6 +159,7 @@ export default function Settings() {
         getPostDeliveriesTtl(),
         getAlertDeliveriesTtl(),
         getDigestRunsTtl(),
+        getAdvisorReportsTtl(),
       ]);
       setConstraints(constraintsData);
       setTtlDays(String(ttlValue));
@@ -172,6 +178,7 @@ export default function Settings() {
       setPostDeliveriesTtlDays(String(postDeliveriesTtl));
       setAlertDeliveriesTtlDays(String(alertDeliveriesTtl));
       setDigestRunsTtlDays(String(digestRunsTtl));
+      setAdvisorReportsTtlDays(String(advisorReportsTtl));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load settings";
       toast.error(message);
@@ -386,6 +393,27 @@ export default function Settings() {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to update digest runs TTL";
       setDigestRunsTtlError(message);
+      toast.error(message);
+    }
+  };
+
+  const onSaveAdvisorReportsTtl = async () => {
+    const min = constraints?.advisorReportsTtl?.min ?? 7;
+    const max = constraints?.advisorReportsTtl?.max ?? 365;
+    const value = Number(advisorReportsTtlDays);
+    if (Number.isNaN(value) || value < min || value > max) {
+      setAdvisorReportsTtlError(`TTL must be between ${min} and ${max} days`);
+      toast.error(`TTL must be between ${min} and ${max} days`);
+      return;
+    }
+    try {
+      const updated = await setAdvisorReportsTtl(value);
+      setAdvisorReportsTtlDays(String(updated));
+      setAdvisorReportsTtlError(null);
+      toast.success("Advisor reports TTL updated");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update advisor reports TTL";
+      setAdvisorReportsTtlError(message);
       toast.error(message);
     }
   };
@@ -965,6 +993,40 @@ export default function Settings() {
                     Digest history retention (runs + drafts).
                     {digestRunsTtlError ? (
                       <span className="ml-2 text-red-400">{digestRunsTtlError}</span>
+                    ) : null}
+                  </td>
+                </tr>
+
+                {/* Advisor Reports TTL */}
+                <tr>
+                  <td className="py-3 pr-4 font-medium text-slate-300">Advisor Reports</td>
+                  <td className="py-3 pr-4">
+                    <div className="flex items-center gap-2">
+                      <input
+                        value={advisorReportsTtlDays}
+                        onChange={(e) => setAdvisorReportsTtlDays(e.target.value)}
+                        placeholder="7-365"
+                        className="w-20 rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-1.5 text-sm text-slate-200 outline-none focus:border-slate-600"
+                      />
+                      <span className="text-slate-500">days</span>
+                    </div>
+                  </td>
+                  <td className="py-3 pr-4 font-mono text-xs text-emerald-400/70">
+                    {formatTtlHint(advisorReportsTtlDays)}
+                  </td>
+                  <td className="py-3 pr-4">
+                    <button
+                      onClick={onSaveAdvisorReportsTtl}
+                      disabled={!advisorReportsTtlDays.trim()}
+                      className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300 transition hover:border-slate-500 disabled:opacity-40"
+                    >
+                      Save
+                    </button>
+                  </td>
+                  <td className="py-3 text-xs text-slate-500">
+                    SmartHub analysis report retention.
+                    {advisorReportsTtlError ? (
+                      <span className="ml-2 text-red-400">{advisorReportsTtlError}</span>
                     ) : null}
                   </td>
                 </tr>

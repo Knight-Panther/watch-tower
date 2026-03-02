@@ -8,6 +8,7 @@ import {
   JOB_MAINTENANCE_SCHEDULE,
   JOB_PLATFORM_HEALTH_CHECK,
   JOB_DAILY_DIGEST,
+  JOB_PIPELINE_ADVISOR,
   QUEUE_MAINTENANCE,
   logger,
   getDefaultTemplate,
@@ -27,6 +28,7 @@ import {
   digestSlots,
   digestDrafts,
   alertDeliveries,
+  advisorReports,
 } from "@watch-tower/db";
 import {
   createTelegramProvider,
@@ -42,6 +44,7 @@ import { ensureRepeatableJobs } from "../job-registry.js";
 import type { RateLimiter } from "../utils/rate-limiter.js";
 import type { EventPublisher } from "../events.js";
 import type { R2Storage } from "../services/r2-storage.js";
+import { runAdvisorAnalysis } from "./advisor-llm.js";
 import {
   hashToken,
   upsertPlatformHealth,
@@ -170,6 +173,80 @@ const checkDigestSlotsDue = async (db: Database): Promise<string[]> => {
   }
 
   return dueSlotIds;
+};
+
+/**
+ * Check if the SmartHub advisor should run now.
+ * Uses same time-check pattern as digest slots.
+ */
+const checkAdvisorDue = async (db: Database, maintenanceQueue: Queue): Promise<void> => {
+  // Read config
+  const configRows = await db
+    .select({ key: appConfig.key, value: appConfig.value })
+    .from(appConfig)
+    .where(inArray(appConfig.key, ["advisor_enabled", "advisor_time", "advisor_timezone"]));
+
+  const configMap = new Map<string, unknown>();
+  for (const row of configRows) configMap.set(row.key, row.value);
+
+  const enabled = configMap.get("advisor_enabled") !== "false" && configMap.get("advisor_enabled") !== false;
+  if (!enabled) return;
+
+  const advisorTime = (configMap.get("advisor_time") as string) ?? "06:00";
+  const advisorTz = (configMap.get("advisor_timezone") as string) ?? "UTC";
+
+  const now = new Date();
+
+  // Get current time in advisor's timezone
+  let currentTime: string;
+  try {
+    currentTime = new Intl.DateTimeFormat("en-GB", {
+      timeZone: advisorTz,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(now);
+  } catch {
+    currentTime = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "UTC",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(now);
+  }
+
+  // Check time match (2-minute forward-only tolerance)
+  const [targetH, targetM] = advisorTime.split(":").map(Number);
+  const [currentH, currentM] = currentTime.split(":").map(Number);
+  const targetMinutes = targetH * 60 + targetM;
+  const currentMinutes = currentH * 60 + currentM;
+  const forwardDiff = (currentMinutes - targetMinutes + 1440) % 1440;
+  if (forwardDiff > 2) return;
+
+  // Idempotency: skip if a report was created today (last 5 min window to prevent triple-fire)
+  const [lastReport] = await db
+    .select({ createdAt: advisorReports.createdAt })
+    .from(advisorReports)
+    .orderBy(desc(advisorReports.createdAt))
+    .limit(1);
+
+  if (lastReport?.createdAt) {
+    const elapsed = Date.now() - lastReport.createdAt.getTime();
+    if (elapsed < 5 * 60 * 1000) return; // prevent triple-fire
+    // Also skip if report was created today in the advisor's timezone
+    const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: advisorTz }).format(now);
+    const lastStr = new Intl.DateTimeFormat("en-CA", { timeZone: advisorTz }).format(
+      lastReport.createdAt,
+    );
+    if (todayStr === lastStr) return;
+  }
+
+  await maintenanceQueue.add(
+    JOB_PIPELINE_ADVISOR,
+    { triggeredBy: "scheduled" },
+    { jobId: `advisor-${Date.now()}` },
+  );
+  logger.info("[scheduler] queued advisor analysis");
 };
 
 const runScheduledIngests = async (db: Database, ingestQueue: Queue, force = false) => {
@@ -1042,6 +1119,17 @@ export const createMaintenanceWorker = ({
           errors.push("alert_deliveries");
         }
 
+        // Advisor reports cleanup (90-day default TTL)
+        try {
+          const advisorTtlDays = await getConfigNumber(db, "advisor_reports_ttl_days", 90);
+          const advisorCutoff = new Date(Date.now() - advisorTtlDays * 86_400_000);
+          await db.delete(advisorReports).where(lt(advisorReports.createdAt, advisorCutoff));
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logger.error(`[maintenance] advisor_reports cleanup failed: ${msg}`);
+          errors.push("advisor_reports");
+        }
+
         // Also run zombie cleanup during daily maintenance
         await resetZombieArticles(db);
 
@@ -1123,6 +1211,13 @@ export const createMaintenanceWorker = ({
           logger.error("[scheduler] digest check failed", err);
         }
 
+        // Check if advisor analysis is due
+        try {
+          await checkAdvisorDue(db, maintenanceQueue);
+        } catch (err) {
+          logger.error("[scheduler] advisor check failed", err);
+        }
+
         return;
       }
 
@@ -1194,6 +1289,41 @@ export const createMaintenanceWorker = ({
           }
         } else {
           logger.info({ slotId }, "[digest] skipped (no qualifying articles or disabled)");
+        }
+        return;
+      }
+
+      if (job.name === JOB_PIPELINE_ADVISOR) {
+        const triggeredBy = (job.data?.triggeredBy as "scheduled" | "manual") ?? "scheduled";
+        logger.info({ triggeredBy }, "[advisor] starting pipeline analysis");
+        const reportId = await runAdvisorAnalysis(db, apiKeys, triggeredBy);
+        logger.info({ reportId }, "[advisor] analysis complete");
+
+        // Notify frontend via SSE (Step 10)
+        if (eventPublisher) {
+          const [report] = await db
+            .select({
+              recommendationCount: advisorReports.recommendationCount,
+              recommendations: advisorReports.recommendations,
+              status: advisorReports.status,
+            })
+            .from(advisorReports)
+            .where(eq(advisorReports.id, reportId))
+            .limit(1);
+          if (report?.status === "ready") {
+            const recs = Array.isArray(report.recommendations) ? report.recommendations : [];
+            const highPriorityCount = recs.filter(
+              (r: Record<string, unknown>) => r.priority === "high",
+            ).length;
+            await eventPublisher.publish({
+              type: "advisor:report_ready",
+              data: {
+                reportId,
+                recommendationCount: report.recommendationCount,
+                highPriorityCount,
+              },
+            });
+          }
         }
         return;
       }

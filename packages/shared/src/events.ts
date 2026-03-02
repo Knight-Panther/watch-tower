@@ -113,6 +113,15 @@ export type DigestSentEvent = {
   };
 };
 
+export type AdvisorReportReadyEvent = {
+  type: "advisor:report_ready";
+  data: {
+    reportId: string;
+    recommendationCount: number;
+    highPriorityCount: number;
+  };
+};
+
 // Union type for all server events
 export type ServerEvent =
   | ArticleIngestedEvent
@@ -125,5 +134,6 @@ export type ServerEvent =
   | SourceFetchedEvent
   | StatsUpdatedEvent
   | DigestDraftReadyEvent
-  | DigestSentEvent;
+  | DigestSentEvent
+  | AdvisorReportReadyEvent;
 

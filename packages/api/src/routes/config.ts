@@ -14,6 +14,7 @@ const CONSTRAINTS = {
   postDeliveriesTtl: { min: 1, max: 60, unit: "days" },
   digestRunsTtl: { min: 1, max: 90, unit: "days" },
   alertDeliveriesTtl: { min: 1, max: 60, unit: "days" },
+  advisorReportsTtl: { min: 7, max: 365, unit: "days" },
   alertWarningThreshold: { min: 10, max: 200, unit: "per hour" },
 } as const;
 
@@ -248,6 +249,31 @@ export const registerConfigRoutes = (app: FastifyInstance, deps: ApiDeps) => {
         });
       }
       await upsertConfig(deps, "alert_deliveries_ttl_days", days);
+      return { days };
+    },
+  );
+
+  // Advisor Reports TTL
+  app.get("/config/advisor-reports-ttl", { preHandler: deps.requireApiKey }, async () => {
+    const days = await getConfigValue(deps, "advisor_reports_ttl_days", 90);
+    return { days };
+  });
+
+  app.patch<{ Body: { days: number } }>(
+    "/config/advisor-reports-ttl",
+    { preHandler: deps.requireApiKey },
+    async (request, reply) => {
+      const { days } = request.body ?? {};
+      if (
+        !Number.isFinite(days) ||
+        days < CONSTRAINTS.advisorReportsTtl.min ||
+        days > CONSTRAINTS.advisorReportsTtl.max
+      ) {
+        return reply.code(400).send({
+          error: `days must be between ${CONSTRAINTS.advisorReportsTtl.min} and ${CONSTRAINTS.advisorReportsTtl.max}`,
+        });
+      }
+      await upsertConfig(deps, "advisor_reports_ttl_days", days);
       return { days };
     },
   );

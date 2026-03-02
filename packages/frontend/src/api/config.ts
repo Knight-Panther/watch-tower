@@ -159,6 +159,34 @@ export const setDigestRunsTtl = async (days: number): Promise<number> => {
   return Number(data.days ?? days);
 };
 
+// ─── Advisor Reports TTL ──────────────────────────────────────────────────────
+
+export const getAdvisorReportsTtl = async (): Promise<number> => {
+  const res = await fetch(`${API_BASE}/config/advisor-reports-ttl`, {
+    headers: authHeaders,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to load advisor reports TTL");
+  }
+  const data = await res.json();
+  return Number(data.days ?? 90);
+};
+
+export const setAdvisorReportsTtl = async (days: number): Promise<number> => {
+  const res = await fetch(`${API_BASE}/config/advisor-reports-ttl`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders },
+    body: JSON.stringify({ days }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Failed to update advisor reports TTL");
+  }
+  const data = await res.json();
+  return Number(data.days ?? days);
+};
+
 // ─── Auto-Post Config (Per-Platform) ─────────────────────────────────────────
 // Each platform has its own auto-post toggle. When enabled, auto-approved
 // articles (score >= auto_approve_threshold) are immediately posted to that platform.

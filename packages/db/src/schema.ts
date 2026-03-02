@@ -115,6 +115,10 @@ export const articles = pgTable(
     ),
     // Maintenance zombie reset: WHERE pipeline_stage IN (...) AND created_at < threshold
     index("idx_articles_stage_created").on(table.pipelineStage, table.createdAt),
+    // Advisor: dedup rate per source
+    index("idx_articles_dedup_source").on(table.isSemanticDuplicate, table.sourceId),
+    // Advisor: trend analysis by scored_at
+    index("idx_articles_scored_at").on(table.scoredAt, table.importanceScore),
   ],
 );
 
@@ -255,6 +259,8 @@ export const llmTelemetry = pgTable(
     index("idx_llm_telemetry_created").on(table.createdAt),
     index("idx_llm_telemetry_provider").on(table.provider),
     index("idx_llm_telemetry_operation").on(table.operation),
+    // Advisor: cost-per-sector JOIN on article_id
+    index("idx_llm_telemetry_article").on(table.articleId),
   ],
 );
 
@@ -516,5 +522,42 @@ export const alertDeliveries = pgTable(
   (table) => [
     uniqueIndex("idx_alert_deliveries_unique").on(table.ruleId, table.articleId),
     index("idx_alert_deliveries_rule").on(table.ruleId),
+  ],
+);
+
+// ─── Advisor Reports (SmartHub pipeline intelligence) ────────────────────────
+
+export const advisorReports = pgTable(
+  "advisor_reports",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    status: text("status").notNull().default("collecting"),
+    // 'collecting' | 'analyzing' | 'ready' | 'failed'
+
+    // Stats + LLM output
+    statsSnapshot: jsonb("stats_snapshot"), // AdvisorStatsSnapshot
+    recommendations: jsonb("recommendations"), // AdvisorRecommendation[]
+    summary: text("summary"), // LLM-generated overview
+    recommendationCount: integer("recommendation_count").notNull().default(0),
+    appliedCount: integer("applied_count").notNull().default(0),
+
+    // LLM metadata
+    llmProvider: text("llm_provider"),
+    llmModel: text("llm_model"),
+    llmTokensIn: integer("llm_tokens_in"),
+    llmTokensOut: integer("llm_tokens_out"),
+    llmCostMicrodollars: integer("llm_cost_microdollars"),
+    llmLatencyMs: integer("llm_latency_ms"),
+
+    // Error tracking
+    errorMessage: text("error_message"),
+    triggeredBy: text("triggered_by").notNull().default("scheduled"),
+    // 'scheduled' | 'manual'
+
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_advisor_reports_status").on(table.status),
+    index("idx_advisor_reports_created").on(table.createdAt),
   ],
 );

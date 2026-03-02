@@ -15,6 +15,7 @@ import SiteRules from "./pages/SiteRules";
 import Alerts from "./pages/Alerts";
 import DigestSettings from "./pages/DigestSettings";
 import Analytics from "./pages/Analytics";
+import Advisor from "./pages/Advisor";
 import {
   ServerEventsProvider,
   useServerEventsContext,
@@ -40,6 +41,7 @@ export default function App() {
           <Route path="/site-rules" element={<ErrorBoundary FallbackComponent={PageErrorFallback}><SiteRules /></ErrorBoundary>} />
           <Route path="/alerts" element={<ErrorBoundary FallbackComponent={PageErrorFallback}><Alerts /></ErrorBoundary>} />
           <Route path="/digest" element={<ErrorBoundary FallbackComponent={PageErrorFallback}><DigestSettings /></ErrorBoundary>} />
+          <Route path="/advisor" element={<ErrorBoundary FallbackComponent={PageErrorFallback}><Advisor /></ErrorBoundary>} />
           <Route path="/analytics" element={<ErrorBoundary FallbackComponent={PageErrorFallback}><Analytics /></ErrorBoundary>} />
           <Route path="/settings" element={<ErrorBoundary FallbackComponent={PageErrorFallback}><Settings /></ErrorBoundary>} />
           <Route path="*" element={<NotFound />} />

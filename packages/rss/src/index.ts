@@ -8,11 +8,16 @@ export type SecureFetchResult = {
   truncated?: boolean;
 };
 
+const USER_AGENT = "WatchTower/1.0 RSS Reader";
+
 /**
  * Fetch RSS feed with security protections:
- * - Size limit via Content-Length check (Layer 3)
+ * - Size limit via Content-Length + body size check (Layer 3)
  * - XXE protection via rss-parser's xml2js config (Layer 4)
  * - Timeout protection
+ *
+ * Uses fetch() for HTTP (modern TLS, better compatibility) and
+ * rss-parser.parseString() for XML parsing.
  */
 export const fetchFeedSecurely = async (
   url: string,
@@ -23,54 +28,64 @@ export const fetchFeedSecurely = async (
 ): Promise<SecureFetchResult> => {
   const { maxSizeBytes, timeoutMs } = options;
 
-  // Create parser with XXE protection
-  // rss-parser uses xml2js internally which is safe by default (no external entities)
   const parser = new Parser({
-    timeout: timeoutMs,
-    maxRedirects: 5,
-    headers: {
-      "User-Agent": "WatchTower/1.0 RSS Reader",
-      Accept: "application/rss+xml, application/xml, text/xml",
-    },
     customFields: {
       item: [["content:encoded", "contentEncoded"]],
     },
   });
 
   try {
-    // First, do a HEAD request to check content-length
+    // Single GET request with timeout, User-Agent, and size checks
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-    try {
-      const headResponse = await fetch(url, {
-        method: "HEAD",
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": USER_AGENT,
+        Accept: "application/rss+xml, application/xml, text/xml",
+      },
+      redirect: "follow",
+    });
 
-      const contentLength = headResponse.headers.get("content-length");
-      if (contentLength && parseInt(contentLength, 10) > maxSizeBytes) {
-        const sizeMb = Math.round(parseInt(contentLength, 10) / 1024 / 1024);
-        const limitMb = Math.round(maxSizeBytes / 1024 / 1024);
-        logger.warn(
-          { url, contentLength, maxSizeBytes },
-          "[secure-rss] feed too large (HEAD check)",
-        );
-        return {
-          success: false,
-          error: `Feed size (${sizeMb}MB) exceeds limit (${limitMb}MB)`,
-        };
-      }
-    } catch {
-      // HEAD failed - continue with GET (some servers don't support HEAD)
-      clearTimeout(timeoutId);
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      return { success: false, error: `HTTP ${response.status} ${response.statusText}` };
     }
 
-    // Fetch and parse with rss-parser
-    // Note: rss-parser doesn't support streaming/size limits during fetch,
-    // but the HEAD check above catches most cases
-    const feed = await parser.parseURL(url);
+    // Check Content-Length header first (fast reject for huge feeds)
+    const contentLength = response.headers.get("content-length");
+    if (contentLength && parseInt(contentLength, 10) > maxSizeBytes) {
+      const sizeMb = Math.round(parseInt(contentLength, 10) / 1024 / 1024);
+      const limitMb = Math.round(maxSizeBytes / 1024 / 1024);
+      logger.warn(
+        { url, contentLength, maxSizeBytes },
+        "[secure-rss] feed too large (Content-Length)",
+      );
+      return {
+        success: false,
+        error: `Feed size (${sizeMb}MB) exceeds limit (${limitMb}MB)`,
+      };
+    }
+
+    // Read body with size enforcement (handles chunked/missing Content-Length)
+    const xml = await response.text();
+    if (xml.length > maxSizeBytes) {
+      const sizeMb = Math.round(xml.length / 1024 / 1024);
+      const limitMb = Math.round(maxSizeBytes / 1024 / 1024);
+      logger.warn(
+        { url, bodySize: xml.length, maxSizeBytes },
+        "[secure-rss] feed too large (body)",
+      );
+      return {
+        success: false,
+        error: `Feed size (${sizeMb}MB) exceeds limit (${limitMb}MB)`,
+      };
+    }
+
+    // Parse XML string with rss-parser
+    const feed = await parser.parseString(xml);
 
     return { success: true, feed };
   } catch (err) {

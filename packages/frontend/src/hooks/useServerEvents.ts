@@ -137,6 +137,7 @@ export const useServerEvents = (options: UseServerEventsOptions = {}): UseServer
       "stats:updated",
       "digest:draft-ready",
       "digest:sent",
+      "advisor:report_ready",
     ];
 
     eventTypes.forEach((eventType) => {

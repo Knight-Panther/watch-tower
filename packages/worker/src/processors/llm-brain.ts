@@ -339,15 +339,8 @@ export const createLLMBrainWorker = ({
             rejected = true;
             break;
           }
-          // Check content snippet
-          if (article.contentSnippet && matchesKeyword(article.contentSnippet, keyword)) {
-            preFilterRejects.push({
-              id: article.id,
-              reason: `pre-filter: keyword '${keyword}' matched in content_snippet`,
-            });
-            rejected = true;
-            break;
-          }
+          // Note: content_snippet intentionally excluded — too broad, high false positive
+          // risk. Let the LLM handle nuance in content via scoring instead.
         }
 
         if (!rejected) {

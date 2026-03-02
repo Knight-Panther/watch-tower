@@ -15,6 +15,7 @@ const navItems = [
   { to: "/site-rules", label: "Restrictions" },
   { to: "/alerts", label: "Alerts" },
   { to: "/digest", label: "Digests" },
+  { to: "/advisor", label: "SmartHub" },
   { to: "/analytics", label: "Analytics" },
   { to: "/settings", label: "DB/Telemetry" },
 ];

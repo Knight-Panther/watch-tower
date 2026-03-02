@@ -16,3 +16,4 @@ export * from "./alerts";
 export * from "./digest";
 export * from "./digest-slots";
 export * from "./analytics";
+export * from "./advisor";

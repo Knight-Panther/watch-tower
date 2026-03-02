@@ -14,7 +14,6 @@ import {
   getAlertSectorKeywords,
   type Sector,
   type ScoringConfig,
-  type ScoringExample,
   type ScoringRule,
 } from "../api";
 import { DEFAULT_SCORING_EXAMPLES } from "@watch-tower/shared";
@@ -463,6 +462,9 @@ Example: {"reasoning": "...", "score": 3, "summary": "...", "matched_alert_keywo
                 placeholder="Add keyword..."
                 color="orange"
               />
+              <p className="mt-2 text-xs text-slate-500">
+                Matches against: title, categories, URL, author. Content body is excluded to avoid false positives.
+              </p>
             </Section>
 
             {/* Alert Keywords (read-only) */}
