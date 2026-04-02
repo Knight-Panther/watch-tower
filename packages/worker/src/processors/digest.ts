@@ -504,23 +504,20 @@ export const deliverDigest = async (
 
   const dateStr = formatDate(new Date(), config.timezone);
 
-  // Generate cover image at DELIVERY time (correct date)
-  const wantImage = config.imageTelegram || config.imageFacebook || config.imageLinkedin;
-  let coverBuffer: Buffer | null = null;
-
-  if (wantImage) {
+  // Generate cover images at DELIVERY time (correct date), one per language used.
+  // Each channel may have a different language (e.g. Telegram=ka, Facebook=en).
+  const coverByLang: Record<string, Buffer> = {};
+  async function getCover(lang: "en" | "ka"): Promise<Buffer | null> {
+    if (coverByLang[lang]) return coverByLang[lang];
     try {
-      coverBuffer = await generateDigestCover(config.language, dateStr);
-      logger.info(
-        { size: coverBuffer.length, language: config.language },
-        "[digest] cover image generated",
-      );
+      const buf = await generateDigestCover(lang, dateStr);
+      coverByLang[lang] = buf;
+      logger.info({ size: buf.length, language: lang }, "[digest] cover image generated");
+      return buf;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      logger.warn(
-        { error: msg },
-        "[digest] cover image generation failed, continuing without image",
-      );
+      logger.warn({ error: msg, language: lang }, "[digest] cover image generation failed");
+      return null;
     }
   }
 
@@ -561,12 +558,11 @@ export const deliverDigest = async (
     const messages = splitTelegramMessages(sections);
     let tgOk = false;
 
-    if (config.imageTelegram && coverBuffer) {
-      const photoResult = await sendTelegramPhoto(
-        telegramConfig!.botToken,
-        config.telegramChatId,
-        coverBuffer,
-      );
+    if (config.imageTelegram) {
+      const tgCover = await getCover(config.telegramLanguage);
+      const photoResult = tgCover
+        ? await sendTelegramPhoto(telegramConfig!.botToken, config.telegramChatId, tgCover)
+        : { ok: false };
       if (photoResult.ok) {
         tgOk = true;
         totalMessages++;
@@ -603,8 +599,9 @@ export const deliverDigest = async (
       const plainBody = formatPlainDigest(fbBullets, content.allArticles, content.hasLLM);
       const fbText = `\u{1F4CA} ${fbHeader} \u2014 ${dateStr}\n\n${plainBody}`;
 
-      if (config.imageFacebook && coverBuffer) {
-        const result = await postFacebookPhoto(facebookConfig!, fbText, coverBuffer);
+      const fbCover = config.imageFacebook ? await getCover(config.facebookLanguage) : null;
+      if (fbCover) {
+        const result = await postFacebookPhoto(facebookConfig!, fbText, fbCover);
         if (result.success) {
           anySent = true;
           totalMessages++;
@@ -648,9 +645,10 @@ export const deliverDigest = async (
           : plainBody;
       const liText = `${header}\n\n${truncBody}`;
 
+      const liCover = config.imageLinkedin ? await getCover(config.linkedinLanguage) : null;
       let result;
-      if (config.imageLinkedin && coverBuffer) {
-        result = await postLinkedInPhoto(linkedinConfig!, liText, coverBuffer);
+      if (liCover) {
+        result = await postLinkedInPhoto(linkedinConfig!, liText, liCover);
       } else {
         const li = createLinkedInProvider(linkedinConfig!);
         result = await li.post({ text: liText });
