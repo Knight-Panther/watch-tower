@@ -49,8 +49,8 @@ RUN npm --workspace @watch-tower/shared run build && \
 # ── Stage 3: Production runtime ───────────────────────────────────────────────
 FROM node:20-alpine AS runtime
 
-# Runtime deps for canvas/sharp
-RUN apk add --no-cache pixman cairo pango jpeg giflib
+# Runtime deps for canvas/sharp + curl for font download
+RUN apk add --no-cache pixman cairo pango jpeg giflib curl
 
 WORKDIR /app
 
@@ -84,6 +84,10 @@ COPY --from=builder /app/packages/translation/dist packages/translation/dist
 COPY --from=builder /app/packages/social/dist packages/social/dist
 COPY --from=builder /app/packages/worker/dist packages/worker/dist
 COPY packages/worker/assets packages/worker/assets
+
+# Download valid NotoSansGeorgian-Bold.ttf (the committed file is a placeholder)
+RUN curl -fsSL -o packages/worker/assets/fonts/NotoSansGeorgian-Bold.ttf \
+  "https://fonts.gstatic.com/s/notosansgeorgian/v48/PlIaFke5O6RzLfvNNVSitxkr76PRHBC4Ytyq-Gof7PUs4S7zWn-8YDB09HFNdpsAy2j5dZE.ttf"
 
 ENV NODE_ENV=production
 
