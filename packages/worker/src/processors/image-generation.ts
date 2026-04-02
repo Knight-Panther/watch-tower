@@ -296,9 +296,10 @@ export const createImageGenerationWorker = ({
             }
           }
 
-          // Compose news card (overlay Georgian title + watermark)
-          const georgianTitle = article.titleKa || article.title;
-          const composedBuffer = await composeNewsCard(base64!, georgianTitle, config.template);
+          // Compose news card: use translated title when posting in Georgian, English otherwise
+          const overlayTitle =
+            config.postingLanguage === "ka" ? article.titleKa || article.title : article.title;
+          const composedBuffer = await composeNewsCard(base64!, overlayTitle, config.template);
 
           // Upload to R2
           const r2Key = `images/${article.id}.webp`;
