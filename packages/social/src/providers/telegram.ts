@@ -210,7 +210,7 @@ export const createTelegramProvider = (config: TelegramConfig): SocialProvider =
       // 1. Breaking label + Sector tag (first line)
       if (template.showBreakingLabel || template.showSectorTag) {
         let header = "";
-        if (template.showBreakingLabel) {
+        if (template.showBreakingLabel && template.breakingEmoji && template.breakingText) {
           header += `${template.breakingEmoji} ${template.breakingText}`;
           if (template.showSectorTag) {
             header += `: ${escapeHtml(article.sector.toUpperCase())}`;

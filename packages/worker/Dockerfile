@@ -7,11 +7,12 @@ WORKDIR /app
 RUN apk add --no-cache python3 make g++ pkgconfig pixman-dev cairo-dev pango-dev jpeg-dev giflib-dev
 
 # Copy root manifests
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json tsconfig.base.json ./
 
 # Copy ALL workspace package.json files (npm workspaces needs them)
 COPY packages/shared/package.json packages/shared/package.json
 COPY packages/db/package.json packages/db/package.json
+COPY packages/rss/package.json packages/rss/package.json
 COPY packages/llm/package.json packages/llm/package.json
 COPY packages/embeddings/package.json packages/embeddings/package.json
 COPY packages/translation/package.json packages/translation/package.json
@@ -28,6 +29,7 @@ FROM deps AS builder
 # Copy source for worker and all its workspace dependencies
 COPY packages/shared packages/shared
 COPY packages/db packages/db
+COPY packages/rss packages/rss
 COPY packages/llm packages/llm
 COPY packages/embeddings packages/embeddings
 COPY packages/translation packages/translation
@@ -37,6 +39,7 @@ COPY packages/worker packages/worker
 # Build in dependency order
 RUN npm --workspace @watch-tower/shared run build && \
     npm --workspace @watch-tower/db run build && \
+    npm --workspace @watch-tower/rss run build && \
     npm --workspace @watch-tower/llm run build && \
     npm --workspace @watch-tower/embeddings run build && \
     npm --workspace @watch-tower/translation run build && \
@@ -53,25 +56,34 @@ WORKDIR /app
 
 # Copy root manifests
 COPY package.json package-lock.json ./
+
+# Copy node_modules from deps stage (already compiled with native build tools)
+# Root hoisted modules
+COPY --from=deps /app/node_modules ./node_modules
+# Workspace-local modules that npm didn't hoist (e.g. openai version conflict)
+COPY --from=deps /app/packages/worker/node_modules ./packages/worker/node_modules
+COPY --from=deps /app/packages/llm/node_modules ./packages/llm/node_modules
+COPY --from=deps /app/packages/embeddings/node_modules ./packages/embeddings/node_modules
+COPY --from=deps /app/packages/translation/node_modules ./packages/translation/node_modules
 COPY packages/shared/package.json packages/shared/package.json
 COPY packages/db/package.json packages/db/package.json
+COPY packages/rss/package.json packages/rss/package.json
 COPY packages/llm/package.json packages/llm/package.json
 COPY packages/embeddings/package.json packages/embeddings/package.json
 COPY packages/translation/package.json packages/translation/package.json
 COPY packages/social/package.json packages/social/package.json
 COPY packages/worker/package.json packages/worker/package.json
 
-# Install production deps (includes native modules)
-RUN npm ci --omit=dev
-
 # Copy built artifacts from all workspace packages
 COPY --from=builder /app/packages/shared/dist packages/shared/dist
 COPY --from=builder /app/packages/db/dist packages/db/dist
+COPY --from=builder /app/packages/rss/dist packages/rss/dist
 COPY --from=builder /app/packages/llm/dist packages/llm/dist
 COPY --from=builder /app/packages/embeddings/dist packages/embeddings/dist
 COPY --from=builder /app/packages/translation/dist packages/translation/dist
 COPY --from=builder /app/packages/social/dist packages/social/dist
 COPY --from=builder /app/packages/worker/dist packages/worker/dist
+COPY packages/worker/assets packages/worker/assets
 
 ENV NODE_ENV=production
 
