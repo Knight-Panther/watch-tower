@@ -43,3 +43,10 @@ tests/results/coverage/
 
 # Internal planning notes
 priority-tasks/
+
+# Internal tooling docs
+CODEX.md
+.jscpd.json
+
+# Client-specific assets
+packages/worker/assets/watermark/
