@@ -40,3 +40,6 @@ tests/results/coverage/
 
 # Claude Code local config (workspace-specific, not for repo)
 .claude/
+
+# Internal planning notes
+priority-tasks/
