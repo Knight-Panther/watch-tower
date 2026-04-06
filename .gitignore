@@ -8,6 +8,7 @@ dist/
 .env
 .env.local
 .env.*.local
+.env.production.local
 
 # OS
 .DS_Store
@@ -36,4 +37,6 @@ tests/results/coverage/
 
 # Misc
 .gemini-clipboard/
-.claude/worktrees/
+
+# Claude Code local config (workspace-specific, not for repo)
+.claude/

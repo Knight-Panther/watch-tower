@@ -1,5 +1,36 @@
 # Watch Tower
 
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-339933?style=flat&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL+pgvector-4169E1?style=flat&logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
+[![Redis](https://img.shields.io/badge/Redis-DC382D?style=flat&logo=redis&logoColor=white)](https://redis.io/)
+[![React](https://img.shields.io/badge/React_19-61DAFB?style=flat&logo=react&logoColor=black)](https://react.dev/)
+[![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat&logo=docker&logoColor=white)](https://www.docker.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+**AI-powered media monitoring pipeline.** Ingests 500+ RSS sources, deduplicates semantically with pgvector, scores with LLM, translates to Georgian, generates AI news card images, and delivers curated briefings to Telegram, Facebook, and LinkedIn — with a full web dashboard.
+
+```
+[INGEST] → [SEMANTIC DEDUP] → [PRE-FILTER] → [LLM SCORE] → [TRANSLATE] → [IMAGE GEN] → [DISTRIBUTE]
+  RSS         pgvector            keywords        1-5 score     Georgian      AI cards       social
+```
+
+### Key Features
+
+- **7-stage pipeline** with PostgreSQL as source of truth — each stage independently restartable
+- **Multi-provider LLM** (Claude / OpenAI / DeepSeek) with automatic fallback
+- **Semantic deduplication** via OpenAI embeddings + pgvector cosine similarity
+- **Georgian (ka) translation** via Gemini/OpenAI with per-article status tracking
+- **AI news card images** via OpenAI gpt-image-1-mini + Cloudflare R2 + canvas compositor
+- **Keyword alerts** — instant Telegram notifications when scored articles match rules (LLM semantic matching, per-rule language, muting)
+- **Daily digest** — multi-slot LLM briefings with draft approval workflow, per-channel language, cover images
+- **SmartHub Advisor** — scheduled pipeline intelligence (13-metric SQL snapshot → LLM recommendations → one-click apply)
+- **Real-time dashboard** with Server-Sent Events, approval workflow, analytics, telemetry
+- **9-layer security** (domain whitelist, SSRF protection, XXE mitigation, rate limiting, kill switch)
+- **Production-ready** Docker Compose stack with Nginx, Let's Encrypt, rolling deploy scripts
+
+---
+
 An automated news monitoring system that scans RSS feeds, scores articles using AI, translates them to Georgian, generates news card images, and distributes them to social media — with full approval workflow and admin dashboard.
 
 ## What Does Watch Tower Do?
@@ -40,7 +71,7 @@ RSS Feeds ──> [1. INGEST] ──> [2. DEDUP] ──> [3. SCORE] ──> [4. 
 
 **What happens:** Even if two articles have different URLs, they might cover the same story. This stage generates a mathematical fingerprint (embedding) for each article and compares it against recent articles. If two articles are too similar, the newer one is marked as a duplicate.
 
-**How it works:** Uses OpenAI's embedding model to convert article text into a 1536-number vector. Then uses pgvector (a PostgreSQL extension) to find similar articles. The similarity threshold is configurable (default: 0.65).
+**How it works:** Uses OpenAI's embedding model to convert article text into a 1536-number vector. Then uses pgvector (a PostgreSQL extension) to find similar articles. The similarity threshold is configurable (default: 0.85).
 
 **Where articles go:** `pipeline_stage = embedded` (or `duplicate` if too similar)
 
@@ -180,7 +211,8 @@ npm run dev:worker       # Start only the background worker
 npm run dev:frontend     # Start only the dashboard
 npm run build            # Build all packages
 npm run db:studio        # Open database GUI (Drizzle Studio)
-npm run pipeline:reset   # Reset everything for a fresh test run
+# Pipeline reset: POST /reset via API, or Settings page in the dashboard
+# Flushes Redis + truncates articles/deliveries/telemetry + resets fetch timestamps
 ```
 
 ---
@@ -405,6 +437,46 @@ Cost is tracked per image in the `article_images` table and visible in telemetry
 
 ---
 
+## Keyword Alerts
+
+Instant Telegram notifications when scored articles match keyword rules — bypasses the distribution pipeline entirely.
+
+- **LLM semantic matching**: Keywords are injected into the scoring prompt; the LLM returns which keywords matched (no brittle regex)
+- **Per-rule language**: Each rule can send alerts in English or Georgian (translated via Gemini/OpenAI)
+- **Sector scoping**: Rules can be global or limited to a specific sector
+- **Cooldown**: 5-minute per-rule/per-article cooldown to avoid duplicate alerts
+- **Quiet hours**: Configurable overnight suppression window (IANA timezone aware)
+- **Muting**: Per-rule mute for 1h / 4h / 12h / 24h / 48h from the dashboard
+- **Audit trail**: Every alert delivery recorded in `alert_deliveries` table
+
+---
+
+## Daily Digest
+
+LLM-curated intelligence briefings delivered on a configurable schedule to Telegram, Facebook, and LinkedIn.
+
+- **Multi-slot**: Multiple independent schedules (e.g., "Morning Brief" at 08:00, "Evening Wrap" at 18:00)
+- **Draft approval**: Generated digest → review/edit → approve → post immediately or schedule
+- **Per-channel language**: Each slot can deliver in English or Georgian per platform independently
+- **Cover images**: Optional AI-generated cover per platform per slot
+- **Analyst roles**: Configurable LLM persona (VC analyst, PR monitor, market intel, etc.)
+- **Auto-post or manual**: Per-slot toggle for automatic delivery vs. draft review
+- **Audit trail**: Every sent digest recorded in `digest_runs` (immutable, includes channel results + score distribution)
+
+---
+
+## SmartHub Advisor
+
+Scheduled LLM-driven pipeline intelligence — analyzes metrics and generates actionable recommendations.
+
+- **13-metric SQL snapshot**: Source quality, sector stats, rejection breakdown, score trends, keyword effectiveness, dedup stats, cost analysis, platform delivery, alert effectiveness, and more
+- **Structured recommendations**: Categorized by type (`source`, `keyword`, `threshold`, `prompt`, `cost`, etc.) and priority (`high`/`medium`/`low`)
+- **One-click apply**: Each recommendation includes a structured action (`endpoint` + `params`) for direct application
+- **Configurable schedule**: Runs daily at a configured time, or triggered manually
+- **Apply tracking**: `applied_at` timestamp per recommendation for auditability
+
+---
+
 ## Security
 
 Watch Tower has 9 layers of defense to protect against malicious feeds, API abuse, and content injection.
@@ -483,17 +555,19 @@ Watch Tower has 9 layers of defense to protect against malicious feeds, API abus
 
 | Page | What It Does |
 |------|-------------|
-| **Home** | Overview stats and pipeline health |
-| **Articles** | Browse all articles, see scores, approve/reject, schedule posts |
+| **Home** | RSS sources overview + signal ratio badges (green/amber/red by source quality) |
+| **Monitoring** | Pipeline health, source fetch status, platform health, token expiry warnings |
+| **Articles** | Browse all articles, see scores + reasoning, approve/reject, schedule posts |
 | **Scheduled** | View upcoming scheduled posts, cancel or reschedule |
-| **LLM Brain** | Configure scoring rules per sector (priority topics, ignore topics, instructions). Also configure image generation prompt |
-| **Scoring Rules** | Detailed per-sector scoring configuration |
-| **Sector Management** | Add/remove sectors, assign RSS sources to sectors |
-| **Media Channel Control** | Customize post templates per platform, manage platform connections |
+| **LLM Brain** | Configure scoring rules per sector (priority topics, ignore, reject keywords, score definitions, examples) |
+| **Media Channels** | Customize post templates per platform, manage platform connections, rate limits |
 | **Image Template** | Design the news card layout (fonts, colors, overlay, branding) |
-| **Settings** | Global config: language toggle, auto-post toggles, translation settings |
-| **Site Rules** | Security settings: domain whitelist, feed limits, emergency stop |
-| **Monitoring** | Platform health, token expiry warnings, rate limit status |
+| **Alerts** | Keyword alert rules — instant Telegram notifications with LLM semantic matching, muting, language toggle |
+| **Digests** | Multi-slot daily digest management — schedule, analyst role, draft approval, per-channel language, cover images |
+| **SmartHub** | Pipeline intelligence advisor — LLM-driven recommendations, one-click apply, run history |
+| **Analytics** | Score distribution, approval rates, rejection breakdown, source ranking, sector performance (30-day) |
+| **Restrictions** | Security: domain whitelist, feed limits, dedup threshold slider, emergency kill switch |
+| **DB/Telemetry** | Database tools, LLM API call tracking (tokens, cost, latency), pipeline reset |
 
 ---
 
@@ -501,10 +575,13 @@ Watch Tower has 9 layers of defense to protect against malicious feeds, API abus
 
 ### Reset the Pipeline (Fresh Start)
 
-Stop all services first, then:
+Use the **Settings page** in the dashboard, or call the API directly:
 
 ```bash
-npm run pipeline:reset
+curl -X POST http://localhost:3001/reset \
+  -H "x-api-key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"confirm": true}'
 ```
 
 This does:
