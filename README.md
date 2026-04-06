@@ -177,6 +177,8 @@ These limits are stored in the database and can be changed from the dashboard wi
 - Docker (for PostgreSQL + Redis)
 - API keys (see Environment Variables section)
 
+> **Image generation:** If you enable AI news card images, place your watermark/logo at `packages/worker/assets/watermark/logo.png`. Without this file the image compositor will fail. You can disable image generation entirely via `image_generation_enabled` in the dashboard Settings page.
+
 ### Setup
 
 ```bash
